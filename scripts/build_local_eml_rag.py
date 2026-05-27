@@ -50,6 +50,9 @@ def main(argv=None):
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--profile", action="store_true", help="report cleaned body token lengths + suggest chunk_size, then exit")
     ap.add_argument("--recreate", action="store_true")
+    ap.add_argument("--embed-summary", action="store_true",
+                    help="contextual retrieval: prepend each email's Pass-2 summary "
+                         "to the chunk text before embedding (needs --summary-cache)")
     args = ap.parse_args(argv)
 
     from src.ingest.local_source import resolve_index_files
@@ -123,6 +126,10 @@ def main(argv=None):
     from src.ingest.embedder import BgeM3Embedder
     from src.ingest.sparse import lexical_weights_to_sparse
     from src.ingest import hybrid_qdrant as hq
+    from src.ingest.embed_text import prepend_summary
+
+    if args.embed_summary:
+        print("contextual retrieval ON: prepending Pass-2 summaries to embedded text")
 
     client = hq.get_client(args.qdrant_url)
     hq.ensure_hybrid_collection(client, args.collection, dim=1024, recreate=args.recreate)
@@ -133,7 +140,12 @@ def main(argv=None):
     t_start = time.time()
     for i in range(0, total, args.upsert_batch):
         batch = nodes[i : i + args.upsert_batch]
-        embed_texts = [n.get_content(metadata_mode=MetadataMode.EMBED) for n in batch]
+        embed_texts = []
+        for n in batch:
+            t = n.get_content(metadata_mode=MetadataMode.EMBED)
+            if args.embed_summary:
+                t = prepend_summary(t, n.metadata.get("summary"))
+            embed_texts.append(t)
         dense, sparse = embedder.encode(embed_texts, batch_size=args.embed_batch, max_length=args.chunk_size)
         points = []
         for n, dv, lw in zip(batch, dense, sparse):
