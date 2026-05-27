@@ -77,19 +77,27 @@ The corpus is filtered in stages before anything gets embedded:
 | **Calendar-collapse + chunk-dedup** | one-line calendar summaries; drop byte-identical chunks | 22,613 → **21,590** chunks (−1,023) |
 | **Net** | | 31,969 emails → **19,820 kept** → 21,590 embedded chunks |
 
-**The honest part — most of the LLM's noise removal did not justify its cost.** Of the
-12,123 emails Pass-2 called noise, **97.9% (11,872)** were automated mail identifiable by
-sender/subject alone — i.e. *cheap regex rules could drop them for free.* Only **2.1%
-(251)** were genuine judgment calls needing content understanding. And the headline
-embedding-time win — a first-run estimate of **~48 h → under 10 min** — came from the
-**inference method** (FlagEmbedding on Apple-Silicon MPS) plus volume reduction, **not**
-from the LLM.
+**The honest part — how much of this needed an LLM?** We measured it. Regex rules
+*derived from the corpus* (high-noise sender domains + calendar/out-of-office subject
+patterns) catch **~65%** of the LLM's noise at high precision, but **miss ~35%
+(≈4,200 emails)**. The miss is structural: the work domain itself is **29% noise**
+(24k emails interleaving real correspondence with compliance reminders, calendar churn,
+AMAs, internal newsletters) — you can't write a sender rule for your own domain, and the
+noise inside it isn't cleanly separable by sender/subject. That ~35% is the LLM's *unique*
+cleaning contribution. Two further findings:
 
-So the ~13-hour local-LLM pass is **not** paid for by noise removal or speed. It earns
-its keep through one durable output: the per-email **summaries**, which power the
-retrieval gains below (contextual retrieval, reranking) and human-readable results.
-**Lesson: use cheap regex for noise; reserve the LLM for the summaries only it can
-produce.**
+- **Rule *discovery* did not need a full pass.** The dominant noise senders
+  (LinkedIn, Zoom, SharePoint, …) jump straight out of a sender-frequency table — a small
+  sample (or non-LLM frequency analysis) reveals them; the 32k pass wasn't required to
+  *find* the rules.
+- **The 48 h → under-10-min embedding win was the *inference method*** (FlagEmbedding on
+  Apple-Silicon MPS) plus volume reduction — **not** the LLM.
+
+So the local-LLM pass earns its keep two ways: the **~35% mixed-domain noise** that cheap
+rules can't reach, **and** the per-email **summaries** that power the retrieval gains
+below (contextual retrieval, reranking) and human-readable results. **Lesson: use cheap
+regex for the obvious bulk; reserve the LLM for the interleaved noise and the summaries
+only it can produce.**
 
 ### Retrieval methodology — what each technique adds (and its trade-off)
 
