@@ -1,0 +1,15 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"   # REST / HTTP API
+      - "6334:6334"   # gRPC API
+    volumes:
+      # Bind-mount to a host folder so data survives `docker rm` / prunes.
+      # Set QDRANT_STORAGE_PATH in your .env to point at an existing data dir;
+      # defaults to ./qdrant_storage next to this compose file.
+      - ${QDRANT_STORAGE_PATH:-./qdrant_storage}:/qdrant/storage
+    # Container restarts with Docker, but is NOT force-started if you stopped it.
+    # Use `docker compose stop` to keep it down; `docker compose up -d` to bring it up.
+    restart: unless-stopped

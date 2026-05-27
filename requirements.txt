@@ -1,0 +1,22 @@
+# Core LlamaIndex and LLM dependencies
+llama-index
+llama-index-embeddings-openai
+llama-index-llms-openai
+llama-index-llms-perplexity
+llama-index-vector-stores-qdrant
+
+# Data ingestion and processing
+datasets
+huggingface-hub
+
+# Vector storage and utilities
+python-dotenv
+pydantic
+qdrant-client
+
+# Optional: For better CLI and logging
+tqdm
+questionary
+
+# pytest for testing
+pytest

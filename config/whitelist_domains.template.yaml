@@ -1,0 +1,24 @@
+# Whitelisted sender domains — TEMPLATE
+#
+# ── Setup ────────────────────────────────────────────────────────────────────
+# Copy this file to whitelist_domains.yaml (which is gitignored):
+#   cp config/whitelist_domains.template.yaml config/whitelist_domains.yaml
+#
+# ── What this file does ──────────────────────────────────────────────────────
+# Domains listed here are excluded from the noise discovery tool
+# (scripts/noise.py discover).  Use it for trusted business partners and
+# colleagues whose emails you want to preserve in the index.
+#
+# This file is managed automatically when you choose [w] during
+# interactive discovery:
+#   python scripts/noise.py discover   → press [w] at any domain prompt
+#
+# To un-whitelist a domain: delete its line and save.
+# ─────────────────────────────────────────────────────────────────────────────
+
+domains: []
+
+# Example:
+# domains:
+#   - globex.com
+#   - partner-corp.com

@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "rag-study"
+version = "0.1.0"
+description = "RAG study project"
+authors = ["fmasi"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+llama-index = "^0.14.15"
+llama-index-embeddings-openai = "^0.5.1"
+llama-index-llms-openai = "^0.6.18"
+llama-index-llms-perplexity = "^0.4.2"
+llama-index-vector-stores-qdrant = "^0.10.0"
+datasets = "^4.5.0"
+huggingface-hub = "^1.4.1"
+python-dotenv = "^1.2.1"
+pydantic = "^2.12.5"
+rich = "^14.0.0"
+azure-storage-blob = "^12.28.0"
+llama-index-vector-stores-pinecone = "^0.7.1"
+qdrant-client = "^1.17.1"
+questionary = "^2.1.0"
+openai = "^1.0"
+anthropic = "^0.40"
+tqdm = "^4.66"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.2"
+ipykernel = "^7.2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = "."
+testpaths = ["tests"]
+markers = [
+	"integration: marks tests that require live external services",
+]

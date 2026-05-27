@@ -1,0 +1,58 @@
+# Email noise filter rules — TEMPLATE
+#
+# ── Setup ────────────────────────────────────────────────────────────────────
+# Copy this file to noise_rules.yaml (which is gitignored):
+#   cp config/noise_rules.template.yaml config/noise_rules.yaml
+#
+# Then run the interactive discovery tool to grow your rules automatically:
+#   python scripts/noise.py discover
+#
+# ── How rules work ───────────────────────────────────────────────────────────
+# Used in two places:
+#   1. Pre-index  — batch_index_to_vector_store.py skips matching emails
+#                   before embedding (zero LLM cost)
+#   2. Post-index — scripts/noise.py purge removes matching emails from
+#                   Qdrant and optionally Azure Blob Storage
+#
+# Rule evaluation (any match across any rule = noise):
+#   sender_domains   : substring match on the domain part of the sender address
+#                      (case-insensitive)
+#                      "linkedin.com" matches user@linkedin.com and
+#                      user@sub.linkedin.com, but NOT user@notlinkedin.com
+#   sender_patterns  : regex match against the full sender string
+#                      (case-insensitive)
+#   subject_patterns : regex match against the subject string (case-insensitive)
+#
+# Key naming convention:
+#   - Manually curated entries use a descriptive name
+#     (e.g. linkedin_notifications)
+#   - Auto-discovered entries use the domain with dots/hyphens replaced by
+#     underscores (e.g. hootsuite_com) — guarantees uniqueness
+#
+# To add a rule manually: copy any block below, adjust values, and save.
+# No code change required.
+# ─────────────────────────────────────────────────────────────────────────────
+
+categories:
+
+  # ── Example: dedicated noise domain ─────────────────────────────────────────
+
+  linkedin_notifications:
+    description: LinkedIn automated notifications, job alerts, connection requests and marketing
+    sender_domains:
+      - linkedin.com
+      - e.linkedin.com
+
+  # ── Example: general-purpose domain with narrow patterns ────────────────────
+  # (never block the whole domain — real people use gmail/outlook/yahoo too)
+  #
+  # gmail_marketing:
+  #   description: Automated marketing and newsletter emails from Gmail accounts
+  #   sender_patterns:
+  #     - 'noreply@gmail\.com'
+  #   subject_patterns:
+  #     - '\bunsubscribe\b'
+  #     - '^Newsletter'
+
+  # ── Add your own rules below ─────────────────────────────────────────────────
+  # Run `python scripts/noise.py discover` to auto-generate rules from your index.
