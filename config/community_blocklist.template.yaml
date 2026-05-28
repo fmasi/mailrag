@@ -1,0 +1,66 @@
+# Community noise blocklist — portable starter rules
+# ---------------------------------------------------------------------------
+# These are sender domains whose mail is almost always *automated notification*
+# rather than human correspondence — the kind of noise that looks the same in
+# any modern corporate mailbox (so it's portable across users/corpora).
+#
+# Provenance: derived empirically from a real ~32k-email corporate mailbox.
+# Domains where >=98% of mail was judged noise AND that are well-known,
+# corpus-INDEPENDENT SaaS/notification services. In that corpus this set alone
+# accounted for ~32% of all noise — i.e. a brand-new user gets roughly a third
+# of the cleanup for free, with zero LLM and zero knowledge of their corpus.
+#
+# Excluded by design: the employer's own tenant, partner/business-contact
+# domains (mixed real+noise — never blanket-block those), and anything
+# personal (health, finance, travel itineraries, government).
+#
+# HOW TO USE: append the entries you want to the `sender_domains:` list in your
+# own `config/noise_rules.yaml`. Review first — a blanket domain block also drops
+# the occasional *real* human message sent through these channels (e.g. a
+# recruiter via LinkedIn). Prefer this for channels you never want, and rely on
+# the LLM Pass-2 for mixed domains.
+
+sender_domains:
+  # --- Collaboration / messaging / docs ---
+  - linkedin.com
+  - e.linkedin.com
+  - zoom.us
+  - sharepointonline.com
+  - mail.notion.so
+  - hello.notion.so
+  - trello.com
+  - reply.ringcentral.com
+
+  # --- Sales / CRM / enablement ---
+  - salesforce.com
+  - allego.com
+  - hootsuite.com
+  - calendar-response.jifflenow.com
+  - domo.com
+
+  # --- Signing / docs / expense / travel-tooling (corporate) ---
+  - docusign.net
+  - navan.com
+  - tripit.com
+
+  # --- HR / training / engagement / GRC ---
+  - reflektive.com
+  - reciprocitylabs.com
+  - mail.skillsoft.com
+  - training.knowbe4.com
+  - express.medallia.com
+  - express.medallia.eu
+
+  # --- Security / dev tooling ---
+  - keepersecurity.com
+  - gitkraken.com
+  - mapbox.com
+
+  # --- Vendor marketing / industry events ---
+  - email.gsma.com
+  - mwcbarcelona.com
+  - jamasoftware.com
+  - scality.com
+  - emails.paloaltonetworks.com
+  - connect.hpe.com
+  - reply.equinix.com
