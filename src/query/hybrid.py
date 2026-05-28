@@ -88,13 +88,19 @@ def build_hybrid_searcher(
 
         embedder = BgeM3Embedder()
 
+    # One bge-m3 sparse encoder for both query AND doc roles. We never index docs via
+    # this query path, but QdrantVectorStore's constructor eagerly builds a *default*
+    # sparse_doc_fn (fastembed/SPLADE) when one isn't supplied — which both pulls an
+    # unwanted dep and would be the wrong vocabulary. Passing our bge-m3 fn avoids that.
+    sparse_fn = make_bge_m3_sparse_query_fn(embedder)
     vector_store = QdrantVectorStore(
         client=client,
         collection_name=collection,
         enable_hybrid=True,
         dense_vector_name=DENSE_VECTOR_NAME,
         sparse_vector_name=SPARSE_VECTOR_NAME,
-        sparse_query_fn=make_bge_m3_sparse_query_fn(embedder),
+        sparse_query_fn=sparse_fn,
+        sparse_doc_fn=sparse_fn,
         hybrid_fusion_fn=reciprocal_rank_fusion,
     )
     index = VectorStoreIndex.from_vector_store(

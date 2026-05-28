@@ -26,6 +26,9 @@ class TestBuildHybridSearcher(unittest.TestCase):
             self.assertEqual(kwargs["dense_vector_name"], "dense")
             self.assertEqual(kwargs["sparse_vector_name"], "sparse")
             self.assertTrue(callable(kwargs["sparse_query_fn"]))
+            # sparse_doc_fn must also be supplied, else QdrantVectorStore builds a
+            # fastembed/SPLADE default doc encoder in its constructor.
+            self.assertTrue(callable(kwargs["sparse_doc_fn"]))
             self.assertIs(kwargs["hybrid_fusion_fn"], hybrid.reciprocal_rank_fusion)
             retr_kwargs = IDX.from_vector_store.return_value.as_retriever.call_args.kwargs
             self.assertEqual(retr_kwargs["vector_store_query_mode"], "hybrid")
