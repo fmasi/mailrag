@@ -46,8 +46,12 @@ def main():
     embedder = BgeM3Embedder()
     _log("loaded.\n")
 
-    def make(cfg):
-        return build_hybrid_searcher(embedder=embedder, top_n=TOP_N, **cfg)
+    # Build each searcher ONCE (rerankers load eagerly; rebuilding per query would
+    # reload the cross-encoder model every time). Reused across all queries.
+    _log("building searchers (loads rerankers once)...")
+    searchers = [(name, build_hybrid_searcher(embedder=embedder, top_n=TOP_N, **cfg))
+                 for name, cfg in CONFIGS]
+    _log(f"built {len(searchers)} searchers.\n")
 
     # Terse set -> recall@10 + rank
     if args.terse:
@@ -57,12 +61,12 @@ def main():
         for item in terse:
             q, target = item["query"], item["target"]
             cells = []
-            for _, cfg in CONFIGS:
-                nodes = make(cfg).search(q)[:TOP_N]
+            for _, s in searchers:
+                nodes = s.search(q)[:TOP_N]
                 ids = [node_msgid(n) for n in nodes]
                 rank = ids.index(target) + 1 if target in ids else None
                 cells.append(str(rank) if rank else "-")
-            _log(q[:40].ljust(40) + " | " + " | ".join(c.center(len(name)) for c, (name, _) in zip(cells, CONFIGS)))
+            _log(q[:40].ljust(40) + " | " + " | ".join(c.center(len(name)) for c, (name, _) in zip(cells, searchers)))
 
     # Content set -> top-5 subjects per config
     if args.content:
@@ -71,8 +75,8 @@ def main():
         _log("\n\n==== CONTENT-RICH top-5 subjects per config ====")
         for q in queries:
             _log(f"\n### {q}")
-            for name, cfg in CONFIGS:
-                nodes = make(cfg).search(q)[:5]
+            for name, s in searchers:
+                nodes = s.search(q)[:5]
                 _log(f"  -- {name} --")
                 for n in nodes:
                     _log(f"     {node_subject(n)}")
