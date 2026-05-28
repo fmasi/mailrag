@@ -1,8 +1,8 @@
 # scripts/select_terse_emails.py
 """Surface candidate TERSE emails from a collection for the recall test.
 
-Terse = short real body (from _node_content .text) AND a non-empty summary present.
-Read-only Qdrant REST (stdlib). Prints candidates (ref_doc_id, subject, body, summary)
+Terse = short real body (from payload "text") AND a non-empty summary present.
+Read-only Qdrant REST (stdlib). Prints candidates (message_id, subject, body, summary)
 for manual curation — query drafting must use subject/thread, NOT the summary.
 
   python scripts/select_terse_emails.py --collection work-rag --max-body 150 --limit 12
@@ -16,13 +16,9 @@ def post(base, path, body):
         return json.load(r)
 
 def body_text(pl):
-    raw = pl.get("_node_content")
-    if not raw:
-        return ""
-    try:
-        return (json.loads(raw).get("text") or "").strip()
-    except (ValueError, TypeError):
-        return ""
+    # work-rag stores the chunk body directly in payload "text" (this collection was
+    # built by qdrant-client directly, not the legacy llama-index "_node_content" format).
+    return (pl.get("text") or "").strip()
 
 def main():
     ap = argparse.ArgumentParser()
@@ -44,7 +40,7 @@ def main():
             break
         for p in pts:
             pl = p.get("payload") or {}
-            rid = pl.get("ref_doc_id") or pl.get("document_id")
+            rid = pl.get("message_id")  # email identity in work-rag (no ref_doc_id field)
             if not rid or rid in seen:
                 continue
             seen.add(rid)
@@ -59,7 +55,7 @@ def main():
     candidates.sort()  # shortest body first
     print(f"{len(candidates)} terse candidates (body <= {args.max_body} chars, summary present)\n")
     for n, (blen, rid, subj, body, summ) in enumerate(candidates[:args.limit], 1):
-        print(f"--- candidate {n} | body={blen} chars | ref_doc_id={rid}")
+        print(f"--- candidate {n} | body={blen} chars | message_id={rid}")
         print(f"  subject: {subj[:90]}")
         print(f"  body   : {body[:160]!r}")
         print(f"  summary: {summ[:140]}")
