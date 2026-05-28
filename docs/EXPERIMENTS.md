@@ -116,7 +116,7 @@ Compared four collections built from the same corpus (`A` original dense-only/un
 | + learned sparse + RRF (B) | exact-token / acronym precision | needs sparse-capable embedder + fusion; more storage |
 | + LLM noise removal (C) | precision — junk can't surface (≈1,000 spam-quarantine digests, ≈1,500 calendar notices gone) | one-time LLM cost (§2) |
 | + contextual retrieval (C′): prepend each email's summary before embedding | short/terse emails match by *gist* — a 43-char reply surfaced via its summary | **topic drift**: dilutes literal matches, pulls in adjacent-but-off results |
-| + cross-encoder reranker *(planned)* | reorders candidates, removes drift | extra per-query latency |
+| + cross-encoder reranker (measured §7) | reorders candidates — clear win on content/literal queries, removes C′ drift | per-query latency; can *demote* contentless terse emails (reads the empty body) |
 
 Key honest finding: **C vs C′ is a real trade-off, not a free win.** Contextual embedding
 helps intent/short-email queries but *hurt* a precise technical query (it pulled in
@@ -130,12 +130,61 @@ both**; multi-query expansion bridges acronym ↔ expansion at the cost of extra
 
 ---
 
+## 7. Cross-encoder reranking & terse-email recall — measured (2026-05-28)
+
+Ran `bge-reranker-v2-m3` as an opt-in stage over the hybrid candidates (LlamaIndex-native),
+plus an 8-config matrix to test the one case contextual retrieval (C′) is *designed* for:
+**terse, contentless emails**.
+
+**Setup.** Two probes: (a) a 3-way mode comparison (dense → hybrid → hybrid+rerank) on 12
+content-rich queries; (b) an 8-config matrix — `{C, C′} × {hybrid, +rerank(body),
++rerank(summary+body)} × fetch {20, 50}` — on 8 deliberately terse replies (one-word bodies
+like "Done" / "Tks" / "+Name" on partner/program threads), measuring recall@10 and the rank
+of the exact target email (keyed on Message-ID). Queries were drafted from subjects/threads,
+never the summaries, to avoid biasing toward C′.
+
+**Content / literal queries — reranking is a clear, consistent win.** Biggest where the query
+terms are *not* in the subject line: relevant-in-top-5 went `0 → 2 → 5` (dense → hybrid →
+hybrid+rerank) on several queries. On well-named entity queries every mode already finds
+on-topic mail, but rerank fixes the *order* — surfacing the precisely-relevant thread above
+generic same-topic mail. This is the fix for C′'s drift.
+
+**Terse emails — the opposite story, and the more interesting one:**
+- Recall wasn't the crisis expected: plain hybrid found 7/8 terse targets, because the
+  *subjects* (`RE: <topic>`) carry the query terms even when the body is "Tks".
+- **C′ (summary embedded) ranks the terse target far higher than C** — e.g. rank `7→1`,
+  `5→1`, `10→2`, `9→4`. Contextual retrieval *does* deliver on its designed purpose; the
+  content-query probe simply couldn't show it.
+- **Body-only reranking can *hurt* terse emails:** the cross-encoder reads the empty body and
+  scores it low — one target fell from rank 5 out of the top-10 entirely.
+- **Summary-aware reranking** (feed the cross-encoder `summary + body` instead of body) was
+  *not* a clear win — comparable to body-rerank on terse, and on content it shifted results
+  (~0.34 top-5 overlap with body-rerank): sometimes more diverse, sometimes mildly drifting
+  toward generic topics (the summary is broader than the body).
+- **Thread-sibling effect:** terse replies compete with the *substantive* emails on the same
+  thread/topic; the reranker legitimately prefers those, and a high-frequency topic (~900
+  emails) buried its terse reply entirely. So "exact terse-email recall" is partly the wrong
+  lens — the information is reachable via the substantive siblings.
+
+**Honest verdict — no single config wins everything.** C′ wins terse/recall (its designed
+purpose); C + reranker wins literal/technical precision, where C′ *hurts* via drift. It's a
+workload-dependent trade-off — the clean resolution is **query-type routing** or a **labelled
+eval weighted by the real query mix**, not "retire C′." The summary's value is best realised
+at *embedding* time (C′) for terse recall (accepting the literal-query drift); the reranker is
+the right default for content/literal queries. Directional only — 8 hand-picked terse queries,
+not proof.
+
+---
+
 ## Open threads / next experiments
 
-- **Cross-encoder reranker** over the hybrid candidates — the fix for C′'s drift; should let
-  contextual retrieval pull clearly ahead.
-- **Larger labeled eval set** — turn directional eyeballing into precision/recall numbers
-  across A/B/C/C′(+rerank).
+- **Query-type routing** — §7 showed content/literal queries want `C` + reranker while
+  terse/intent queries want `C′`. Detect query intent and route (or run both and merge), since
+  no single config wins everything.
+- **Larger labeled eval set** — turn the directional eyeballing of §7 into precision/recall/nDCG
+  numbers across A/B/C/C′(+rerank), weighted by the real query mix, to settle the trade-off.
+- **Deduplicate results by email** (#2) — multiple chunks of one email currently crowd the
+  top-K; group by Message-ID at display time.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain
   and re-measure the LLM budget saved.
 - **Learn from spam filtering** — decades of prior art (Bayesian filters, shared blocklists,
