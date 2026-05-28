@@ -57,6 +57,20 @@ class TestBuildHybridSearcher(unittest.TestCase):
             RR.assert_called_once_with(top_n=5)
             self.assertIs(searcher._reranker, RR.return_value)
 
+    def test_rerank_with_summary_attaches_summary_reranker(self):
+        with patch("src.query.hybrid.QdrantVectorStore"), \
+             patch("src.query.hybrid.VectorStoreIndex"), \
+             patch("src.query.hybrid.make_summary_reranker") as MSR, \
+             patch("src.query.hybrid._make_reranker") as MR:
+            MSR.return_value = MagicMock(name="sumrr")
+            searcher = hybrid.build_hybrid_searcher(
+                "work-rag", client=MagicMock(), embedder=MagicMock(),
+                rerank_with_summary=True, top_n=10,
+            )
+            MSR.assert_called_once_with(top_n=10)
+            MR.assert_not_called()
+            self.assertIs(searcher._reranker, MSR.return_value)
+
     def test_builds_client_and_embedder_when_not_injected(self):
         with patch("src.query.hybrid.QdrantVectorStore"), \
              patch("src.query.hybrid.VectorStoreIndex"), \

@@ -18,6 +18,7 @@ from src.query.bge_m3_embedding import (
     make_bge_m3_sparse_query_fn,
 )
 from src.query.fusion import reciprocal_rank_fusion
+from src.query.summary_rerank import make_summary_reranker
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
@@ -71,6 +72,7 @@ def build_hybrid_searcher(
     embedder=None,
     mode: str = "hybrid",
     rerank: bool = False,
+    rerank_with_summary: bool = False,
     dense_top_k: int = 20,
     sparse_top_k: int = 20,
     top_n: int = 5,
@@ -79,6 +81,7 @@ def build_hybrid_searcher(
 
     mode="dense" -> dense-only baseline; mode="hybrid" -> dense+sparse RRF.
     rerank=True attaches the cross-encoder reranker (top_n results).
+    rerank_with_summary=True scores the cross-encoder on summary+body (takes precedence over rerank).
     `client`/`embedder` are injectable for testing; built lazily otherwise.
     """
     if client is None:
@@ -113,5 +116,10 @@ def build_hybrid_searcher(
         similarity_top_k=dense_top_k,
         sparse_top_k=sparse_top_k,
     )
-    reranker = _make_reranker(top_n=top_n) if rerank else None
+    if rerank_with_summary:
+        reranker = make_summary_reranker(top_n=top_n)
+    elif rerank:
+        reranker = _make_reranker(top_n=top_n)
+    else:
+        reranker = None
     return HybridSearcher(retriever, reranker)

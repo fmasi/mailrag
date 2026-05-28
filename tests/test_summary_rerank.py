@@ -38,5 +38,33 @@ class TestRerankByScores(unittest.TestCase):
         self.assertEqual(rerank_by_scores([], [], top_n=5), [])
 
 
+from unittest.mock import MagicMock
+from src.query.summary_rerank import SummaryAwareReranker
+
+
+class TestSummaryAwareReranker(unittest.TestCase):
+    def test_scores_on_summary_plus_body_and_reorders(self):
+        mock_model = MagicMock()
+        mock_model.compute_score.return_value = [0.1, 0.9]
+        rr = SummaryAwareReranker(top_n=2, _reranker=mock_model)
+        n1, n2 = _Node("B1", "S1"), _Node("B2", "S2")
+        out = rr.postprocess_nodes([n1, n2], query_str="q")
+        mock_model.compute_score.assert_called_once_with([["q", "S1\n\nB1"], ["q", "S2\n\nB2"]])
+        self.assertEqual(out, [n2, n1])  # 0.9 before 0.1
+        self.assertEqual(n2.score, 0.9)
+
+    def test_single_pair_float_score(self):
+        mock_model = MagicMock()
+        mock_model.compute_score.return_value = 0.7  # FlagReranker returns float for one pair
+        rr = SummaryAwareReranker(top_n=5, _reranker=mock_model)
+        out = rr.postprocess_nodes([_Node("B", "S")], query_str="q")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].score, 0.7)
+
+    def test_empty_nodes(self):
+        rr = SummaryAwareReranker(top_n=5, _reranker=MagicMock())
+        self.assertEqual(rr.postprocess_nodes([], query_str="q"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
