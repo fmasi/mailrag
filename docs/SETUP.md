@@ -48,11 +48,13 @@ conda run -n mailrag-build pip install \
 
 Run host-side scripts with `conda run -n mailrag-build --no-capture-output python <script>`.
 
-- **Reranker (optional, `rag` env only):** the opt-in cross-encoder reranker needs
-  `llama-index-postprocessor-flag-embedding-reranker` (pulls FlagEmbedding, already in
-  the `rag` env): `conda run -n rag pip install llama-index-postprocessor-flag-embedding-reranker`.
-  It is deliberately NOT a core dependency — the unit suite mocks it, so `mailrag-test`
-  does not need it.
+- **Hybrid query + reranker (`rag` env only):** the framework-native query path
+  (`scripts/compare_retrieval.py`, `src/query/`) needs two LlamaIndex packages in the
+  `rag` env, which is otherwise built ad-hoc with only `llama-index-core` + `qdrant-client`
+  (the build talks to Qdrant via `qdrant-client` directly):
+  `conda run -n rag pip install "llama-index-vector-stores-qdrant>=0.10,<0.11" llama-index-postprocessor-flag-embedding-reranker`.
+  The reranker pulls FlagEmbedding (already present). Both are deliberately NOT core
+  dependencies — the unit suite mocks/patches them, so `mailrag-test` does not need them.
 
 ---
 
