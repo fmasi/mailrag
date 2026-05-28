@@ -10,7 +10,11 @@ Run on HOST in the `rag` env (MPS + live Qdrant). Real queries live in LOCAL fil
     --terse ~/rag_pass2/terse_queries.json --content ~/rag_pass2/probe_queries.txt \
     | tee ~/eval_summary_rerank.log
 """
-import argparse, json, sys
+import argparse, json, os, sys
+
+# Make the repo root importable so `from src...` works regardless of cwd
+# (matches scripts/build_local_eml_rag.py and scripts/compare_retrieval.py).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TOP_N = 10
 CONFIGS = [
