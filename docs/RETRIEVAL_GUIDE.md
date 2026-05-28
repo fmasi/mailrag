@@ -14,6 +14,7 @@ you can talk through out loud. Grown incrementally as we build the system.
 
 ## Contents
 
+0. [Start here: the big picture (problem + plain glossary + drift)](#start-here-the-big-picture-plain-language-primer)
 1. [Retrieval fundamentals: dense vs sparse](#1-retrieval-fundamentals)
 2. [BM25 — classic lexical search](#2-bm25--classic-lexical-search)
 3. [Learned sparse retrieval (SPLADE, bge-m3 sparse)](#3-learned-sparse-retrieval)
@@ -22,6 +23,78 @@ you can talk through out loud. Grown incrementally as we build the system.
 6. [ColBERT & late interaction](#6-colbert--late-interaction)
 7. [Serving embeddings on Apple Silicon (UMA, MPS vs MLX, M5)](#7-serving-embeddings-on-apple-silicon)
 8. _(coming next)_ Chunking, parent-document retrieval, reranking, RAPTOR, contextual retrieval, late chunking, thread reconstruction, evaluation
+
+---
+
+## Start here: the big picture (plain-language primer)
+
+New to the query side? Read this first — the rest of the guide goes deep, but this section
+explains *what we're solving* and gives a plain-language glossary you can hold in your head.
+
+### The problem we're actually solving
+There are tens of thousands of emails in a vector database. The goal: **you type a question
+or topic, and the system returns the *most relevant* emails** (an LLM can then answer using
+them). The entire difficulty is in that one word — *relevant*. There are several ways to
+measure relevance, each good at some things and bad at others, so the work is finding the
+combination that puts the *right* emails at the top.
+
+### How a computer finds "relevant" at all
+A computer can't compare meaning directly, so we turn every email — and your query — into a
+list of numbers (a **vector**) that represents it. "Relevant" then means "whose numbers are
+closest to the query's numbers." There are **two different ways to make those numbers**, good
+at opposite things:
+
+- **Dense vector — the "meaning" method.** Captures the overall gist. Great at synonyms and
+  paraphrase (it knows *reschedule* ≈ *new time proposed*). Weak at exact rare terms — it may
+  not lock firmly onto a product code or version number.
+- **Sparse vector — the "keyword" method.** Like a smart keyword match: it emphasises the
+  important *words*. Great at exact terms, acronyms, and codes. Blind to meaning — if you don't
+  use the same word, it misses.
+
+Think of two assistants: one *understands what you mean* but is vague on specifics; the other
+is a *literal keyword bloodhound* but doesn't get nuance.
+
+### Hybrid + fusion — use both assistants
+Each method returns its own ranked list, and they disagree. **Fusion** is the recipe for
+merging two ranked lists into one. We use **Reciprocal Rank Fusion (RRF)**: an email that
+*both* methods rank highly gets boosted. So **hybrid search = the best of meaning-match and
+keyword-match.** (RRF fuses *ranks*, not scores, so it needs no score calibration — see §5.)
+
+### Reranking — a slow, smart second opinion
+Everything above is **fast but approximate**: each email's vector and the query's vector were
+computed *separately*, so the model never saw them side by side. A **reranker (cross-encoder)**
+is a slower, smarter model that reads the query and **one email together** and scores how
+relevant it really is. Far more accurate, but too slow for the whole corpus — so the pattern is
+**"retrieve wide, rerank narrow":** the fast methods fetch ~20 candidates, then the reranker
+re-reads and reorders just those. (See §6 for the bi-encoder-vs-cross-encoder spectrum.)
+
+### Drift — and why "contextual retrieval" can cause it
+A retrieval method **drifts** when it ranks loosely-related results *above* the ones that
+precisely answer the query — the top results slide off-target toward generic topical neighbours.
+
+> **Drift, in one line:** loosely-on-topic results creeping above the precise ones.
+
+One experiment in this project, *contextual retrieval*, glues a one-line summary onto each email
+*before* embedding it, hoping the extra context helps. The side effect: the summary makes the
+email's vector look like a blend of *generic topics*, so a precise query can match emails that
+are only vaguely related — i.e. it **increases drift**. A reranker is the standard cure: because
+it re-reads the *actual* query against the *actual* email, it pushes drifted-in results back down.
+
+### What we measured (directional, small sample)
+Comparing **dense → hybrid → hybrid+rerank** on a cleaned collection (no summaries) vs a
+summary-embedded one:
+
+- **Reranking is a clear, consistent win — biggest where the fast methods are weakest.** When
+  the query's words are *not* in the subject line, dense/hybrid struggle and rerank rescues it
+  (on some queries, relevant-in-top-5 went from **0 → 2 → 5** across the three stages).
+- **On queries naming a specific entity, all methods already find on-topic emails** (the corpus
+  has exact-match threads) **but rerank fixes the *order*,** surfacing the precisely-relevant
+  thread above generically-related mail.
+- **The summary-embedded collection did not clearly beat the plain one, and it adds drift risk.**
+  The reranker mattered more than the summary trick. (A larger *labelled* evaluation is the way
+  to settle this rigorously — see the roadmap.)
+- **Caveat — duplicate results:** the same email/thread can appear several times in the top-K
+  (multiple chunks). Grouping results by email (display-level dedup) is a tracked follow-up.
 
 ---
 
