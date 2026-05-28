@@ -40,6 +40,17 @@ class TestReciprocalRankFusion(unittest.TestCase):
         self.assertEqual(out.ids, [])
         self.assertEqual(out.nodes, [])
 
+    def test_ids_without_nodes_stay_parallel(self):
+        # a sparse-only style leg: ids present but no nodes; the fused output
+        # must keep ids/similarities/nodes strictly parallel.
+        dense = VectorStoreQueryResult(nodes=[], similarities=[], ids=["a", "b"])
+        sparse = _result(["b", "c"])
+        out = reciprocal_rank_fusion(dense, sparse, top_k=5)
+        self.assertEqual(len(out.ids), len(out.nodes))
+        self.assertEqual([n.node_id for n in out.nodes], out.ids)
+        # only ids that have a node survive (b and c, from the sparse leg)
+        self.assertEqual(set(out.ids), {"b", "c"})
+
 
 if __name__ == "__main__":
     unittest.main()
