@@ -54,6 +54,16 @@ class TestBuildHybridSearcher(unittest.TestCase):
             RR.assert_called_once_with(top_n=5)
             self.assertIs(searcher._reranker, RR.return_value)
 
+    def test_builds_client_and_embedder_when_not_injected(self):
+        with patch("src.query.hybrid.QdrantVectorStore"), \
+             patch("src.query.hybrid.VectorStoreIndex"), \
+             patch("src.query.hybrid._make_reranker"), \
+             patch("src.query.hybrid._qdrant_client") as QC, \
+             patch("src.ingest.embedder.BgeM3Embedder") as EMB:
+            hybrid.build_hybrid_searcher("work-rag", mode="hybrid")
+            QC.assert_called_once()
+            EMB.assert_called_once()
+
 
 class TestHybridSearcherSearch(unittest.TestCase):
     def test_search_applies_reranker_when_present(self):

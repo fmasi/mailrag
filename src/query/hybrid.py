@@ -8,7 +8,7 @@ RRF callback (src/query/fusion.py). FlagEmbedding/reranker imports are lazy so t
 module imports cleanly in the unit-test env.
 """
 import os
-from typing import List, Optional
+from typing import List
 
 from llama_index.core import VectorStoreIndex
 from llama_index.vector_stores.qdrant import QdrantVectorStore
@@ -100,6 +100,7 @@ def build_hybrid_searcher(
         vector_store, embed_model=BgeM3LlamaIndexEmbedding(embedder=embedder)
     )
     query_mode = "hybrid" if mode == "hybrid" else "default"
+    # sparse_top_k is forwarded in both modes; LlamaIndex ignores it in "default" (dense) mode.
     retriever = index.as_retriever(
         vector_store_query_mode=query_mode,
         similarity_top_k=dense_top_k,
