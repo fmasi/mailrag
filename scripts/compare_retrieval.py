@@ -12,7 +12,12 @@ Example:
     --queries ~/rag_pass2/probe_queries.txt --top-k 10 | tee ~/compare_retrieval.log
 """
 import argparse
+import os
 import sys
+
+# Make the repo root importable so `from src...` works regardless of cwd
+# (matches scripts/build_local_eml_rag.py and scripts/llm_pass2.py).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 DEFAULT_QUERIES = [
     "product release schedule and generally available versions",
