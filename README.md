@@ -106,8 +106,15 @@ only it can produce.**
 | **Dense (semantic) only** | matches meaning & paraphrase | misses rare exact tokens (acronyms, IDs); returns redundant near-duplicate chunks |
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token / acronym precision, fused with semantics | needs a sparse-capable embedder + fusion; more storage |
 | **+ LLM noise removal** | precision — junk can't surface (≈1,000 spam-quarantine digests and ≈1,500 calendar notifications removed from results) | one-time LLM cost (see above) |
-| **+ contextual retrieval** (prepend each email's summary before embedding) | short/terse emails match by *gist* — e.g. a 43-character reply surfaced via its summary | **topic drift**: dilutes literal matches and can pull in adjacent-but-off results; best paired with a reranker |
-| **+ cross-encoder reranker** *(planned)* | reorders the fused candidates, removing contextual drift | extra per-query latency |
+| **+ contextual retrieval** (prepend each email's summary before embedding) | short/terse emails match by *gist* — e.g. a 43-character reply surfaced via its summary | **topic drift**: helps terse/gist queries but *dilutes* literal/precise matches (measured — see `EXPERIMENTS.md` §7) |
+| **+ cross-encoder reranker** *(measured — `EXPERIMENTS.md` §7)* | reorders the fused candidates — a clear win on content/literal queries | per-query latency; can *demote* contentless terse emails (it scores the empty body low) |
+
+**Where this nets out** (measured — see [`EXPERIMENTS.md` §7](docs/EXPERIMENTS.md)): the reranker is a
+clear win for normal queries; contextual retrieval (`C′`) helps *terse* emails but *hurts* literal ones — a
+real bi-directional trade-off. Rather than maintain two collections plus a query router, the chosen direction
+is **thread-aware retrieval over a single collection** — a terse reply lives in a thread, so pulling the
+thread (via its substantive emails) covers the topic (`thread_id` is already on every email). That likely
+retires `C′` and subsumes result deduplication.
 
 **Worked example.** Searching for a partner certification program by its acronym
 (`"ACP"`) mixes a *semantic* concept (certification readiness) with a *rare exact token*

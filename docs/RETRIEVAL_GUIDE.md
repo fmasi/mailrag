@@ -22,7 +22,8 @@ you can talk through out loud. Grown incrementally as we build the system.
 5. [Hybrid search & Reciprocal Rank Fusion (RRF)](#5-hybrid-search--rrf)
 6. [ColBERT & late interaction](#6-colbert--late-interaction)
 7. [Serving embeddings on Apple Silicon (UMA, MPS vs MLX, M5)](#7-serving-embeddings-on-apple-silicon)
-8. _(coming next)_ Chunking, parent-document retrieval, reranking, RAPTOR, contextual retrieval, late chunking, thread reconstruction, evaluation
+8. Hybrid retrieval, fusion & reranking — how this project queries (measured; see also `EXPERIMENTS.md` §6–7)
+9. [Roadmap / coming next](#roadmap--coming-next) — thread-aware retrieval (lead next step), evaluation metrics, chunking, RAPTOR, late chunking
 
 ---
 
@@ -90,11 +91,14 @@ summary-embedded one:
 - **On queries naming a specific entity, all methods already find on-topic emails** (the corpus
   has exact-match threads) **but rerank fixes the *order*,** surfacing the precisely-relevant
   thread above generically-related mail.
-- **The summary-embedded collection did not clearly beat the plain one, and it adds drift risk.**
-  The reranker mattered more than the summary trick. (A larger *labelled* evaluation is the way
-  to settle this rigorously — see the roadmap.)
+- **The summary-embedded collection (C′) is a *bi-directional* trade-off, not a clear win:** it
+  clearly *helps* terse/contentless emails (ranks them far higher — its designed purpose) but
+  clearly *hurts* literal/precise queries (topic drift). The reranker is the bigger lever for
+  content queries. This trade-off is what motivates **thread-aware retrieval over one collection**
+  as the cleaner resolution (see the Roadmap below and `EXPERIMENTS.md` §7); a larger *labelled*
+  eval would quantify it.
 - **Caveat — duplicate results:** the same email/thread can appear several times in the top-K
-  (multiple chunks). Grouping results by email (display-level dedup) is a tracked follow-up.
+  (multiple chunks). Grouping by thread (thread-aware retrieval) is the fix — and *is* the dedup.
 
 ---
 
@@ -425,13 +429,6 @@ specifically, MLX is dense-only** (no learned sparse), which is why a hybrid bui
 
 ---
 
-_Next sections to add: chunking strategy, parent-document / thread-as-parent retrieval,
-RAPTOR, contextual retrieval vs late chunking, email thread
-reconstruction (Message-ID/In-Reply-To/References, JWZ), and evaluation metrics
-(recall@k, nDCG, MRR)._
-
----
-
 ## Hybrid retrieval, fusion, and reranking (how this project queries)
 
 ### Dense vs learned-sparse vectors
@@ -478,3 +475,19 @@ parity — `HuggingFaceEmbedding("BAAI/bge-m3")` can drift); (2) fusion is clien
 server-side Qdrant-native RRF fast-path is a tracked enhancement); (3) bge-m3 sparse needs a
 custom `sparse_query_fn` because the default sparse encoder is SPLADE; (4) the shipped Qdrant
 fusion is relative-score only, so RRF is supplied as a small callback.
+
+---
+
+## Roadmap / coming next
+
+Covered above and **measured** (see `EXPERIMENTS.md` §6–7): hybrid dense+sparse + RRF, learned-sparse
+(bge-m3), the cross-encoder reranker, and contextual retrieval (C′). Still to explore:
+
+- **Thread-aware / parent-document retrieval** *(the lead next step)* — retrieve over one collection
+  + reranker, then group/expand by `thread_id` so terse replies are covered as thread context. Likely
+  lets us retire C′. Open questions: confirm pulling the thread actually surfaces the info, and
+  thread-size bounding (an LLM-generated thread summary and/or breaking long threads into parent-id
+  segments).
+- **Evaluation** — a labelled eval set + metrics (recall@k, nDCG, MRR) to turn the directional §7
+  findings into hard numbers and weigh the C / C′ / reranker trade-off by the real query mix.
+- **Chunking strategy, RAPTOR, late chunking** — deeper theory sections still to write.

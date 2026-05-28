@@ -121,7 +121,9 @@ Compared four collections built from the same corpus (`A` original dense-only/un
 Key honest finding: **C vs C′ is a real trade-off, not a free win.** Contextual embedding
 helps intent/short-email queries but *hurt* a precise technical query (it pulled in
 off-topic training webinars). Contextual retrieval is meant to be paired with a reranker —
-cast a wide net, then rerank to drop the drift.
+cast a wide net, then rerank to drop the drift. **(Updated by §7:** once measured, the cleaner
+resolution turned out to be *thread-aware retrieval over a single collection `C`* — likely
+retiring `C′` — rather than pairing C′ with a reranker. Read §7 for the verdict.)
 
 **Worked example.** Searching for a partner certification program by its acronym (`ACP`)
 mixes a *semantic* concept (certification readiness) with a *rare exact token* (`ACP`):
@@ -195,7 +197,7 @@ terse queries, not proof; a labelled eval would quantify the trade-off.
 - **Larger labeled eval set** — turn the directional eyeballing of §7 into precision/recall/nDCG
   numbers across A/B/C/C′(+rerank), weighted by the real query mix, to settle the trade-off.
 - **Deduplicate results by email** (#2) — multiple chunks of one email currently crowd the
-  top-K; group by Message-ID at display time.
+  top-K. *Subsumed by thread-aware retrieval (§7): grouping by `thread_id` is the dedup.*
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain
   and re-measure the LLM budget saved.
 - **Learn from spam filtering** — decades of prior art (Bayesian filters, shared blocklists,
