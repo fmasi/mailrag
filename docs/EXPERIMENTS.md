@@ -166,21 +166,32 @@ generic same-topic mail. This is the fix for C′'s drift.
   emails) buried its terse reply entirely. So "exact terse-email recall" is partly the wrong
   lens — the information is reachable via the substantive siblings.
 
-**Honest verdict — no single config wins everything.** C′ wins terse/recall (its designed
-purpose); C + reranker wins literal/technical precision, where C′ *hurts* via drift. It's a
-workload-dependent trade-off — the clean resolution is **query-type routing** or a **labelled
-eval weighted by the real query mix**, not "retire C′." The summary's value is best realised
-at *embedding* time (C′) for terse recall (accepting the literal-query drift); the reranker is
-the right default for content/literal queries. Directional only — 8 hand-picked terse queries,
-not proof.
+**Honest verdict — no single config wins everything, but the fix is probably *architectural*,
+not a second collection.** C′ wins terse/recall (its designed purpose); C + reranker wins
+literal/technical precision, where C′ *hurts* via drift. Rather than maintain two collections
+plus a query router, the cleaner resolution is **thread-aware retrieval over a single
+collection**: a terse reply never needs to be found *in isolation* — it lives in a thread, and
+pulling the thread (via its substantive emails) covers the topic. This is the classic
+**parent-document / thread-reconstruction** pattern, and `thread_id` is already on every email.
+That likely lets us **retire C′** and keep one collection (`C`) + reranker, with summaries as
+*payload* (not embedded). It also subsumes the duplicate-results issue (#2) — grouping by
+thread *is* the dedup. A terse reply that is the *only* match for a topic is low-value anyway,
+so missing it in isolation is an acceptable price.
+
+To validate next: (a) does pulling the thread actually surface the terse email's info; (b)
+thread-size bounding for long threads — likely an LLM-generated thread summary and/or breaking
+long threads into parent-id segments (its own research thread). Directional only — 8 hand-picked
+terse queries, not proof; a labelled eval would quantify the trade-off.
 
 ---
 
 ## Open threads / next experiments
 
-- **Query-type routing** — §7 showed content/literal queries want `C` + reranker while
-  terse/intent queries want `C′`. Detect query intent and route (or run both and merge), since
-  no single config wins everything.
+- **Thread-aware retrieval** (parent-document / thread reconstruction) — the elegant
+  alternative to two collections + routing: retrieve over one collection (`C`) + reranker, then
+  group/expand results by `thread_id` so terse replies are covered as thread context. Could
+  retire C′ entirely. Sub-research: thread-size bounding (LLM thread summary and/or parent-id
+  segmentation of long threads).
 - **Larger labeled eval set** — turn the directional eyeballing of §7 into precision/recall/nDCG
   numbers across A/B/C/C′(+rerank), weighted by the real query mix, to settle the trade-off.
 - **Deduplicate results by email** (#2) — multiple chunks of one email currently crowd the
