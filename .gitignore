@@ -80,6 +80,8 @@ target/
 
 # Local data/cache artifacts
 data_cache/
+# Private working handover notes (next-steps context, not for the public repo)
+/HANDOVER-NEXT.md
 # Anchored to repo root: a top-level ``storage/`` runtime dir stays ignored,
 # but the tracked ``src/storage/`` package must NOT be (unanchored ``storage/``
 # silently dropped it from the public repo, breaking fresh clones).

@@ -135,6 +135,7 @@ finds the token but misses paraphrases; **hybrid + RRF gets both.** Multi-query 
 ## Documentation
 
 - [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — 5-minute setup
+- [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points
 - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning
 - [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs (cleanup economics, regex-vs-LLM, retrieval methodology) with real, anonymized numbers
