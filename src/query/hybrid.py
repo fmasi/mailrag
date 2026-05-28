@@ -25,20 +25,21 @@ DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
 def _qdrant_client():
-    """Construct a Qdrant client from env/config (collection passed separately)."""
+    """Construct a Qdrant client from environment variables (collection passed separately).
+
+    Reads ``os.environ`` directly rather than importing ``src.config.settings``: that
+    module eagerly imports heavy cloud llama-index integrations (OpenAI/Perplexity) which
+    the lightweight local ``rag`` query env does not (and should not, per the offline goal)
+    have. ``QDRANT_URL`` is required; api-key/grpc are optional with local-friendly defaults.
+    """
     from qdrant_client import QdrantClient
 
-    from src.config.settings import RAGConfig
-
-    url = (os.environ.get("QDRANT_URL") or RAGConfig.QDRANT_URL).strip()
+    url = (os.environ.get("QDRANT_URL") or "").strip()
     if not url:
         raise ValueError("QDRANT_URL environment variable is not set")
-    api_key = (os.environ.get("QDRANT_API_KEY") or RAGConfig.QDRANT_API_KEY).strip() or None
-    grpc_raw = os.environ.get("QDRANT_PREFER_GRPC")
-    if grpc_raw is None:
-        prefer_grpc = bool(RAGConfig.QDRANT_PREFER_GRPC)
-    else:
-        prefer_grpc = grpc_raw.strip().lower() in {"1", "true", "yes", "on"}
+    api_key = (os.environ.get("QDRANT_API_KEY") or "").strip() or None
+    grpc_raw = os.environ.get("QDRANT_PREFER_GRPC") or ""
+    prefer_grpc = grpc_raw.strip().lower() in {"1", "true", "yes", "on"}
     return QdrantClient(url=url, api_key=api_key, prefer_grpc=prefer_grpc)
 
 
