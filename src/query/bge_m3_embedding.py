@@ -12,22 +12,26 @@ Two adapters:
 The underlying ``BgeM3Embedder`` lazily imports FlagEmbedding only on first encode,
 so importing this module is safe in the (FlagEmbedding-free) unit-test env.
 """
-from typing import Callable, List, Tuple
+from typing import TYPE_CHECKING, Callable, List, Tuple
 
 from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.embeddings import BaseEmbedding
 
 from src.ingest.sparse import lexical_weights_to_sparse
 
+if TYPE_CHECKING:
+    from src.ingest.embedder import BgeM3Embedder
+
 
 class BgeM3LlamaIndexEmbedding(BaseEmbedding):
     _embedder = PrivateAttr()
 
-    def __init__(self, embedder, model_name: str = "BAAI/bge-m3", **kwargs):
+    def __init__(self, embedder: "BgeM3Embedder", model_name: str = "BAAI/bge-m3", **kwargs):
         super().__init__(model_name=model_name, **kwargs)
         self._embedder = embedder
 
     def _dense(self, texts: List[str]) -> List[List[float]]:
+        """Return dense bge-m3 vectors as Python floats, shape [N, 1024]."""
         dense_vecs, _ = self._embedder.encode(texts)
         return [[float(x) for x in row] for row in dense_vecs]
 
@@ -46,11 +50,14 @@ class BgeM3LlamaIndexEmbedding(BaseEmbedding):
     async def _aget_text_embedding(self, text: str) -> List[float]:
         return self._get_text_embedding(text)
 
+    async def _aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return self._dense(texts)
+
 
 SparseEncoderCallable = Callable[[List[str]], Tuple[List[List[int]], List[List[float]]]]
 
 
-def make_bge_m3_sparse_query_fn(embedder) -> SparseEncoderCallable:
+def make_bge_m3_sparse_query_fn(embedder: "BgeM3Embedder") -> SparseEncoderCallable:
     """Return a LlamaIndex sparse_query_fn backed by bge-m3 lexical weights."""
 
     def _fn(texts: List[str]) -> Tuple[List[List[int]], List[List[float]]]:

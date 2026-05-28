@@ -24,9 +24,9 @@ class TestBgeM3DenseEmbedding(unittest.TestCase):
             self.assertAlmostEqual(got, exp, places=5)
         self.assertTrue(all(isinstance(x, float) for x in out))
 
-    def test_text_embedding_uses_same_dense(self):
+    def test_text_embedding_matches_query_path(self):
         m = BgeM3LlamaIndexEmbedding(embedder=self._embedder())
-        self.assertEqual(len(m._get_text_embedding("hi")), 3)
+        self.assertEqual(m._get_text_embedding("hi"), m._get_query_embedding("hi"))
 
 
 class TestBgeM3SparseQueryFn(unittest.TestCase):
