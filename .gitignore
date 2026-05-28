@@ -227,3 +227,5 @@ __marimo__/
 .claude/
 config/mcp.json
 .github/hooks/
+# Dev-process design specs / implementation plans (brainstorming/writing-plans output)
+docs/superpowers/
