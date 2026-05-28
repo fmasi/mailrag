@@ -48,6 +48,12 @@ conda run -n mailrag-build pip install \
 
 Run host-side scripts with `conda run -n mailrag-build --no-capture-output python <script>`.
 
+- **Reranker (optional, `rag` env only):** the opt-in cross-encoder reranker needs
+  `llama-index-postprocessor-flag-embedding-reranker` (pulls FlagEmbedding, already in
+  the `rag` env): `conda run -n rag pip install llama-index-postprocessor-flag-embedding-reranker`.
+  It is deliberately NOT a core dependency — the unit suite mocks it, so `mailrag-test`
+  does not need it.
+
 ---
 
 ## 3. Start Qdrant

@@ -353,6 +353,55 @@ specifically, MLX is dense-only** (no learned sparse), which is why a hybrid bui
 ---
 
 _Next sections to add: chunking strategy, parent-document / thread-as-parent retrieval,
-cross-encoder reranking, RAPTOR, contextual retrieval vs late chunking, email thread
+RAPTOR, contextual retrieval vs late chunking, email thread
 reconstruction (Message-ID/In-Reply-To/References, JWZ), and evaluation metrics
 (recall@k, nDCG, MRR)._
+
+---
+
+## Hybrid retrieval, fusion, and reranking (how this project queries)
+
+### Dense vs learned-sparse vectors
+A **dense** vector (bge-m3, 1024-d, cosine) captures *meaning* — it matches paraphrases
+and acronym/expansion synonymy, but can miss exact rare tokens. A **learned-sparse**
+vector is a mostly-zero vector over the model's vocabulary: only the tokens the model
+judges important get non-zero weight. It is like BM25, but the weights — and *which*
+terms light up, including some not literally present ("term expansion") — are learned.
+
+**Why query and stored sparse must share a vocabulary.** Sparse weights are keyed by a
+specific tokenizer's token-IDs. bge-m3 and SPLADE (LlamaIndex's default `fastembed`
+sparse) are different models with different vocabularies, so their sparse vectors are not
+comparable — dot-producting them is meaningless. Our collections store **bge-m3** sparse
+weights, so the query's sparse side must also be bge-m3. We supply a custom
+`sparse_query_fn` (see `src/query/bge_m3_embedding.py`) that encodes the query with bge-m3
+and reshapes its `lexical_weights` (`{token_id: weight}`) into Qdrant's `(indices, values)`
+form — bypassing the default SPLADE encoder so query and stored vectors share one vocabulary.
+
+### Hybrid + Reciprocal Rank Fusion (RRF)
+We retrieve a dense leg and a sparse leg, then fuse with **RRF**: a document's score is
+`sum 1/(k + rank)` over the lists it appears in (k=60). RRF fuses *ranks*, not scores, so
+it needs no score normalization and is robust across modalities. Vector-DB research showed
+server-side RRF is not universal (Qdrant/Milvus/ES yes; Pinecone uses alpha; Weaviate its
+own fusion), so client-side RRF is the portable default — which is what LlamaIndex does.
+
+### Bi-encoder vs cross-encoder (why rerank)
+bge-m3 is a **bi-encoder**: query and document are embedded *separately*, then compared —
+fast and precomputable, but lossy (the model never sees them together). A **cross-encoder**
+reranker (bge-reranker-v2-m3) feeds *(query, document) together* through a transformer and
+emits one relevance score — far more accurate, but not precomputable, so it runs only on the
+top-K candidates: **retrieve wide, rerank narrow**. It is the standard fix for the topic
+drift contextual-embedding (C′) introduces, because it re-reads the real query against each
+candidate and demotes off-topic results the diluted embedding floated up.
+
+### Framework vs. our manual approach (and limitations)
+We use LlamaIndex's native components rather than rolling our own: `QdrantVectorStore`
+(hybrid mode) is the backend + dense/sparse retrieval, `hybrid_fusion_fn` is the fusion
+swap point, and a node postprocessor (`FlagEmbeddingReranker`) is the rerank stage. This
+replaces the earlier hand-built path (qdrant-client direct upsert + manual RRF in an
+ephemeral script). Where the framework is strictly better: maintained, far less code, clean
+swap points. Where it constrains us / limitations: (1) in hybrid mode the dense leg must go
+through the index's `embed_model` (we wrap our FlagEmbedding bge-m3 in a `BaseEmbedding` for
+parity — `HuggingFaceEmbedding("BAAI/bge-m3")` can drift); (2) fusion is client-side (a
+server-side Qdrant-native RRF fast-path is a tracked enhancement); (3) bge-m3 sparse needs a
+custom `sparse_query_fn` because the default sparse encoder is SPLADE; (4) the shipped Qdrant
+fusion is relative-score only, so RRF is supplied as a small callback.
