@@ -45,3 +45,38 @@ def extract_thread_ids(nodes) -> List[str]:
         if tid and tid not in seen:
             seen.append(tid)
     return seen
+
+
+_SCROLL_PAGE = 256
+
+
+def fetch_thread_payloads(client, collection: str, thread_ids: List[str]) -> List[dict]:
+    """Scroll every point whose thread_id is in `thread_ids`, return their payloads.
+
+    Uses a MatchAny filter on the thread_id KEYWORD index. Paginates until the
+    scroll cursor is exhausted.
+    """
+    if not thread_ids:
+        return []
+    from qdrant_client import models
+
+    flt = models.Filter(
+        must=[models.FieldCondition(
+            key="thread_id", match=models.MatchAny(any=list(thread_ids))
+        )]
+    )
+    payloads: List[dict] = []
+    offset = None
+    while True:
+        points, offset = client.scroll(
+            collection_name=collection,
+            scroll_filter=flt,
+            limit=_SCROLL_PAGE,
+            with_payload=True,
+            with_vectors=False,
+            offset=offset,
+        )
+        payloads.extend(p.payload for p in points)
+        if offset is None:
+            break
+    return payloads

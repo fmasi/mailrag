@@ -1,5 +1,6 @@
 """Tests for thread-aware retrieval expansion."""
 import unittest
+from unittest.mock import MagicMock, patch
 from src.query import thread_expand as te
 from llama_index.core.schema import TextNode, NodeWithScore
 
@@ -32,3 +33,28 @@ class TestExtractThreadIds(unittest.TestCase):
     def test_skips_missing_thread_id(self):
         nodes = [self._node("t1"), NodeWithScore(node=TextNode(text="b", metadata={}), score=1.0)]
         self.assertEqual(te.extract_thread_ids(nodes), ["t1"])
+
+
+class TestFetchThreadPayloads(unittest.TestCase):
+    def _pt(self, mid, tid):
+        p = MagicMock()
+        p.payload = {"message_id": mid, "thread_id": tid, "text": "b"}
+        return p
+
+    def test_scrolls_and_collects_payloads_with_pagination(self):
+        client = MagicMock()
+        # First page returns a next-offset, second page ends (None).
+        client.scroll.side_effect = [
+            ([self._pt("m1", "t1")], "next"),
+            ([self._pt("m2", "t1")], None),
+        ]
+        out = te.fetch_thread_payloads(client, "work-rag", ["t1"])
+        self.assertEqual([p["message_id"] for p in out], ["m1", "m2"])
+        self.assertEqual(client.scroll.call_count, 2)
+        # Collection name forwarded.
+        self.assertEqual(client.scroll.call_args_list[0].kwargs["collection_name"], "work-rag")
+
+    def test_empty_thread_ids_returns_empty(self):
+        client = MagicMock()
+        self.assertEqual(te.fetch_thread_payloads(client, "work-rag", []), [])
+        client.scroll.assert_not_called()
