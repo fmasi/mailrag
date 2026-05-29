@@ -58,10 +58,11 @@ def run(queries_path, top_k, outdir):
 
     for q in queries:
         query = q["query"]
+        thread_ctxs = s_c_rr.search_threads(query)
         arms = {
             "C": flatten_nodes(s_c.search(query)[:top_k]),
             "C+rerank": flatten_nodes(s_c_rr.search(query)[:top_k]),
-            "C+rerank+thread": flatten_threads(s_c_rr.search_threads(query)),
+            "C+rerank+thread": flatten_threads(thread_ctxs),
             "Cprime": flatten_nodes(s_cp.search(query)[:top_k]),
             "Cprime+rerank": flatten_nodes(s_cp_rr.search(query)[:top_k]),
         }
@@ -72,10 +73,9 @@ def run(queries_path, top_k, outdir):
             "arms": {a: [h.message_id for h in hits] for a, hits in arms.items()},
         })
         pool_rows.append({"query": query, "pool": [_hit_dict(h) for h in pool]})
-        ctxs = s_c_rr.search_threads(query)
         bounding.append({"query": query,
                          "threads": [{"n_emails": len(c.emails),
-                                      "tokens": estimate_tokens(c.text)} for c in ctxs]})
+                                      "tokens": estimate_tokens(c.text)} for c in thread_ctxs]})
         print(f"  done: {query[:60]!r} (pool={len(pool)})", flush=True)
 
     os.makedirs(outdir, exist_ok=True)
