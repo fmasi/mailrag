@@ -82,6 +82,16 @@ def fetch_thread_payloads(client, collection: str, thread_ids: List[str]) -> Lis
     return payloads
 
 
+def order_by_date(emails: List[ThreadEmail]) -> List[ThreadEmail]:
+    """Chronological order; unparseable/unknown dates sort last (stable)."""
+    def key(e: ThreadEmail):
+        d = e.date or ""
+        # ISO-8601 strings sort lexicographically; "unknown" / "" sort last.
+        bad = not d or d == "unknown"
+        return (bad, d)
+    return sorted(emails, key=key)
+
+
 def group_into_emails(payloads: List[dict]) -> List[ThreadEmail]:
     """Collapse chunk payloads into one ThreadEmail per message_id.
 

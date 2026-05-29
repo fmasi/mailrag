@@ -88,3 +88,25 @@ class TestGroupIntoEmails(unittest.TestCase):
         # Both chunk texts present (order best-effort; content must not be lost).
         self.assertIn("part A", emails[0].body)
         self.assertIn("part B", emails[0].body)
+
+
+class TestOrderByDate(unittest.TestCase):
+    def _e(self, mid, date):
+        return te.ThreadEmail(message_id=mid, sender="a", to="b", cc="",
+                              date=date, subject="hi", body="x")
+
+    def test_sorts_iso_dates_ascending(self):
+        emails = [
+            self._e("m2", "2024-05-02T00:00:00+00:00"),
+            self._e("m1", "2024-05-01T00:00:00+00:00"),
+        ]
+        out = te.order_by_date(emails)
+        self.assertEqual([e.message_id for e in out], ["m1", "m2"])
+
+    def test_unknown_dates_sort_last_stable(self):
+        emails = [
+            self._e("m2", "unknown"),
+            self._e("m1", "2024-05-01T00:00:00+00:00"),
+        ]
+        out = te.order_by_date(emails)
+        self.assertEqual([e.message_id for e in out], ["m1", "m2"])
