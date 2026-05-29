@@ -187,17 +187,67 @@ terse queries, not proof; a labelled eval would quantify the trade-off.
 
 ---
 
+## 8. Thread-aware retrieval — design and implementation (2026-05-29)
+
+### Motivation
+
+About **9.6% of emails in the kept corpus** are terse-but-valid short replies: one-line
+acknowledgements, brief sign-offs, forwarding notes. These embed poorly in isolation — the
+dense retriever has almost no semantic signal to latch onto, and the sparse side sees only
+high-frequency function tokens. The §7 matrix showed that contextual retrieval (C′) rescues
+them by prepending a summary before embedding, but at a measurable cost: **literal and
+technical queries drift** as the summary dilutes the exact-token signal. That is a
+bi-directional trade-off, not a free win, and it is the finding that drove the architectural
+shift here.
+
+### Design
+
+The resolution is **parent-document / small-to-big retrieval**, applied at the thread level:
+
+- Keep **one collection** (`C`) with summaries as payload (not embedded) and one reranker.
+- After hybrid retrieve + optional rerank, group the top hits by `thread_id` and fetch all
+  emails in each matched thread directly from Qdrant (a scroll + filter per thread).
+- **Match on small units, answer from the thread.** A terse reply lives in a thread with
+  substantive emails; those substantive siblings are the ones the retriever finds, and pulling
+  the whole thread exposes the terse reply as context without needing to embed it well.
+
+This is implemented in `src/query/thread_expand.py` and wired into `HybridSearcher` via
+`search_threads()`. Multi-chunk emails (body split across several Qdrant points) are
+reconstructed by joining their body chunks (best-effort order — there is no `chunk_index`
+field yet; adding one at ingest is a filed follow-up). Each email is rendered with an
+explicit From/To/Cc/Date header so the LLM can attribute who said what.
+
+### Key implementation facts
+
+- **93.3% of emails produce a single chunk**; 6.7% span multiple chunks and require
+  reconstruction. The body-rejoining step handles both cases uniformly.
+- **`message_id` deduplication** happens inside the expansion step: each unique `message_id`
+  contributes exactly one `ThreadEmail`, regardless of how many chunks matched it. This
+  subsumes the standalone dedup work item from §7.
+- **`thread_id` is already on every stored payload** — no re-indexing needed; the feature
+  is a pure query-time operation.
+- A `bound_thread` helper (off by default) accepts a `max_tokens` limit and a pluggable
+  summarizer for environments where very large threads would overflow a small context window.
+
+### Verdict
+
+Thread-aware retrieval **retires C′**: terse replies are reached via their thread siblings,
+not by embedding tricks. The single collection (`C`) + reranker architecture is cleaner —
+no routing logic, no second index to maintain — and the dedup issue from §7 is resolved as
+a side effect of grouping. Confirmed directionally correct; a labelled eval would quantify
+recall for the terse-reply subset now that the full thread is surfaced.
+
+---
+
 ## Open threads / next experiments
 
-- **Thread-aware retrieval** (parent-document / thread reconstruction) — the elegant
-  alternative to two collections + routing: retrieve over one collection (`C`) + reranker, then
-  group/expand results by `thread_id` so terse replies are covered as thread context. Could
-  retire C′ entirely. Sub-research: thread-size bounding (LLM thread summary and/or parent-id
-  segmentation of long threads).
+- ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
+  remaining: thread-size bounding validation on long threads (LLM thread summary and/or
+  parent-id segmentation).
 - **Larger labeled eval set** — turn the directional eyeballing of §7 into precision/recall/nDCG
   numbers across A/B/C/C′(+rerank), weighted by the real query mix, to settle the trade-off.
-- **Deduplicate results by email** (#2) — multiple chunks of one email currently crowd the
-  top-K. *Subsumed by thread-aware retrieval (§7): grouping by `thread_id` is the dedup.*
+- ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
+  by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain
   and re-measure the LLM budget saved.
 - **Learn from spam filtering** — decades of prior art (Bayesian filters, shared blocklists,
