@@ -122,6 +122,35 @@ def render_thread(thread_id: str, emails: List[ThreadEmail]) -> str:
     return "\n".join(lines).strip()
 
 
+def assemble_threads(nodes, client, collection: str) -> List[ThreadContext]:
+    """Expand retrieved nodes into ordered, attributed ThreadContexts.
+
+    Fetches all points per thread_id once, then builds one ThreadContext per
+    thread_id (in hit order).
+    """
+    thread_ids = extract_thread_ids(nodes)
+    if not thread_ids:
+        return []
+    payloads = fetch_thread_payloads(client, collection, thread_ids)
+
+    by_tid: dict[str, List[dict]] = {tid: [] for tid in thread_ids}
+    for p in payloads:
+        tid = p.get("thread_id")
+        if tid in by_tid:
+            by_tid[tid].append(p)
+
+    contexts: List[ThreadContext] = []
+    for tid in thread_ids:
+        emails = order_by_date(group_into_emails(by_tid[tid]))
+        if not emails:
+            continue
+        text = render_thread(tid, emails)
+        contexts.append(ThreadContext(
+            thread_id=tid, subject=emails[0].subject, emails=emails, text=text,
+        ))
+    return contexts
+
+
 def group_into_emails(payloads: List[dict]) -> List[ThreadEmail]:
     """Collapse chunk payloads into one ThreadEmail per message_id.
 

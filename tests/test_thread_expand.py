@@ -132,3 +132,32 @@ class TestRenderThread(unittest.TestCase):
         self.assertIn("Cc: —", text)
         # Chronological: Anthony's email appears before Fred's reply.
         self.assertLess(text.index("Please find details"), text.index("Lets do it"))
+
+
+class TestAssembleThreads(unittest.TestCase):
+    def test_end_to_end_with_mock_client(self):
+        nodes = [NodeWithScore(node=TextNode(text="Lets do it",
+                 metadata={"thread_id": "t1"}), score=1.0)]
+        client = MagicMock()
+        client.scroll.side_effect = [(
+            [self._pt("m1", "a", "2024-05-01T00:00:00+00:00", "details"),
+             self._pt("m2", "b", "2024-05-02T00:00:00+00:00", "Lets do it")],
+            None,
+        )]
+        ctxs = te.assemble_threads(nodes, client, "work-rag")
+        self.assertEqual(len(ctxs), 1)
+        self.assertEqual(ctxs[0].thread_id, "t1")
+        self.assertEqual([e.message_id for e in ctxs[0].emails], ["m1", "m2"])
+        self.assertIn("details", ctxs[0].text)
+        self.assertIn("Lets do it", ctxs[0].text)
+
+    def _pt(self, mid, sender, date, text):
+        p = MagicMock()
+        p.payload = {"message_id": mid, "thread_id": "t1", "sender": sender,
+                     "to": "x", "cc": "", "date": date, "subject": "hi",
+                     "text": text, "summary": ""}
+        return p
+
+    def test_no_thread_ids_returns_empty(self):
+        nodes = [NodeWithScore(node=TextNode(text="b", metadata={}), score=1.0)]
+        self.assertEqual(te.assemble_threads(nodes, MagicMock(), "work-rag"), [])
