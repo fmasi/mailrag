@@ -24,7 +24,7 @@ def build_judge_prompt(query: str, email_text: str) -> str:
 
 _GRADE_KEYWORD = re.compile(r"grade\D{0,5}([0-3])", re.IGNORECASE)
 _JSON_GRADE = re.compile(r'"?grade"?\s*[:=]\s*([0-3])', re.IGNORECASE)
-_ANY_DIGIT = re.compile(r"[0-7]")
+_ANY_DIGIT = re.compile(r"[0-9]")
 
 
 def parse_grade(text: str) -> int:

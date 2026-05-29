@@ -33,6 +33,12 @@ class ParseGradeTest(unittest.TestCase):
         # "grade" keyword wins over an incidental later number
         self.assertEqual(parse_grade("grade 2 (out of 3)"), 2)
 
+    def test_clamps_high_digit_via_fallback(self):
+        self.assertEqual(parse_grade("9"), 3)
+
+    def test_parses_none_input(self):
+        self.assertEqual(parse_grade(None), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
