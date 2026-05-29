@@ -92,6 +92,36 @@ def order_by_date(emails: List[ThreadEmail]) -> List[ThreadEmail]:
     return sorted(emails, key=key)
 
 
+_EMDASH = "—"
+
+
+def _short_date(date: str) -> str:
+    """'2015-01-08T16:05:00+00:00' -> '2015-01-08 16:05'; pass through if odd."""
+    if not date or date == "unknown":
+        return "unknown"
+    d = date.replace("T", " ")
+    return d[:16]
+
+
+def render_thread(thread_id: str, emails: List[ThreadEmail]) -> str:
+    """Render emails as an attributed, chronological thread block for the LLM.
+
+    Each email gets an explicit From/To/Cc/Date header because the vector store
+    excludes to/cc from the default LLM metadata block (src/data/models.py).
+    """
+    subject = emails[0].subject if emails else thread_id
+    lines = [f"[Thread: {subject}]", ""]
+    for e in emails:
+        cc = e.cc.strip() if e.cc else ""
+        lines.append(
+            f"[{_short_date(e.date)}] From: {e.sender}  To: {e.to}  "
+            f"Cc: {cc or _EMDASH}"
+        )
+        lines.append(f"  {e.body.strip()}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def group_into_emails(payloads: List[dict]) -> List[ThreadEmail]:
     """Collapse chunk payloads into one ThreadEmail per message_id.
 

@@ -110,3 +110,25 @@ class TestOrderByDate(unittest.TestCase):
         ]
         out = te.order_by_date(emails)
         self.assertEqual([e.message_id for e in out], ["m1", "m2"])
+
+
+class TestRenderThread(unittest.TestCase):
+    def test_renders_attribution_header_per_email(self):
+        emails = [
+            te.ThreadEmail(message_id="m1", sender="Anthony", to="Fred", cc="",
+                           date="2015-01-08T16:05:00+00:00", subject="viewing",
+                           body="Please find details"),
+            te.ThreadEmail(message_id="m2", sender="Fred", to="Anthony", cc="Boss",
+                           date="2015-01-08T16:59:00+00:00", subject="Re: viewing",
+                           body="Lets do it"),
+        ]
+        text = te.render_thread("t1", emails)
+        self.assertIn("[Thread: viewing]", text)
+        self.assertIn("From: Anthony", text)
+        self.assertIn("To: Fred", text)
+        self.assertIn("Cc: Boss", text)
+        self.assertIn("Lets do it", text)
+        # Empty cc renders as an em-dash, never blank/missing.
+        self.assertIn("Cc: —", text)
+        # Chronological: Anthony's email appears before Fred's reply.
+        self.assertLess(text.index("Please find details"), text.index("Lets do it"))
