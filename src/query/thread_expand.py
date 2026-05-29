@@ -151,6 +151,45 @@ def assemble_threads(nodes, client, collection: str) -> List[ThreadContext]:
     return contexts
 
 
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars/token) — dependency-free heuristic."""
+    return len(text) // 4
+
+
+def bound_thread(
+    ctx: ThreadContext,
+    max_tokens: int,
+    summarizer: Optional[Callable[[str], str]] = None,
+) -> ThreadContext:
+    """Keep an assembled thread within `max_tokens`. No-op when under budget.
+
+    Over budget: keep the root (first) and the most-recent email verbatim. The
+    middle is either summarized (if a `summarizer` callback is supplied) or
+    elided with a marker. Off by default at the call site (max_tokens unset).
+    """
+    if estimate_tokens(ctx.text) <= max_tokens or len(ctx.emails) <= 2:
+        return ctx
+
+    root, latest = ctx.emails[0], ctx.emails[-1]
+    middle = ctx.emails[1:-1]
+    middle_text = render_thread(ctx.thread_id, middle)
+
+    if summarizer is not None:
+        middle_block = summarizer(middle_text)
+    else:
+        middle_block = f"[{len(middle)} earlier emails omitted]"
+
+    head = render_thread(ctx.thread_id, [root])
+    tail = render_thread(ctx.thread_id, [latest])
+    # tail's leading "[Thread: ...]" header is redundant after head; drop it.
+    tail_body = tail.split("\n", 2)[-1] if "\n" in tail else tail
+    text = "\n\n".join([head, middle_block, tail_body]).strip()
+    return ThreadContext(
+        thread_id=ctx.thread_id, subject=ctx.subject, emails=ctx.emails,
+        text=text, bounded=True,
+    )
+
+
 def group_into_emails(payloads: List[dict]) -> List[ThreadEmail]:
     """Collapse chunk payloads into one ThreadEmail per message_id.
 

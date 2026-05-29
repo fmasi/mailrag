@@ -161,3 +161,40 @@ class TestAssembleThreads(unittest.TestCase):
     def test_no_thread_ids_returns_empty(self):
         nodes = [NodeWithScore(node=TextNode(text="b", metadata={}), score=1.0)]
         self.assertEqual(te.assemble_threads(nodes, MagicMock(), "work-rag"), [])
+
+
+class TestBoundThread(unittest.TestCase):
+    def _ctx(self, n_emails, body):
+        emails = [te.ThreadEmail(message_id=f"m{i}", sender="a", to="b", cc="",
+                  date=f"2024-05-{i+1:02d}T00:00:00+00:00", subject="hi", body=body)
+                  for i in range(n_emails)]
+        return te.ThreadContext(thread_id="t1", subject="hi", emails=emails,
+                                text=te.render_thread("t1", emails))
+
+    def test_under_budget_is_unchanged(self):
+        ctx = self._ctx(2, "short")
+        out = te.bound_thread(ctx, max_tokens=10_000)
+        self.assertFalse(out.bounded)
+        self.assertEqual(out.text, ctx.text)
+
+    def test_over_budget_with_summarizer_summarizes_tail(self):
+        ctx = self._ctx(6, "x" * 400)
+        called = {}
+        def fake_summarizer(text: str) -> str:
+            called["yes"] = True
+            return "SUMMARY OF EARLIER"
+        out = te.bound_thread(ctx, max_tokens=200, summarizer=fake_summarizer)
+        self.assertTrue(out.bounded)
+        self.assertIn("SUMMARY OF EARLIER", out.text)
+        self.assertTrue(called.get("yes"))
+        # Most recent email kept verbatim.
+        self.assertIn(ctx.emails[-1].body, out.text)
+
+    def test_over_budget_without_summarizer_elides_middle(self):
+        ctx = self._ctx(6, "x" * 400)
+        out = te.bound_thread(ctx, max_tokens=200, summarizer=None)
+        self.assertTrue(out.bounded)
+        self.assertIn("omitted", out.text.lower())
+        # Root (first) and latest (last) kept verbatim.
+        self.assertIn(ctx.emails[0].body, out.text)
+        self.assertIn(ctx.emails[-1].body, out.text)
