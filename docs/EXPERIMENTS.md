@@ -324,8 +324,9 @@ Findings:
   2.02) at ~15× the context — not worth it.
 - **Keep C′** — the end-to-end arbiter says its summaries improve answers; the §7/§8 lean
   toward retiring it was based on a ranked-list lens that mis-models thread delivery.
-- **A small fast model (e4b-class) suffices** — no need for the 26B/31B (the 31B also
-  crashed on this 48GB box).
+- **A small model (e4b-class) appears sufficient** — but this is **quantization-confounded**
+  (e4b ran at 8-bit, the 26B at 4-bit; see the perf/quant note below). Treat "size doesn't
+  matter" as *plausible but unproven*; model choice is second-order to retrieval here.
 - **The ceiling (~62–69% correct) is retrieval coverage (~76%)** → see #11–#14.
 
 ### Caveats & a practical gotcha
@@ -334,6 +335,27 @@ Findings:
   24k (max 128k); the big-context setups *overflowed* → empty answers graded 0
   (`C′+all` read 0.44). Reloaded at 128k via `lms load -c 131072`, the same setup scored
   **2.09**. The "small models can't do thread-aware" reading was entirely this artifact.
+
+### Model size / quantization / speed (perf benchmark, MLX on a 48GB Mac)
+
+The end-to-end "e4b ≥ 26B" reading is **quantization-confounded**: e4b ran at **8-bit**, the
+26B at **4-bit** — a 2× precision gap favouring the small model. A clean same-quant size test
+(26b@6bit end-to-end) was *not* run (deferred: model choice is second-order to retrieval).
+Speed benchmark (`scripts/eval/bench_models.py`, LM Studio native stats, ~3–4.5k-token prompts):
+
+| model | quant | gen tok/s | time-to-first-token |
+|---|---|---|---|
+| 26b-a4b (MoE) | 4bit | ~75 | ~1.9 s |
+| 26b-a4b (MoE) | 6bit | ~60 | ~2.2 s |
+| e4b | 8bit | ~50 | ~1.0 s |
+
+Counter-intuitive but consistent: at these quants the **26B-MoE@4bit *generates* fastest**
+(4-bit weights + only ~4B active params); **e4b@8bit generates slower (~50 tok/s) but has ~2×
+better latency (TTFT) and far lower memory** (~8 GiB; the 31B *dense* crashed on this box).
+So the model trade is latency/memory (e4b) vs raw throughput (26b@4bit) — **quant matters more
+than size for speed.** Quality differences are small and confounded. **Net: model choice is
+second-order; the lever is retrieval coverage (#12). Revisit a clean same-quant model
+comparison only after coverage is improved.**
 
 ---
 
