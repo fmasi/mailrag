@@ -80,3 +80,37 @@ def fetch_thread_payloads(client, collection: str, thread_ids: List[str]) -> Lis
         if offset is None:
             break
     return payloads
+
+
+def group_into_emails(payloads: List[dict]) -> List[ThreadEmail]:
+    """Collapse chunk payloads into one ThreadEmail per message_id.
+
+    93% of emails are single-chunk; the ~7% multi-chunk ones have their chunk
+    `text` fields concatenated (best-effort order — no chunk_index field exists
+    yet; see follow-up issue). Identity/metadata is taken from the first chunk.
+    """
+    by_mid: dict[str, List[dict]] = {}
+    order: List[str] = []
+    for p in payloads:
+        mid = p.get("message_id") or ""
+        if mid not in by_mid:
+            by_mid[mid] = []
+            order.append(mid)
+        by_mid[mid].append(p)
+
+    emails: List[ThreadEmail] = []
+    for mid in order:
+        chunks = by_mid[mid]
+        head = chunks[0]
+        body = "\n".join(c.get("text", "") for c in chunks).strip()
+        emails.append(ThreadEmail(
+            message_id=mid,
+            sender=head.get("sender", ""),
+            to=head.get("to", ""),
+            cc=head.get("cc", ""),
+            date=head.get("date", ""),
+            subject=head.get("subject", ""),
+            body=body,
+            summary=head.get("summary", ""),
+        ))
+    return emails
