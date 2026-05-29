@@ -239,13 +239,113 @@ recall for the terse-reply subset now that the full thread is surfaced.
 
 ---
 
+## 9. Labeled eval — retrieval metrics, coverage, and end-to-end answer quality (2026-05-29)
+
+Turned §6–§8's directional reads into measured numbers. **45 synthetic-from-corpus
+queries** (LLM-generated from thread *bodies*, never subjects/summaries, to avoid biasing
+toward C′; hypothesis-weighted ~40% terse / ~40% content / ~20% thread-spanning, each with
+a known answer-email target). Harness: `scripts/eval/{gen_queries,run_arms,judge,calibrate,
+report,sweep_thread_n,e2e_context,e2e_answer}.py` + pure-logic modules `src/eval/`. All raw
+artifacts are gitignored under `eval/out/`; only aggregate numbers appear here.
+
+**Judge calibration (local Gemma-31B vs an Opus reference on 514 pooled pairs):** Cohen's
+κ = 0.52 (moderate), Spearman = 0.74 (strong rank agreement), and — the decisive check —
+**both pre-registered decisions came out identical under both judges**, so local judging is
+decision-adequate (route: all-local).
+
+### Lens 1 — ranked-list metrics (LLM-judge pooled, flatten-to-emails, 5 arms)
+
+nDCG@10: **C′ 0.851 > C 0.804 > C′+rerank 0.665 > C+rerank 0.628 > C+rerank+thread 0.419.**
+Two surprises that *overturn* the §7 eyeballing:
+- **Reranking HURT every category.** The cross-encoder demoted answer-bearing emails the
+  LLM-judge rated relevant (concrete case: a query's top-8 grades went `3 3 3 3 0 3 1 0` →
+  `1 0 3 2 0 0 1 0` after rerank). It optimizes query↔body similarity; the judge rewards
+  answer content — they disagree. **⇒ rerank off by default.**
+- **C′ (embedded summaries) was the *best* ranked arm**, including on content queries — the
+  §6 "C′ drifts on literal queries" worry did not reproduce under LLM-judge.
+- Thread-aware scored *worst* here — but this is the wrong ruler for it (see Lens 2): it
+  returns whole threads in chronological order (~44 emails), not a relevance-ranked top-10.
+
+### Lens 2 — answer-coverage (does the known answer email get returned at all; no judging)
+
+Pulling the full thread roughly **doubles** answer-coverage. Critically, the original
+thread arm was seeded from the *rerank'd* (now-known-worst) hits; re-measured on clean seeds:
+
+| arm | answer found | terse |
+|---|---|---|
+| C / C′ (no thread) | 44% / 42% | 33% / 33% |
+| C+rerank+thread (rerank'd seeds) | 58% | 50% |
+| **C+thread (clean)** | **82%** | **78%** |
+| **C′+thread (clean)** | **84%** | **83%** |
+
+Thread-expansion **top-N sweep** (coverage / avg emails): sharp diminishing returns — most
+of the win is in the first ~3 threads. C+thread N=1 56% (8 emails) / N=3 71% (28) / all 82%
+(113); C′+thread N=1 **67%** / N=3 76% / all 84%. C′ ranks the answer-thread higher, so it
+wins at *tight* budgets (N=1: 67% vs 56%); the two converge by N≈5.
+
+### Lens 3 — end-to-end answer quality (the arbiter)
+
+Fed each setup's retrieved context to an answer model; an Opus judge graded the answer's
+correctness (0–3) against the **full source thread** as ground truth. Two answer models;
+mean grade (higher = better):
+
+| context setup | 26B@4bit | e4b@128k |
+|---|---|---|
+| no context | 0.00 | 0.00 |
+| answer email only | 1.27 | 1.38 |
+| plain C (~10 emails) | 1.69 | 1.93 |
+| C + 1 thread | 1.58 | 1.62 |
+| C + 3 threads | 1.78 | 1.76 |
+| C + all (~113) | 1.76 | 1.95 |
+| **C′ + 1 thread** | 1.89 | **2.02** |
+| C′ + 3 threads | 1.89 | 1.82 |
+| **C′ + all** | 1.96 | **2.09** |
+
+terse-only: e4b@128k **C′+1thread = 2.24** vs 26B 1.72.
+
+Findings:
+- **The answer model is *not* the bottleneck — retrieval coverage is.** When the answer was
+  present in context the 26B answered correctly ≈88% of the time (67% correct ÷ 76% coverage);
+  most lost points are questions where retrieval never surfaced the answer thread (~24%).
+- **A 4B model at its full window matches or beats the 26B almost everywhere** (`C′+all`
+  e4b 2.09 vs 26B 1.96; `C′+1thread` 2.02 vs 1.89). Bigger model buys little; better
+  retrieval is the lever.
+- **Handing the AI only the pinpoint answer email (1.27/1.38) is the *worst* real option** —
+  worse than any thread context. A terse answer email alone is insufficient; the surrounding
+  thread is needed. (Sanity floor: no-context = 0.00.)
+- **More context did not confuse the model** (no "lost-in-the-middle" collapse 1→3→all);
+  diminishing returns, not damage.
+- **C′ beats C at every depth** for both models — embedded summaries earn their keep by
+  ranking the answer thread into a tight context window.
+
+### Verdict / recommended stack
+- **`C′` + expand the top ~1–3 threads, reranker OFF.** Sweet spot: **C′ + top-1 thread**
+  (~2k tokens) ≈ best quality at smallest context; `C′+all` is marginally higher (2.09 vs
+  2.02) at ~15× the context — not worth it.
+- **Keep C′** — the end-to-end arbiter says its summaries improve answers; the §7/§8 lean
+  toward retiring it was based on a ranked-list lens that mis-models thread delivery.
+- **A small fast model (e4b-class) suffices** — no need for the 26B/31B (the 31B also
+  crashed on this 48GB box).
+- **The ceiling (~62–69% correct) is retrieval coverage (~76%)** → see #11–#14.
+
+### Caveats & a practical gotcha
+- Directional: 45 queries, single Opus judge (±~0.1 run-to-run noise), one quant per model.
+- **Always load the model at its full context window.** LM Studio silently loaded e4b at
+  24k (max 128k); the big-context setups *overflowed* → empty answers graded 0
+  (`C′+all` read 0.44). Reloaded at 128k via `lms load -c 131072`, the same setup scored
+  **2.09**. The "small models can't do thread-aware" reading was entirely this artifact.
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
   remaining: thread-size bounding validation on long threads (LLM thread summary and/or
   parent-id segmentation).
-- **Larger labeled eval set** — turn the directional eyeballing of §7 into precision/recall/nDCG
-  numbers across A/B/C/C′(+rerank), weighted by the real query mix, to settle the trade-off.
+- ~~**Larger labeled eval set**~~ — DONE (§9). Settled it: keep C′, C′+top-1–3 threads, rerank
+  off, a small model suffices. **New lead: retrieval coverage (~76%) is the ceiling, not the
+  answer model** — see #12 (diagnose the misses), #11 (per-thread summaries), #13 (summary
+  prompt), #14 (chunk size).
 - ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
   by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain

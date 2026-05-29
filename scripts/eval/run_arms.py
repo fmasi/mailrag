@@ -5,9 +5,11 @@ retrieved-thread token sizes. All outputs (real content) -> eval/out (gitignored
 Arms:
   C                      collection=work-rag,     mode=hybrid, rerank=False
   C+rerank               collection=work-rag,     mode=hybrid, rerank=True
-  C+rerank+thread        collection=work-rag,     search_threads(), rerank=True
+  C+rerank+thread        collection=work-rag,     search_threads(), rerank=True  (rerank'd seeds)
+  C+thread               collection=work-rag,     search_threads(), rerank=False (clean seeds)
   Cprime                 collection=work-rag-ctx, mode=hybrid, rerank=False
   Cprime+rerank          collection=work-rag-ctx, mode=hybrid, rerank=True
+  Cprime+thread          collection=work-rag-ctx, search_threads(), rerank=False (clean seeds)
 
 Run on the HOST (rag env; QDRANT_URL set):
   QDRANT_URL=http://localhost:6333 conda run -n rag --no-capture-output \
@@ -58,13 +60,17 @@ def run(queries_path, top_k, outdir):
 
     for q in queries:
         query = q["query"]
-        thread_ctxs = s_c_rr.search_threads(query)
+        thread_ctxs = s_c_rr.search_threads(query)        # rerank'd seeds (original arm)
+        thread_ctxs_c = s_c.search_threads(query)         # plain-C seeds (no rerank)
+        thread_ctxs_cp = s_cp.search_threads(query)       # C' seeds (no rerank)
         arms = {
             "C": flatten_nodes(s_c.search(query)[:top_k]),
             "C+rerank": flatten_nodes(s_c_rr.search(query)[:top_k]),
             "C+rerank+thread": flatten_threads(thread_ctxs),
+            "C+thread": flatten_threads(thread_ctxs_c),
             "Cprime": flatten_nodes(s_cp.search(query)[:top_k]),
             "Cprime+rerank": flatten_nodes(s_cp_rr.search(query)[:top_k]),
+            "Cprime+thread": flatten_threads(thread_ctxs_cp),
         }
         pool = build_pool(arms)
         arm_rankings.append({
@@ -75,7 +81,7 @@ def run(queries_path, top_k, outdir):
         pool_rows.append({"query": query, "pool": [_hit_dict(h) for h in pool]})
         bounding.append({"query": query,
                          "threads": [{"n_emails": len(c.emails),
-                                      "tokens": estimate_tokens(c.text)} for c in thread_ctxs]})
+                                      "tokens": estimate_tokens(c.text)} for c in thread_ctxs_c]})
         print(f"  done: {query[:60]!r} (pool={len(pool)})", flush=True)
 
     os.makedirs(outdir, exist_ok=True)
