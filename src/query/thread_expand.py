@@ -29,3 +29,19 @@ class ThreadContext:
     emails: List[ThreadEmail]
     text: str
     bounded: bool = False
+
+
+def _node_metadata(node) -> dict:
+    """Return metadata whether given a NodeWithScore or a bare TextNode."""
+    inner = getattr(node, "node", node)
+    return getattr(inner, "metadata", {}) or {}
+
+
+def extract_thread_ids(nodes) -> List[str]:
+    """Distinct thread_ids of the retrieved hits, in first-seen order."""
+    seen: List[str] = []
+    for node in nodes:
+        tid = _node_metadata(node).get("thread_id")
+        if tid and tid not in seen:
+            seen.append(tid)
+    return seen
