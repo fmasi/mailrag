@@ -101,5 +101,36 @@ class TestHybridSearcherSearch(unittest.TestCase):
         self.assertEqual(searcher.search("q"), ["n1", "n2"])
 
 
+class TestThreadExpansion(unittest.TestCase):
+    def test_search_threads_calls_assemble(self):
+        retriever = MagicMock()
+        retriever.retrieve.return_value = ["n1"]
+        client = MagicMock()
+        searcher = hybrid.HybridSearcher(
+            retriever, reranker=None, client=client, collection="work-rag",
+        )
+        with patch("src.query.hybrid.assemble_threads") as AT:
+            AT.return_value = ["ctx1"]
+            out = searcher.search_threads("q")
+            AT.assert_called_once_with(["n1"], client, "work-rag")
+            self.assertEqual(out, ["ctx1"])
+
+    def test_search_threads_requires_client(self):
+        searcher = hybrid.HybridSearcher(MagicMock(), reranker=None)
+        with self.assertRaises(ValueError):
+            searcher.search_threads("q")
+
+    def test_build_searcher_passes_client_and_collection(self):
+        with patch("src.query.hybrid.QdrantVectorStore"), \
+             patch("src.query.hybrid.VectorStoreIndex"), \
+             patch("src.query.hybrid._make_reranker"):
+            client = MagicMock()
+            searcher = hybrid.build_hybrid_searcher(
+                "work-rag", client=client, embedder=MagicMock(), mode="hybrid",
+            )
+            self.assertIs(searcher._client, client)
+            self.assertEqual(searcher._collection, "work-rag")
+
+
 if __name__ == "__main__":
     unittest.main()
