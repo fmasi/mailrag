@@ -83,8 +83,20 @@ are only vaguely related — i.e. it **increases drift**. A reranker is the stan
 it re-reads the *actual* query against the *actual* email, it pushes drifted-in results back down.
 
 ### What we measured (directional, small sample)
-Comparing **dense → hybrid → hybrid+rerank** on a cleaned collection (no summaries) vs a
-summary-embedded one:
+
+> **⚠️ Superseded by the labeled eval — see [`EXPERIMENTS.md` §9](EXPERIMENTS.md).** The reads
+> below were early, eyeballed, small-sample. A 45-query labeled eval (3 lenses + LLM-as-judge)
+> later **revised two of them**:
+> - **Reranking measured to *hurt*** under LLM-judged relevance (it demotes answer-bearing
+>   emails) — *not* the clear win the eyeballing suggested. **Off by default.**
+> - **Contextual retrieval (`C′`) was the *best* arm** (ranked and end-to-end) — the "drift"
+>   penalty did not reproduce; **`C′` is kept, not retired.**
+> - **Thread-aware retrieval ~doubles answer-coverage** (terse 33% → ~80%) and is the headline
+>   win; recommended stack is **`C′` + expand top ~1–3 threads, rerank off**.
+> - **Retrieval coverage (~76%), not the answer model, is the ceiling.**
+
+The original directional reads (kept for the record), comparing **dense → hybrid → hybrid+rerank**
+on a cleaned collection (no summaries) vs a summary-embedded one:
 
 - **Reranking is a clear, consistent win — biggest where the fast methods are weakest.** When
   the query's words are *not* in the subject line, dense/hybrid struggle and rerank rescues it
@@ -560,10 +572,16 @@ unusually large threads.
 
 ## Roadmap / coming next
 
-Covered above and **measured** (see `EXPERIMENTS.md` §6–8): hybrid dense+sparse + RRF,
+Covered above and **measured** (see `EXPERIMENTS.md` §6–9): hybrid dense+sparse + RRF,
 learned-sparse (bge-m3), the cross-encoder reranker, contextual retrieval (C′), and
-thread-aware retrieval (implemented; retires C′). Still to explore:
+thread-aware retrieval.
 
-- **Evaluation** — a labelled eval set + metrics (recall@k, nDCG, MRR) to turn the directional §7
-  findings into hard numbers and weigh the C / C′ / reranker trade-off by the real query mix.
+- ✅ **Evaluation — DONE (`EXPERIMENTS.md` §9).** A 45-query labeled eval across 3 lenses
+  (ranked metrics, answer-coverage, end-to-end answer quality) and 2 answer models, with an
+  LLM judge calibrated against a stronger reference. Verdict: **keep `C′`; recommended stack
+  `C′` + expand top ~1–3 threads, reranker off; a small model suffices; retrieval coverage is
+  the ceiling.**
+- **▶ Next lead — lift the retrieval ceiling (~76%).** The eval showed the answer model isn't
+  the bottleneck; retrieval is. Open issues: per-thread summaries (#11), coverage diagnosis
+  (#12), summary-prompt quality (#13), chunk size (#14).
 - **Chunking strategy, RAPTOR, late chunking** — deeper theory sections still to write.
