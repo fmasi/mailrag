@@ -31,6 +31,22 @@ class PoolingTest(unittest.TestCase):
         grades = {"a": 3, "b": 2, "c": 1, "d": 0}
         self.assertEqual(total_relevant(grades, rel=2), 2)
 
+    # --- edge cases ---
+
+    def test_build_pool_empty_arms(self):
+        self.assertEqual(build_pool({}), [])
+
+    def test_graded_rankings_arm_with_no_hits(self):
+        gr = graded_rankings({"C": []}, {})
+        self.assertEqual(gr, {"C": []})
+
+    def test_total_relevant_empty_grades(self):
+        self.assertEqual(total_relevant({}, rel=1), 0)
+
+    def test_total_relevant_all_below_threshold(self):
+        grades = {"a": 0, "b": 1}
+        self.assertEqual(total_relevant(grades, rel=2), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
