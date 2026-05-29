@@ -229,3 +229,6 @@ config/mcp.json
 .github/hooks/
 # Dev-process design specs / implementation plans (brainstorming/writing-plans output)
 docs/superpowers/
+
+# eval harness outputs (contain real corpus content — never commit)
+eval/out/
