@@ -325,8 +325,9 @@ Findings:
 - **Keep C′** — the end-to-end arbiter says its summaries improve answers; the §7/§8 lean
   toward retiring it was based on a ranked-list lens that mis-models thread delivery.
 - **A small model (e4b-class) appears sufficient** — but this is **quantization-confounded**
-  (e4b ran at 8-bit, the 26B at 4-bit; see the perf/quant note below). Treat "size doesn't
-  matter" as *plausible but unproven*; model choice is second-order to retrieval here.
+  later de-confounded by a same-context 3-way run (see the model/quant note below): at *fair*
+  precision the 4B essentially **ties** the 6×-larger model, and model choice is second-order
+  to retrieval here.
 - **The ceiling (~62–69% correct) is retrieval coverage (~76%)** → see #11–#14.
 
 ### Caveats & a practical gotcha
@@ -336,26 +337,35 @@ Findings:
   (`C′+all` read 0.44). Reloaded at 128k via `lms load -c 131072`, the same setup scored
   **2.09**. The "small models can't do thread-aware" reading was entirely this artifact.
 
-### Model size / quantization / speed (perf benchmark, MLX on a 48GB Mac)
+### Model size / quantization / speed (de-confounded, MLX on a 48GB Mac)
 
-The end-to-end "e4b ≥ 26B" reading is **quantization-confounded**: e4b ran at **8-bit**, the
-26B at **4-bit** — a 2× precision gap favouring the small model. A clean same-quant size test
-(26b@6bit end-to-end) was *not* run (deferred: model choice is second-order to retrieval).
-Speed benchmark (`scripts/eval/bench_models.py`, LM Studio native stats, ~3–4.5k-token prompts):
+The first end-to-end run compared e4b@**8bit** vs 26b@**4bit** — a 2× precision gap. A
+same-context (128k) 3-way re-run de-confounds size from quant. Mean answer-correctness (0–3)
+across the 7 retrieval setups, plus the speed/memory benchmark
+(`scripts/eval/bench_models.py`, LM Studio native stats):
 
-| model | quant | gen tok/s | time-to-first-token |
-|---|---|---|---|
-| 26b-a4b (MoE) | 4bit | ~75 | ~1.9 s |
-| 26b-a4b (MoE) | 6bit | ~60 | ~2.2 s |
-| e4b | 8bit | ~50 | ~1.0 s |
+| model | quant | RAM | gen tok/s | TTFT | end-to-end quality (overall) | terse (best setup) |
+|---|---|---|---|---|---|---|
+| e4b | 8bit | **9.0 GB** | ~50 | **~1.0 s** | **1.88** | **2.24** |
+| 26b-a4b (MoE) | 4bit | 15.6 GB | **~75** | ~1.9 s | 1.79 | 1.72 |
+| 26b-a4b (MoE) | 6bit | 21.8 GB | ~60 | ~2.2 s | **1.91** | 2.11 |
+| 31b (dense) | 4bit | 28.9 GB | ~9.6 ⚠️ | ~10 s | — (too slow / OOMs on long ctx) | — |
 
-Counter-intuitive but consistent: at these quants the **26B-MoE@4bit *generates* fastest**
-(4-bit weights + only ~4B active params); **e4b@8bit generates slower (~50 tok/s) but has ~2×
-better latency (TTFT) and far lower memory** (~8 GiB; the 31B *dense* crashed on this box).
-So the model trade is latency/memory (e4b) vs raw throughput (26b@4bit) — **quant matters more
-than size for speed.** Quality differences are small and confounded. **Net: model choice is
-second-order; the lever is retrieval coverage (#12). Revisit a clean same-quant model
-comparison only after coverage is improved.**
+Findings:
+- **Quant ≈ size, in effect.** 4→6 bit on the *same* 26B lifted quality **+0.12** (1.79→1.91)
+  — about the magnitude of the entire 6× size jump. The original "e4b > 26B" was *real but
+  partly a 4-bit handicap*: at fair precision **26b@6bit (1.91) ties e4b@8bit (1.88)** (~noise).
+- **e4b@8bit wins the hardest case (terse, 2.24)** and the quality-per-resource frontier: it
+  matches the 6×-larger model at **<½ the RAM** and ~2× better latency.
+- **More bits = more RAM + slower + slightly better** (26b@6bit 21.8 GB/60 tok/s vs 26b@4bit
+  15.6 GB/75 tok/s) — the three move together. The 31B *dense* is impractical here (9.6 tok/s,
+  OOMs on long context).
+- **This task is retrieval-gated, not intelligence-gated** — all usable models cluster at
+  ~1.8–1.9 because the ceiling is *whether the answer is in the retrieved context*, not model
+  smarts. A harder, reasoning-heavy task might separate them. **For this use case, e4b wins;
+  reach for 26b@6bit only if a future task actually needs the intelligence.**
+
+**Net: model choice is second-order; the lever is retrieval coverage (#12).**
 
 ---
 
