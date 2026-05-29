@@ -16,10 +16,14 @@
   or Azure Blob Storage, behind one `EmailLoader` interface.
 - **Email-aware preprocessing** — reply-chain stripping, calendar-invite collapsing,
   noise/newsletter filtering, exact-text chunk dedup.
-- **Hybrid retrieval** — bge-m3 dense + sparse vectors stored in Qdrant (also
-  supports local persistence and Pinecone).
+- **Hybrid retrieval** — bge-m3 dense + sparse vectors (RRF-fused) in Qdrant (also
+  supports local persistence and Pinecone), with optional **thread-aware expansion**
+  (match a small unit, answer from its full conversation).
 - **LLM "Pass-2"** — optional local-LLM summarization/judging of each email,
   content-addressed and cached.
+- **A measured methodology** — a labeled, LLM-judged retrieval eval (see the case
+  study below) that quantifies each technique and, in one case, *overturned* the
+  intuitive choice.
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
 
 ## Quickstart (runs against the public Enron dataset)
@@ -106,15 +110,24 @@ only it can produce.**
 | **Dense (semantic) only** | matches meaning & paraphrase | misses rare exact tokens (acronyms, IDs); returns redundant near-duplicate chunks |
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token / acronym precision, fused with semantics | needs a sparse-capable embedder + fusion; more storage |
 | **+ LLM noise removal** | precision — junk can't surface (≈1,000 spam-quarantine digests and ≈1,500 calendar notifications removed from results) | one-time LLM cost (see above) |
-| **+ contextual retrieval** (prepend each email's summary before embedding) | short/terse emails match by *gist* — e.g. a 43-character reply surfaced via its summary | **topic drift**: helps terse/gist queries but *dilutes* literal/precise matches (measured — see `EXPERIMENTS.md` §7) |
-| **+ cross-encoder reranker** *(measured — `EXPERIMENTS.md` §7)* | reorders the fused candidates — a clear win on content/literal queries | per-query latency; can *demote* contentless terse emails (it scores the empty body low) |
+| **+ contextual retrieval** (prepend each email's summary before embedding — `C′`) | short/terse emails match by *gist*; in the labeled eval, the **best ranked arm** *and* the end-to-end winner | one extra embedded collection to build/maintain |
+| **+ cross-encoder reranker** | *(intuition: reorder candidates for precision)* | **measured to HURT** — under an LLM judge it demotes answer-bearing emails (§9); **off by default** |
+| **+ thread-aware expansion** (pull the full conversation of each top hit) | **~doubles answer-coverage** (terse replies 33% → ~80%) — match a small unit, answer from its thread | larger context per query (tunable: expand top-N threads) |
 
-**Where this nets out** (measured — see [`EXPERIMENTS.md` §7](docs/EXPERIMENTS.md)): the reranker is a
-clear win for normal queries; contextual retrieval (`C′`) helps *terse* emails but *hurts* literal ones — a
-real bi-directional trade-off. Rather than maintain two collections plus a query router, the chosen direction
-is **thread-aware retrieval over a single collection** — a terse reply lives in a thread, so pulling the
-thread (via its substantive emails) covers the topic (`thread_id` is already on every email). That likely
-retires `C′` and subsumes result deduplication.
+**What a labeled eval settled** (45 queries × **3 lenses** — ranked metrics, answer-coverage,
+and end-to-end answer quality — × 2 answer models; LLM-as-judge calibrated against a stronger
+reference model; full write-up in [`EXPERIMENTS.md` §9](docs/EXPERIMENTS.md)):
+
+- **Thread-aware retrieval is the win.** Pulling a hit's full conversation roughly *doubles*
+  how often the answer actually reaches the LLM (terse queries 33% → ~80%) — confirming the
+  match-small / answer-from-the-thread design.
+- **Recommended stack: `C′` + expand the top ~1–3 threads, reranker OFF** — best end-to-end
+  answers (especially on terse replies), at a small context (~2 k tokens for the top thread).
+- **The reranker *hurt*** under LLM-judged relevance — a finding that *overturned* an earlier
+  eyeballed conclusion. The eval was built specifically to put that intuition to the test.
+- **The ceiling is retrieval, not the model.** When the answer was in the retrieved context,
+  even a **4 B** model answered correctly ~88% of the time; the lost points are queries where
+  retrieval never surfaced the right thread (~24%). Model size was second-order here.
 
 **Worked example.** Searching for a partner certification program by its acronym
 (`"ACP"`) mixes a *semantic* concept (certification readiness) with a *rare exact token*
@@ -145,7 +158,8 @@ finds the token but misses paraphrases; **hybrid + RRF gets both.** Multi-query 
 - [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points
 - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning
-- [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs (cleanup economics, regex-vs-LLM, retrieval methodology) with real, anonymized numbers
+- [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs (cleanup economics, regex-vs-LLM, retrieval methodology, and the **§9 labeled eval**: thread-aware retrieval, the reranker reversal, and "retrieval is the ceiling, not the model") with real, anonymized numbers
+- [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware expansion
 - [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent)
 
 ## License

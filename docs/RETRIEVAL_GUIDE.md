@@ -22,8 +22,9 @@ you can talk through out loud. Grown incrementally as we build the system.
 5. [Hybrid search & Reciprocal Rank Fusion (RRF)](#5-hybrid-search--rrf)
 6. [ColBERT & late interaction](#6-colbert--late-interaction)
 7. [Serving embeddings on Apple Silicon (UMA, MPS vs MLX, M5)](#7-serving-embeddings-on-apple-silicon)
-8. Hybrid retrieval, fusion & reranking — how this project queries (measured; see also `EXPERIMENTS.md` §6–7)
-9. [Roadmap / coming next](#roadmap--coming-next) — thread-aware retrieval (lead next step), evaluation metrics, chunking, RAPTOR, late chunking
+8. Hybrid retrieval, fusion & reranking — how this project queries (measured; see also `EXPERIMENTS.md` §6–8)
+9. [Thread-aware retrieval](#thread-aware-retrieval) — what/why/how + token bounding
+10. [Roadmap / coming next](#roadmap--coming-next) — evaluation metrics, chunking, RAPTOR, late chunking
 
 ---
 
@@ -82,8 +83,20 @@ are only vaguely related — i.e. it **increases drift**. A reranker is the stan
 it re-reads the *actual* query against the *actual* email, it pushes drifted-in results back down.
 
 ### What we measured (directional, small sample)
-Comparing **dense → hybrid → hybrid+rerank** on a cleaned collection (no summaries) vs a
-summary-embedded one:
+
+> **⚠️ Superseded by the labeled eval — see [`EXPERIMENTS.md` §9](EXPERIMENTS.md).** The reads
+> below were early, eyeballed, small-sample. A 45-query labeled eval (3 lenses + LLM-as-judge)
+> later **revised two of them**:
+> - **Reranking measured to *hurt*** under LLM-judged relevance (it demotes answer-bearing
+>   emails) — *not* the clear win the eyeballing suggested. **Off by default.**
+> - **Contextual retrieval (`C′`) was the *best* arm** (ranked and end-to-end) — the "drift"
+>   penalty did not reproduce; **`C′` is kept, not retired.**
+> - **Thread-aware retrieval ~doubles answer-coverage** (terse 33% → ~80%) and is the headline
+>   win; recommended stack is **`C′` + expand top ~1–3 threads, rerank off**.
+> - **Retrieval coverage (~76%), not the answer model, is the ceiling.**
+
+The original directional reads (kept for the record), comparing **dense → hybrid → hybrid+rerank**
+on a cleaned collection (no summaries) vs a summary-embedded one:
 
 - **Reranking is a clear, consistent win — biggest where the fast methods are weakest.** When
   the query's words are *not* in the subject line, dense/hybrid struggle and rerank rescues it
@@ -478,16 +491,97 @@ fusion is relative-score only, so RRF is supplied as a small callback.
 
 ---
 
+## Thread-aware retrieval
+
+### What it does
+
+After the normal hybrid retrieve + optional rerank step, the result set is **expanded into
+full email threads**. Each retrieved node carries a `thread_id` in its metadata; the expander
+fetches *all* emails in that thread from Qdrant (by scrolling the collection filtered on
+`thread_id`), reconstructs multi-chunk emails by rejoining their body chunks (best-effort
+order — there is no `chunk_index` field yet), sorts the emails chronologically, and renders
+each one as an attributed block — a single header line followed by the body:
+
+```
+[Thread: <subject>]
+
+[2015-01-08 16:05] From: <sender>  To: <recipient(s)>  Cc: <cc or —>
+  <body>
+```
+
+All emails from the same thread are concatenated into a single `ThreadContext` object. The
+final result is a list of `ThreadContext` values — one per unique thread — rather than a flat
+list of retrieved chunks.
+
+### Why it matters
+
+Two concrete problems motivate this:
+
+1. **Terse replies embed poorly in isolation.** A one-line reply ("sounds good") has almost
+   no semantic signal on its own. Embedding it independently gives the dense retriever nothing
+   to latch onto, and the sparse side only sees a handful of common tokens. The surrounding
+   thread — with the substantive question it was answering — carries the real meaning. By
+   matching on *any* email in the thread (typically the substantive ones) and then pulling
+   the *whole* thread, terse replies become reachable without embedding tricks.
+
+2. **Explicit attribution for the LLM.** Threads rendered with a per-email From/To/Cc/Date
+   header let the language model see *who said what and when*. Without this, summarisation
+   tasks can conflate or mis-attribute statements across participants — the model sees a wall
+   of text with no speaker boundaries.
+
+### How to call it
+
+`HybridSearcher` exposes two methods:
+
+```python
+# Plain retrieval — returns a list of LlamaIndex NodeWithScore objects (unchanged)
+nodes = searcher.search(query)
+
+# Thread-aware retrieval — returns a list of ThreadContext objects
+contexts = searcher.search_threads(query)
+```
+
+Each `ThreadContext` has:
+- `.thread_id` — the thread identifier (matches `thread_id` in Qdrant payload)
+- `.subject` — the thread subject (from the first email's payload)
+- `.emails` — list of `ThreadEmail` objects (one per reconstructed email)
+- `.text` — the fully rendered, attributed block ready to pass to an LLM
+
+`build_hybrid_searcher` accepts `mode="hybrid"` (default) or `"dense"`, and `rerank=True`
+to attach the cross-encoder before thread expansion:
+
+```python
+searcher = build_hybrid_searcher("my-collection", mode="hybrid", rerank=True)
+contexts = searcher.search_threads("when did we agree on the deadline")
+```
+
+See `scripts/probe_threads.py` for a ready-to-run manual probe against a live collection.
+
+### Token bounding (off by default)
+
+Very long threads can overflow the context window of a small LLM. The `bound_thread`
+function (in `src/query/thread_expand.py`) accepts a `max_tokens` limit and a pluggable
+`summarizer` callable. When the rendered thread exceeds the limit, it keeps the thread's
+root (first) and most-recent (last) email verbatim and replaces the middle — either by
+running the summarizer over it, or, if no summarizer is supplied, by eliding it with a
+`[N earlier emails omitted]` marker. This is off by default — `assemble_threads` returns
+unbounded threads — and is intended for environments with tight context budgets or
+unusually large threads.
+
+---
+
 ## Roadmap / coming next
 
-Covered above and **measured** (see `EXPERIMENTS.md` §6–7): hybrid dense+sparse + RRF, learned-sparse
-(bge-m3), the cross-encoder reranker, and contextual retrieval (C′). Still to explore:
+Covered above and **measured** (see `EXPERIMENTS.md` §6–9): hybrid dense+sparse + RRF,
+learned-sparse (bge-m3), the cross-encoder reranker, contextual retrieval (C′), and
+thread-aware retrieval.
 
-- **Thread-aware / parent-document retrieval** *(the lead next step)* — retrieve over one collection
-  + reranker, then group/expand by `thread_id` so terse replies are covered as thread context. Likely
-  lets us retire C′. Open questions: confirm pulling the thread actually surfaces the info, and
-  thread-size bounding (an LLM-generated thread summary and/or breaking long threads into parent-id
-  segments).
-- **Evaluation** — a labelled eval set + metrics (recall@k, nDCG, MRR) to turn the directional §7
-  findings into hard numbers and weigh the C / C′ / reranker trade-off by the real query mix.
+- ✅ **Evaluation — DONE (`EXPERIMENTS.md` §9).** A 45-query labeled eval across 3 lenses
+  (ranked metrics, answer-coverage, end-to-end answer quality) and 2 answer models, with an
+  LLM judge calibrated against a stronger reference. Verdict: **keep `C′`; recommended stack
+  `C′` + expand top ~1–3 threads, reranker off; a small model suffices; retrieval coverage is
+  the ceiling.**
+- **▶ Next lead — lift the retrieval ceiling (~76%).** The eval showed the answer model isn't
+  the bottleneck; retrieval is. Open issues: per-thread summaries (#11), coverage diagnosis
+  (#12), summary-prompt quality (#13), chunk size (#14).
 - **Chunking strategy, RAPTOR, late chunking** — deeper theory sections still to write.

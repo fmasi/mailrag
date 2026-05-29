@@ -19,6 +19,7 @@ from src.query.bge_m3_embedding import (
 )
 from src.query.fusion import reciprocal_rank_fusion
 from src.query.summary_rerank import make_summary_reranker
+from src.query.thread_expand import assemble_threads
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
@@ -54,15 +55,26 @@ def _make_reranker(model: str = DEFAULT_RERANK_MODEL, top_n: int = 5, use_fp16: 
 class HybridSearcher:
     """Runs the retriever, then (optionally) the reranker postprocessor."""
 
-    def __init__(self, retriever, reranker=None):
+    def __init__(self, retriever, reranker=None, *, client=None, collection=None):
         self._retriever = retriever
         self._reranker = reranker
+        self._client = client
+        self._collection = collection
 
     def search(self, query: str) -> List:
         nodes = self._retriever.retrieve(query)
         if self._reranker is not None:
             nodes = self._reranker.postprocess_nodes(nodes, query_str=query)
         return nodes
+
+    def search_threads(self, query: str):
+        """Search, then expand the hits into attributed ThreadContexts."""
+        if self._client is None or self._collection is None:
+            raise ValueError(
+                "search_threads requires a Qdrant client and collection"
+            )
+        nodes = self.search(query)
+        return assemble_threads(nodes, self._client, self._collection)
 
 
 def build_hybrid_searcher(
@@ -122,4 +134,4 @@ def build_hybrid_searcher(
         reranker = _make_reranker(top_n=top_n)
     else:
         reranker = None
-    return HybridSearcher(retriever, reranker)
+    return HybridSearcher(retriever, reranker, client=client, collection=collection)
