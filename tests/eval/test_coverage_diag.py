@@ -2,7 +2,7 @@
 import unittest
 
 from src.eval.coverage_diag import (
-    best_gold_rank, distinct_thread_rank, is_terse, lexical_overlap)
+    best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap)
 
 
 def _h(tid, mid):
@@ -76,6 +76,46 @@ class TestLexicalOverlap(unittest.TestCase):
 
     def test_empty_query_is_zero(self):
         self.assertEqual(lexical_overlap("", "anything"), 0.0)
+
+
+class TestClassifyMiss(unittest.TestCase):
+    # defaults used in the live run
+    TOP_HITS, N, K = 10, 3, 20
+
+    def _c(self, **ranks):
+        base = {"hyb_thread_rank": None, "hyb_distinct_rank": None,
+                "dense_thread_rank": None, "sparse_thread_rank": None}
+        base.update(ranks)
+        return classify_miss(base, self.TOP_HITS, self.N, self.K)
+
+    def test_covered_when_distinct_rank_below_n(self):
+        self.assertEqual(self._c(hyb_distinct_rank=2, hyb_thread_rank=5), "covered")
+
+    def test_budget_when_in_pool_but_past_n_threads(self):
+        # 4th distinct thread (rank 3 >= N=3) but its hit is within top_hits nodes
+        self.assertEqual(self._c(hyb_distinct_rank=3, hyb_thread_rank=7), "budget")
+
+    def test_fusion_when_single_mode_finds_it(self):
+        # not in hybrid pool, but dense ranks it high
+        self.assertEqual(self._c(dense_thread_rank=4), "fusion")
+
+    def test_fusion_via_sparse(self):
+        self.assertEqual(self._c(sparse_thread_rank=10), "fusion")
+
+    def test_hard_when_deep_in_both(self):
+        self.assertEqual(
+            self._c(dense_thread_rank=150, sparse_thread_rank=180), "hard")
+
+    def test_hard_when_absent_everywhere(self):
+        self.assertEqual(self._c(), "hard")
+
+    def test_budget_boundary_exactly_at_top_hits_is_not_budget(self):
+        # hyb_thread_rank == top_hits (10) is OUTSIDE the pool (0-based) -> not budget
+        self.assertEqual(self._c(hyb_thread_rank=10, dense_thread_rank=4), "fusion")
+
+    def test_fusion_boundary_exactly_at_k_is_not_fusion(self):
+        # dense rank == K (20) is outside "within first K" (0-based) -> hard
+        self.assertEqual(self._c(dense_thread_rank=20), "hard")
 
 
 if __name__ == "__main__":

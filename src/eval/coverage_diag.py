@@ -66,3 +66,31 @@ def lexical_overlap(query: str, text: str) -> float:
     if not q:
         return 0.0
     return len(q & _tokens(text)) / len(q)
+
+
+def classify_miss(ranks: dict, top_hits: int = 10, n: int = 3, k: int = 20) -> str:
+    """Bucket a query by where its gold thread sank. First match wins.
+
+    All ranks are 0-based node indices and may be None (absent). Keys:
+      hyb_distinct_rank  distinct-thread position of gold thread, hybrid
+      hyb_thread_rank    node rank of gold thread's best hit, hybrid
+      dense_thread_rank  node rank of gold thread's best hit, dense-only
+      sparse_thread_rank node rank of gold thread's best hit, sparse-only
+
+    - covered: gold thread is among the first `n` distinct hybrid threads.
+    - budget:  gold thread's best hybrid hit is within the first `top_hits` nodes
+               (the expansion pool) but past the top-`n` threads.
+    - fusion:  not in the hybrid pool, but dense OR sparse ranks it within first `k`.
+    - hard:    deep/absent in both single modes.
+    """
+    dr = ranks.get("hyb_distinct_rank")
+    if dr is not None and dr < n:
+        return "covered"
+    hr = ranks.get("hyb_thread_rank")
+    if hr is not None and hr < top_hits:
+        return "budget"
+    de = ranks.get("dense_thread_rank")
+    sp = ranks.get("sparse_thread_rank")
+    if (de is not None and de < k) or (sp is not None and sp < k):
+        return "fusion"
+    return "hard"
