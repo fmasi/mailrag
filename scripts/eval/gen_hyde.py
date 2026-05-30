@@ -28,9 +28,9 @@ from src.llm.client import make_client, default_model
 from src.query.hyde import generate_hypothetical
 
 
-def run(queries_path, out_path, model):
+def run(queries_path, out_path, model, anchored=False):
     client = make_client()
-    print(f"hyde model: {model}", flush=True)
+    print(f"hyde model: {model} (anchored={anchored})", flush=True)
     rows = [json.loads(l) for l in open(queries_path) if l.strip()]
     empty = 0
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -38,7 +38,7 @@ def run(queries_path, out_path, model):
         for i, q in enumerate(rows, 1):
             query = q["query"]
             try:
-                hyp = generate_hypothetical(client, model, query)
+                hyp = generate_hypothetical(client, model, query, anchored=anchored)
             except Exception as e:  # noqa: BLE001 - keep going, record empty
                 print(f"  hyde error: {e}", flush=True)
                 hyp = ""
@@ -54,9 +54,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--queries", default="eval/out/queries.jsonl")
     ap.add_argument("--out", default="eval/out/hyde_queries.jsonl")
+    ap.add_argument("--anchored", action="store_true",
+                    help="preserve query anchors / invent nothing (EXPERIMENTS §12)")
     args = ap.parse_args()
     model = os.getenv("RAG_HYDE_MODEL", "").strip() or default_model()
-    run(args.queries, args.out, model)
+    run(args.queries, args.out, model, anchored=args.anchored)
 
 
 if __name__ == "__main__":
