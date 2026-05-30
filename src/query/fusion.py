@@ -22,21 +22,24 @@ def _rank_fusion(
     top_k: int,
     k: int,
     p: float,
+    sparse_weight: float = 1.0,
 ) -> VectorStoreQueryResult:
     """Fuse two ranked lists by the power-mean of per-list RRF terms 1/(k+rank).
 
     p=1 -> arithmetic sum (classic RRF); p->inf -> CombMAX (per-doc best term),
-    with the sum of terms as a deterministic tiebreak. Inputs are rank scores, so
-    no score normalization is needed. ids/similarities/nodes stay strictly parallel
-    (ids whose node is absent are dropped), then the top_k are returned.
+    with the sum of terms as a deterministic tiebreak. ``sparse_weight`` scales the
+    sparse list's terms (dense weight fixed at 1.0): >1 favours keyword/sparse hits,
+    countering the densification of summary-embedded docs (EXPERIMENTS §13). Inputs
+    are rank scores, so no score normalization is needed. ids/similarities/nodes stay
+    strictly parallel (ids whose node is absent are dropped), then the top_k returned.
     """
     terms: Dict[str, List[float]] = {}
     node_by_id: Dict[str, BaseNode] = {}
-    for result in (dense_result, sparse_result):
+    for result, weight in ((dense_result, 1.0), (sparse_result, sparse_weight)):
         ids = result.ids or []
         nodes = result.nodes or []
         for rank, _id in enumerate(ids):
-            terms.setdefault(_id, []).append(1.0 / (k + rank + 1))
+            terms.setdefault(_id, []).append(weight * (1.0 / (k + rank + 1)))
             if rank < len(nodes):
                 node_by_id.setdefault(_id, nodes[rank])
 
@@ -71,16 +74,18 @@ def reciprocal_rank_fusion(
     return _rank_fusion(dense_result, sparse_result, top_k=top_k, k=k, p=1.0)
 
 
-def make_rank_fusion(p: float = 1.0, k: int = 60):
+def make_rank_fusion(p: float = 1.0, k: int = 60, sparse_weight: float = 1.0):
     """Build a hybrid_fusion_fn that fuses by power-mean with exponent `p` (>=1).
 
     p=1 == reciprocal_rank_fusion; p=inf == CombMAX. p<1 is rejected (it rewards
     agreement — the wrong direction for un-burying single-modality top hits).
+    sparse_weight (>=0) scales the sparse list's RRF terms; >1 favours keyword hits.
     """
     if p < 1:
         raise ValueError("p must be >= 1 (p<1 rewards agreement, the wrong direction)")
 
     def fusion_fn(dense_result, sparse_result, alpha: float = 0.5, top_k: int = 2, k: int = k):
-        return _rank_fusion(dense_result, sparse_result, top_k=top_k, k=k, p=p)
+        return _rank_fusion(dense_result, sparse_result, top_k=top_k, k=k, p=p,
+                            sparse_weight=sparse_weight)
 
     return fusion_fn

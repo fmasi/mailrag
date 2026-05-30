@@ -103,5 +103,25 @@ class TestPowerMeanFusion(unittest.TestCase):
         self.assertEqual(set(out.ids), {"b", "c"})
 
 
+class TestSparseWeight(unittest.TestCase):
+    def test_weight_1_matches_default_ordering(self):
+        # sparse_weight=1.0 must reproduce classic RRF exactly (regression guard).
+        dense = _result(["a", "b", "c"])
+        sparse = _result(["b", "a", "d"])
+        ref = reciprocal_rank_fusion(dense, sparse, top_k=4, k=60)
+        out = make_rank_fusion(p=1.0, sparse_weight=1.0)(dense, sparse, top_k=4, k=60)
+        self.assertEqual(out.ids, ref.ids)
+
+    def test_up_weighting_sparse_rescues_a_sparse_only_hit(self):
+        # 'd' is dense-rank-0 only; 'g' is sparse-rank-0 only. At weight 1 they tie
+        # (dense leg seen first -> 'd' first); up-weighting sparse flips 'g' on top.
+        dense = _result(["d"])
+        sparse = _result(["g"])
+        eq = make_rank_fusion(p=1.0, sparse_weight=1.0)(dense, sparse, top_k=2, k=60)
+        self.assertEqual(eq.ids, ["d", "g"])
+        up = make_rank_fusion(p=1.0, sparse_weight=2.0)(dense, sparse, top_k=2, k=60)
+        self.assertEqual(up.ids[0], "g")
+
+
 if __name__ == "__main__":
     unittest.main()
