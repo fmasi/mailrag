@@ -55,16 +55,23 @@ def run(queries_path, selection_path, blacklist, distractor_threads, max_emails,
     paths = []
     for t in chosen:
         paths.extend(by_thread[t])
+    gold_email_count = len(paths)
+    if gold_email_count > max_emails:
+        print(f"WARNING: gold threads alone = {gold_email_count} emails > "
+              f"--max-emails={max_emails}; keeping ALL gold emails (slice exceeds cap).",
+              flush=True)
     for t in distractor_pool[:distractor_threads]:
         if len(paths) >= max_emails:
             break
         chosen.append(t)
         paths.extend(by_thread[t])
 
-    paths = paths[:max_emails]
+    # Cap only the distractor tail; gold emails are never dropped.
+    paths = paths[:max(max_emails, gold_email_count)]
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as fh:
         fh.write("\n".join(paths) + "\n")
+    print(f"gold emails: {gold_email_count}  total slice emails: {len(paths)}", flush=True)
     print(f"slice: {len(chosen)} threads, {len(paths)} emails -> {out_path}", flush=True)
 
 
