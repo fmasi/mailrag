@@ -83,6 +83,8 @@ def make_rank_fusion(p: float = 1.0, k: int = 60, sparse_weight: float = 1.0):
     """
     if p < 1:
         raise ValueError("p must be >= 1 (p<1 rewards agreement, the wrong direction)")
+    if sparse_weight < 0:
+        raise ValueError("sparse_weight must be >= 0")
 
     def fusion_fn(dense_result, sparse_result, alpha: float = 0.5, top_k: int = 2, k: int = k):
         return _rank_fusion(dense_result, sparse_result, top_k=top_k, k=k, p=p,

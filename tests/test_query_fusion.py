@@ -112,6 +112,10 @@ class TestSparseWeight(unittest.TestCase):
         out = make_rank_fusion(p=1.0, sparse_weight=1.0)(dense, sparse, top_k=4, k=60)
         self.assertEqual(out.ids, ref.ids)
 
+    def test_negative_sparse_weight_rejected(self):
+        with self.assertRaises(ValueError):
+            make_rank_fusion(sparse_weight=-1.0)
+
     def test_up_weighting_sparse_rescues_a_sparse_only_hit(self):
         # 'd' is dense-rank-0 only; 'g' is sparse-rank-0 only. At weight 1 they tie
         # (dense leg seen first -> 'd' first); up-weighting sparse flips 'g' on top.
