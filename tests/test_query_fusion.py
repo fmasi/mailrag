@@ -62,29 +62,26 @@ class TestPowerMeanFusion(unittest.TestCase):
         for a, b in zip(out.similarities, ref.similarities):
             self.assertAlmostEqual(a, b)
 
-    def test_p_inf_vs_p1_max_outweighs_sum(self):
-        # At p=1 (sum), a doc with two weak terms can beat one strong + one absent.
-        # At p=inf (max), the strong term wins (best rank from any list).
-        dense = _result(["a", "b", "c"])  # a=rank0, b=rank1
-        sparse = _result(["b", "d"])      # b=rank0, d=rank1
-        # a: sum=1/61, max=1/61 (one list only)
-        # b: sum=1/61+1/61=2/61, max=1/61 (two lists)
-        # At p=1: b wins (larger sum)
-        # At p=inf: a and b tie on max; b wins tiebreak (larger sum)
-        p1 = make_rank_fusion(p=1.0)(dense, sparse, top_k=4, k=60)
-        pinf = make_rank_fusion(p=float("inf"))(dense, sparse, top_k=4, k=60)
-        self.assertEqual(p1.ids[0], "b")  # b is stronger (sum)
-        self.assertEqual(pinf.ids[0], "b")  # b wins tiebreak at p=inf too
+    def test_buried_single_list_hit_rescued_at_high_p(self):
+        # m is mediocre in BOTH lists (rank1 each); g is the TOP hit of one list only.
+        # p=1 (sum): m's two terms beat g's one -> m ABOVE g.
+        # p=inf (max): g's stronger single term beats m -> g ABOVE m (rescued). FLIP.
+        dense = _result(["f", "m"])     # f rank0, m rank1
+        sparse = _result(["g", "m"])    # g rank0, m rank1
+        p1 = make_rank_fusion(p=1.0)(dense, sparse, top_k=5, k=60)
+        pinf = make_rank_fusion(p=float("inf"))(dense, sparse, top_k=5, k=60)
+        self.assertLess(p1.ids.index("m"), p1.ids.index("g"))      # m above g at p=1
+        self.assertLess(pinf.ids.index("g"), pinf.ids.index("m"))  # g above m at p=inf
 
-    def test_score_monotonic_in_p_for_buried_hit(self):
-        dense = _result(["x", "y", "z", "w"])
-        sparse = _result(["g", "x"])
-        pos = {}
+    def test_buried_hit_rank_improves_monotonically_in_p(self):
+        dense = _result(["f", "m"])
+        sparse = _result(["g", "m"])
+        idx = []
         for p in (1.0, 2.0, 10.0, float("inf")):
-            out = make_rank_fusion(p=p)(dense, sparse, top_k=4, k=60)
-            pos[p] = out.ids.index("g")
-        ranks = [pos[p] for p in (1.0, 2.0, 10.0, float("inf"))]
-        self.assertEqual(ranks, sorted(ranks, reverse=True))
+            out = make_rank_fusion(p=p)(dense, sparse, top_k=5, k=60)
+            idx.append(out.ids.index("g"))
+        self.assertEqual(idx, sorted(idx, reverse=True))   # g's index never worsens as p grows
+        self.assertLess(idx[-1], idx[0])                   # and is strictly better at p=inf than p=1
 
     def test_p_inf_tiebreak_by_sum(self):
         # both "g" and "h" tie on max term (each rank 0 in one list); "h" is also
