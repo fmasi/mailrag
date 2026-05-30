@@ -427,6 +427,18 @@ all*. The classification logic is unit-tested (`src/eval/coverage_diag.py`); dri
 - **Tighten the eval** — filter meta/degenerate generated queries and extend the `bad_query`
   guard before the next coverage measurement. → **#18.**
 
+**Eval refresh (#18, 2026-05-30).** Replaced the 45-query set with **120 validated** queries
+(48 terse / 48 content / 24 spanning) generated with a hardened prompt + an LLM validator gate
+(`src/eval/query_validator.py`); the validator rejected ~24% of candidates. On the clean set the
+hard-miss bucket **no longer contains any meta/artifact queries**, and the picture sharpens:
+coverage **82%** (C′, top-3) · budget 6 (5%) · fusion 8 (7%) · hard 8 (7%). The hard core is now
+**overwhelmingly terse-reply discriminability** — 7 of 8 hard misses are *terse* questions
+("what did X decide/say"), all `vocab_gap`, **zero index/chunking**, oracle body-rank 0 every
+time (the answer email is findable; the short reply just can't rank). C′'s coverage edge also
+**grew on the cleaner set** (covers 98 vs C's 89, +9 — was +2 on the 45-set), reinforcing "keep
+C′". This 82% is the trustworthy baseline for #17 (widen-N recovers ~4 of 6 budget misses) and
+#16 (query-side help for the terse hard core).
+
 ---
 
 ## Open threads / next experiments
