@@ -441,6 +441,55 @@ C′". This 82% is the trustworthy baseline for #17 (widen-N recovers ~4 of 6 bu
 
 ---
 
+## 11. Tunable fusion (power-mean) + widen-N — end-to-end (#17, 2026-05-30)
+
+§10 pinpointed RRF-**sum** burying strong single-modality hits (7/8 fusion misses = gold thread
+at sparse rank 0, drowned by mediocre-in-both siblings). We implemented a **tunable power-mean
+fusion** over the per-list RRF terms `1/(k+rank)` — `p=1` is exactly RRF-sum, `p→∞` is CombMAX,
+the continuum is a single tunable knob (`src/query/fusion.py: make_rank_fusion`). Evaluated it +
+widen-N **end-to-end** on the clean 120-query set (§ eval-refresh): coverage (cheap p-sweep),
+context tokens, and answer quality (local **26b@6bit** answer-gen, **26b@8bit** judge,
+answer-vs-gold 0–3).
+
+**Stage-1 coverage p-sweep (C′, N=3, n=120):** coverage rises only modestly with p — `p=1` 82%
+→ `p=∞` **84% (+2pts)**; `p=∞` *regresses* the tight N=1 budget (69%→66%) — the tie/churn
+CombMAX warning, realised. Widen-N is a comparable lever (N3→N5 ≈ +3pts at any p).
+
+**Stage-2 end-to-end arm table:**
+
+| arm | coverage | avg tokens | grade (0–3) |
+|---|---|---|---|
+| no_context (anchor) | – | 0 | 0.10 |
+| answer_only (anchor) | – | 172 | 1.99 |
+| C′ thread N3, RRF sum (baseline) | 82% | 6,150 | 1.54 |
+| C′ thread N3, max-fusion | 84% | 6,730 | 1.59 |
+| C′ thread N5, max-fusion | 87% | 11,910 | 1.61 |
+
+**Paired (per-query) analysis — the gains are within noise:**
+- **max-fusion vs baseline (N3):** only **8 of 120** queries changed grade — 5 better, 3 worse
+  (**net +2**, meanΔ +0.05). It *reshuffles* rather than uniformly lifts: rescues some buried
+  hits (3 queries +3 grade) but **demotes some terse answer-threads** (2 queries −2 grade).
+- **widen-N5 vs N3:** **net −1 on grade** (2 wins / 3 losses) for ~2× the tokens; spanning grade
+  drops (1.83→1.79). The extra threads add distraction. Counterproductive.
+
+**Verdict — a negative result:**
+- **Retrieval-knob tuning is second-order on this corpus** (reconfirms §9/§10). Neither
+  max-fusion nor widen-N gives a meaningful end-to-end answer-quality gain: the fusion fix is a
+  near-wash (helps and hurts roughly equally), and widening N to 5 is net-negative for double the
+  tokens.
+- **Keep RRF (`p=1`) as the default; reject widen-N→5.** We do not flip the default on a
+  within-noise, partly-regressive (N=1) change.
+- **The tunable combiner ships as available, corpus-tunable infrastructure** (not the default):
+  `make_rank_fusion(p)` is a clean, tested knob anyone tuning mailrag for *their own* corpus can
+  sweep — on a more lexical/heterogeneous corpus the buried-hit fix may pay off more than here.
+- **The real lever remains query-side (#16).** The threads max-fusion *demoted* were terse —
+  the exact class query expansion / HyDE targets.
+- Caveat: the grade ceiling is low (`answer_only` = 1.99) — even gold-email-only doesn't grade as
+  fully complete (judge strictness + terse-email self-containment), so treat absolute grades as
+  relative, not calibrated.
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
@@ -451,10 +500,14 @@ C′". This 82% is the trustworthy baseline for #17 (widen-N recovers ~4 of 6 bu
   answer model.**
 - ~~**Diagnose the coverage ceiling** (#12)~~ — DONE (§10). The ceiling is a **query→document
   matching** problem, not indexing/chunking (0/6 hard misses are chunk defects; the gold email
-  is retrievable at rank ~0 from its own text). Leads, in priority order:
-  **#16** (query expansion / HyDE — highest-leverage real fix), **#17** (cheap wins: widen
-  thread budget 3→5 + RRF fusion tuning, ~+11% coverage), **#11/#13** (doc-side queryable
-  summaries), **#18** (eval hygiene). **#14 (chunk size) de-prioritised** for coverage.
+  is retrievable at rank ~0 from its own text).
+- ~~**Eval hygiene** (#18)~~ — DONE (§ eval-refresh). 120 validated queries; clean 82% baseline.
+- ~~**Cheap fusion/widen-N wins** (#17)~~ — DONE (§11). **Negative result:** tunable power-mean
+  fusion + widen-N are within-noise / counterproductive end-to-end here; kept RRF default, shipped
+  `make_rank_fusion` as a corpus-tunable knob. Retrieval-knob tuning is second-order.
+- **▶ LEAD: query-side retrieval (#16)** — query expansion / HyDE for the **terse hard core**
+  (the queries every prior lever left on the table). The highest-leverage remaining fix.
+  Secondary: **#11/#13** (doc-side queryable summaries). **#14 (chunk size) de-prioritised.**
 - ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
   by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain
