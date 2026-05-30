@@ -6,7 +6,7 @@
 
 [![Test Suite](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml/badge.svg)](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
 ## What it does
 
@@ -164,4 +164,5 @@ finds the token but misses paraphrases; **hybrid + RRF gets both.** Multi-query 
 
 ## License
 
-[MIT](LICENSE)
+[Apache 2.0](LICENSE) — see also [`NOTICE`](NOTICE). Copyright © 2026 Frederic Masi.
+If you build on this work (code or method), please preserve the attribution in `NOTICE`.
