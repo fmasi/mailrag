@@ -369,6 +369,66 @@ Findings:
 
 ---
 
+## 10. Coverage-miss diagnostic — why the answer thread isn't retrieved (#12, 2026-05-30)
+
+§9 located the ceiling at **retrieval coverage** (~76% on C′ + top-3 threads): for ~24% of
+queries the answer-bearing thread never reaches the answer model. This diagnostic traces
+*where* each gold thread sinks and *why*. Method: for all 45 labeled queries, find the best
+rank of the gold thread under **dense-only, sparse-only, and hybrid** retrieval on C and C′
+(deep top-200), bucket the cause, and on the hard core run an **oracle escalation** —
+re-query with the gold email's own subject/body to test whether the email is retrievable *at
+all*. The classification logic is unit-tested (`src/eval/coverage_diag.py`); driver is
+`scripts/eval/diagnose_coverage.py`. The diagnostic reproduces the §9 number exactly
+(covered 34/45 = 76%), which validates the buckets.
+
+**Cause split (C′, top-3 threads, n=45):**
+
+| Bucket | n | % | meaning | lever |
+|---|---|---|---|---|
+| covered | 34 | 76% | gold thread in top-3 | — |
+| budget | 3 | 7% | in the top-10 pool but past the 3rd thread | widen N / rerank |
+| fusion | 2 | 4% | dense **or** sparse ranks it well; RRF buries it | fusion tuning |
+| hard | 6 | 13% | deep/absent in **both** single modes | representation |
+
+- **The ceiling is a query→document *matching* problem, not an indexing/chunking one.** All 6
+  hard misses are `vocab_gap`; **zero** are `index_or_chunking`. The oracle is unambiguous:
+  querying with the gold email's own *body* surfaces its thread at **rank 0 in 5 of 6** hard
+  misses (rank 3 in the 6th). The answer email is perfectly indexed and findable — the
+  natural-language *question* simply fails to rank it. **→ de-prioritises #14 (chunk size):
+  chunking is not the lever for these misses.**
+- **It's discriminability, not vocabulary absence.** Hard misses have *high* query↔thread
+  lexical overlap (mean **0.62** vs 0.75 for covered) — the query words *are* in the thread.
+  They are also in many *other* threads (recurring terms like "confirmed", customer/product
+  names), so vocabulary-similar siblings out-rank the gold thread. The email body wins as a
+  query because it is far more specific than the question.
+- **Budget misses are one-rank near-misses.** The 3 sit at distinct-thread ranks 3, 3, 5 (the
+  budget is 3). Widening top-3 → top-5 recovers 2 of 3 immediately — this *is* the 76%→84%
+  gap the §9 top-N sweep showed. Near-free coverage (cost: a few k tokens).
+- **Fusion misses are RRF dilution.** One: sparse ranks the gold thread at 6 but dense never
+  returns it (>200) and RRF pushes the fused result to 58. The other: sparse 10 / dense 29 →
+  fused 14. When one modality has a strong hit and the other is blind, RRF dilutes it; a
+  min-rank fallback or weight tuning recovers both.
+- **C′ net-helps coverage.** Embedded summaries cover **34 vs C's 32** (C′ rescues 3 — two
+  fusion→covered, one hard→covered — and costs 1; net +2 / +4%). Corroborates §9's "keep C′".
+- **Eval-hygiene caveat.** ≥2 of the 6 hard misses are meta/degenerate *generated* queries
+  ("what was the subject of the email thread / of the meeting") — not real product questions.
+  The automated `bad_query` guard flagged 0 because it keys on the oracle *failing*, and here
+  the oracle *succeeds*; these are mislabeled `vocab_gap`. The genuinely retrieval-fixable hard
+  core is therefore **~4, not 6**. N=45 is small — treat sub-bucket percentages as directional.
+
+**Verdict — where the leverage is:**
+- **Cheap, non-ML wins first (~5 of 11 misses, ~76%→~87% coverage):** widen the thread budget
+  (3→5) and tune/guard RRF fusion. No model or index changes. → **#17.**
+- **The real ceiling is query↔document matching.** The oracle proves a better *query* retrieves
+  the gold thread at rank 0, so the highest-leverage real fix is **query-side**: query expansion
+  / HyDE / multi-query — make the query look like the answer. → **#16** (filed as the new lead).
+  Doc-side queryable summaries (#11/#13) attack the same gap from the other end.
+- **De-prioritise #14 (chunk size)** for coverage — 0/6 hard misses are chunking defects.
+- **Tighten the eval** — filter meta/degenerate generated queries and extend the `bad_query`
+  guard before the next coverage measurement. → **#18.**
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
@@ -376,8 +436,13 @@ Findings:
   parent-id segmentation).
 - ~~**Larger labeled eval set**~~ — DONE (§9). Settled it: keep C′, C′+top-1–3 threads, rerank
   off, a small model suffices. **New lead: retrieval coverage (~76%) is the ceiling, not the
-  answer model** — see #12 (diagnose the misses), #11 (per-thread summaries), #13 (summary
-  prompt), #14 (chunk size).
+  answer model.**
+- ~~**Diagnose the coverage ceiling** (#12)~~ — DONE (§10). The ceiling is a **query→document
+  matching** problem, not indexing/chunking (0/6 hard misses are chunk defects; the gold email
+  is retrievable at rank ~0 from its own text). Leads, in priority order:
+  **#16** (query expansion / HyDE — highest-leverage real fix), **#17** (cheap wins: widen
+  thread budget 3→5 + RRF fusion tuning, ~+11% coverage), **#11/#13** (doc-side queryable
+  summaries), **#18** (eval hygiene). **#14 (chunk size) de-prioritised** for coverage.
 - ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
   by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain
