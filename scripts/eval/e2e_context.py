@@ -6,14 +6,15 @@ For each query, dumps a row {query, category, answer_message_id, gold_text,
 contexts:{setup: text}} to eval/out/e2e/contexts.jsonl. Outputs contain real
 corpus content -> eval/out (gitignored).
 
-Setups:
-  no_context        ""                       (lower-bound anchor)
-  answer_only       the gold answer email     (upper-bound anchor)
-  plain_C           top-10 emails (no thread) (work-rag, no rerank)
-  C_thread_n1       top-1 expanded thread      (work-rag)
-  C_thread_n3       top-3 expanded threads
-  C_thread_all      all expanded threads
-  Cprime_thread_n3  top-3 expanded threads     (work-rag-ctx; C' ranking edge at tight budget)
+Setups (5 finalist arms):
+  no_context        ""                          (lower-bound anchor)
+  answer_only       the gold answer email        (upper-bound anchor)
+  Cprime_thread_n3  top-3 threads, RRF sum       (C', baseline p=1)
+  Cprime_pm_n3      top-3 threads, power-mean    (C', exponent=--fusion-p)
+  Cprime_pm_n5      top-5 threads, power-mean    (C', exponent=--fusion-p)
+
+  The --fusion-p flag controls the power-mean exponent for the pm arms
+  (default: inf = max-score fusion).
 
 Run on the HOST (rag env; QDRANT_URL set):
   QDRANT_URL=http://localhost:6333 conda run -n rag --no-capture-output \
