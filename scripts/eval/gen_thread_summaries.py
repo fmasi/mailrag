@@ -17,7 +17,7 @@ Run on the HOST (rag env; LM Studio loaded with the summary model):
 import argparse
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -57,7 +57,11 @@ def _tid(e):
 
 def _dkey(e):
     d = getattr(e, "date", None)
-    return d if isinstance(d, datetime) else datetime.min
+    if isinstance(d, datetime):
+        if d.tzinfo is not None:
+            d = d.astimezone(timezone.utc).replace(tzinfo=None)
+        return d
+    return datetime.min
 
 
 def run(slice_path, out_path, mode, model):
@@ -96,10 +100,10 @@ def run(slice_path, out_path, mode, model):
         preceding = []
         for e in thread:
             sha = file_sha256(e.source_id)
+            ed = _as_dict(e)
             if cache.has(sha):
                 counts["cached"] += 1
             else:
-                ed = _as_dict(e)
                 prompt = (
                     build_thread_aware_prompt(ed, preceding)
                     if mode == "thread"
@@ -126,7 +130,7 @@ def run(slice_path, out_path, mode, model):
                     counts["error"] += 1
             # Append the dict (not the NormalizedEmail) so _format_preceding can
             # call .get() safely on it.
-            preceding.append(_as_dict(e))
+            preceding.append(ed)
             if bar is not None:
                 bar.update(1)
                 bar.set_postfix(**counts, refresh=False)
