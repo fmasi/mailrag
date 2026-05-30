@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from src.ingest.embedder import BgeM3Embedder
 from src.query.hybrid import build_hybrid_searcher, _qdrant_client
+from src.query.fusion import make_rank_fusion
 from src.query.thread_expand import _node_metadata, fetch_thread_payloads, group_into_emails
 from src.eval.coverage_diag import (
     best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap,
@@ -85,18 +86,22 @@ def _ranks_for(searchers, query, gtid, gmid):
     }
 
 
-def run(queries_path, out_path):
+def run(queries_path, out_path, fusion_p):
     print("loading bge-m3 (silent ~1 min)...", flush=True)
     embedder = BgeM3Embedder()
     client = _qdrant_client()
 
-    def modes(coll):
-        return {m: build_hybrid_searcher(
-            coll, client=client, embedder=embedder, mode=m, rerank=False,
-            dense_top_k=DEEP_K, sparse_top_k=DEEP_K, top_n=DEEP_K)
-            for m in ("dense", "sparse", "hybrid")}
+    def modes(coll, p):
+        fusion_fn = make_rank_fusion(p=p)
+        out = {}
+        for m in ("dense", "sparse", "hybrid"):
+            out[m] = build_hybrid_searcher(
+                coll, client=client, embedder=embedder, mode=m, rerank=False,
+                dense_top_k=DEEP_K, sparse_top_k=DEEP_K, top_n=DEEP_K,
+                fusion_fn=(fusion_fn if m == "hybrid" else None))
+        return out
 
-    s_c, s_cp = modes(C), modes(CP)
+    s_c, s_cp = modes(C, fusion_p), modes(CP, fusion_p)
 
     with open(queries_path) as fh:
         queries = [json.loads(l) for l in fh if l.strip()]
@@ -144,7 +149,7 @@ def run(queries_path, out_path):
             print(f"  {bucket:8s} {query[:48]!r}", flush=True)
 
     total = sum(hist.values())
-    print(f"\n=== cause histogram (C', N={N}) ===", flush=True)
+    print(f"\n=== cause histogram (C', N={N}, p={fusion_p}) ===", flush=True)
     for b in ("covered", "budget", "fusion", "hard"):
         c = hist.get(b, 0)
         pct = (100 * c / total) if total else 0.0
@@ -156,8 +161,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--queries", default="eval/out/queries.jsonl")
     ap.add_argument("--out", default="eval/out/coverage_diag.jsonl")
+    ap.add_argument("--fusion-p", type=float, default=1.0,
+                    help="power-mean exponent for hybrid fusion (1=RRF sum, inf=max)")
     args = ap.parse_args()
-    run(args.queries, args.out)
+    run(args.queries, args.out, args.fusion_p)
 
 
 if __name__ == "__main__":
