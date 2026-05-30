@@ -6,15 +6,12 @@ For each query, dumps a row {query, category, answer_message_id, gold_text,
 contexts:{setup: text}} to eval/out/e2e/contexts.jsonl. Outputs contain real
 corpus content -> eval/out (gitignored).
 
-Setups (5 finalist arms):
-  no_context        ""                          (lower-bound anchor)
-  answer_only       the gold answer email        (upper-bound anchor)
-  Cprime_thread_n3  top-3 threads, RRF sum       (C', baseline p=1)
-  Cprime_pm_n3      top-3 threads, power-mean    (C', exponent=--fusion-p)
-  Cprime_pm_n5      top-5 threads, power-mean    (C', exponent=--fusion-p)
-
-  The --fusion-p flag controls the power-mean exponent for the pm arms
-  (default: inf = max-score fusion).
+Setups (5 HyDE arms):
+  no_context              ""                          (lower-bound anchor)
+  answer_only             the gold answer email        (upper-bound anchor)
+  Cprime_n3_raw           top-3 threads, raw query     (C', baseline RRF)
+  Cprime_n3_hyde_pure     top-3 threads, hypothetical only  (C', HyDE pure)
+  Cprime_n3_hyde_augment  top-3 threads, query+hypothetical (C', HyDE augment)
 
 Run on the HOST (rag env; QDRANT_URL set):
   QDRANT_URL=http://localhost:6333 conda run -n rag --no-capture-output \
@@ -31,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from src.ingest.embedder import BgeM3Embedder
 from src.query.hybrid import build_hybrid_searcher, _qdrant_client
 from src.query.thread_expand import group_into_emails, render_thread, fetch_thread_payloads  # noqa: F401
-from src.query.fusion import make_rank_fusion
+from src.query.hyde import combine_query
 
 C, CP = "work-rag", "work-rag-ctx"
 
@@ -64,18 +61,29 @@ def _gold_text(client, message_id):
     return f"Subject: {e.subject}\n\n{e.body}".strip()
 
 
-def run(queries_path, out_path, fusion_p):
+def _load_hyde(path):
+    """{query: hypothetical} from a hyde_queries.jsonl, or {} if path is falsy."""
+    if not path:
+        return {}
+    out = {}
+    for line in open(path):
+        if line.strip():
+            r = json.loads(line)
+            out[r["query"]] = r.get("hypothetical", "")
+    return out
+
+
+def run(queries_path, out_path, hyde_file):
     print("loading bge-m3 (silent ~1 min)...", flush=True)
     embedder = BgeM3Embedder()
     client = _qdrant_client()
 
-    def mk(collection, fusion_fn=None):
-        return build_hybrid_searcher(
-            collection, client=client, embedder=embedder, mode="hybrid",
-            rerank=False, dense_top_k=20, sparse_top_k=20, top_n=10, fusion_fn=fusion_fn)
+    # C', hybrid, RRF default (the recommended stack); HyDE only changes the query string.
+    s_cp = build_hybrid_searcher(
+        CP, client=client, embedder=embedder, mode="hybrid",
+        rerank=False, dense_top_k=20, sparse_top_k=20, top_n=10)
 
-    s_cp = mk(CP)
-    s_cp_pm = mk(CP, make_rank_fusion(p=fusion_p))   # power-mean fusion on C'
+    hyde_map = _load_hyde(hyde_file)
 
     with open(queries_path) as fh:
         queries = [json.loads(l) for l in fh if l.strip()]
@@ -85,14 +93,16 @@ def run(queries_path, out_path, fusion_p):
         for q in queries:
             query = q["query"]
             gold = _gold_text(client, q["answer_message_id"])
-            ctxs_cp = s_cp.search_threads(query)
-            ctxs_cp_pm = s_cp_pm.search_threads(query)
+            hyp = hyde_map.get(query, "")
+            raw_ctx = _join_threads(s_cp.search_threads(query), 3)
+            pure_ctx = _join_threads(s_cp.search_threads(combine_query(query, hyp, "pure")), 3)
+            aug_ctx = _join_threads(s_cp.search_threads(combine_query(query, hyp, "augment")), 3)
             contexts = {
                 "no_context": "",
                 "answer_only": gold,
-                "Cprime_thread_n3": _join_threads(ctxs_cp, 3),     # baseline (p=1)
-                "Cprime_pm_n3": _join_threads(ctxs_cp_pm, 3),      # power-mean, top-3
-                "Cprime_pm_n5": _join_threads(ctxs_cp_pm, 5),      # power-mean, top-5
+                "Cprime_n3_raw": raw_ctx,          # baseline (raw query)
+                "Cprime_n3_hyde_pure": pure_ctx,   # search with hypothetical only
+                "Cprime_n3_hyde_augment": aug_ctx, # search with query + hypothetical
             }
             out.write(json.dumps({
                 "query": query, "category": q["category"],
@@ -107,10 +117,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--queries", default="eval/out/queries.jsonl")
     ap.add_argument("--out", default="eval/out/e2e/contexts.jsonl")
-    ap.add_argument("--fusion-p", type=float, default=float("inf"),
-                    help="power-mean exponent for the C' fusion arms (inf=max)")
+    ap.add_argument("--hyde-file", default="eval/out/hyde_queries.jsonl")
     args = ap.parse_args()
-    run(args.queries, args.out, args.fusion_p)
+    run(args.queries, args.out, args.hyde_file)
 
 
 if __name__ == "__main__":

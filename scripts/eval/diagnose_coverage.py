@@ -27,12 +27,25 @@ from src.query.thread_expand import _node_metadata, fetch_thread_payloads, group
 from src.eval.coverage_diag import (
     best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap,
     oracle_root_cause, is_bad_query)
+from src.query.hyde import combine_query
 
 C, CP = "work-rag", "work-rag-ctx"
 DEEP_K = 200          # search/rank-trace depth: how far down each ranked list we look
                       # (distinct from K below, which is the "good rank" cutoff for fusion)
 TOP_HITS, N, K = 10, 3, 20   # expansion pool / thread budget / single-mode "good rank"
 OVERLAP_BAD = 0.15    # query<->thread overlap below this + hard + oracle-fail => bad query
+
+
+def _load_hyde(path):
+    """{query: hypothetical} from a hyde_queries.jsonl, or {} if path is falsy."""
+    if not path:
+        return {}
+    out = {}
+    for line in open(path):
+        if line.strip():
+            r = json.loads(line)
+            out[r["query"]] = r.get("hypothetical", "")
+    return out
 
 
 def _hits(searcher, query):
@@ -86,7 +99,7 @@ def _ranks_for(searchers, query, gtid, gmid):
     }
 
 
-def run(queries_path, out_path, fusion_p):
+def run(queries_path, out_path, fusion_p, hyde_mode, hyde_file):
     print("loading bge-m3 (silent ~1 min)...", flush=True)
     embedder = BgeM3Embedder()
     client = _qdrant_client()
@@ -102,6 +115,7 @@ def run(queries_path, out_path, fusion_p):
         return out
 
     s_c, s_cp = modes(C, fusion_p), modes(CP, fusion_p)
+    hyde_map = _load_hyde(hyde_file) if hyde_mode != "off" else {}
 
     with open(queries_path) as fh:
         queries = [json.loads(l) for l in fh if l.strip()]
@@ -113,8 +127,9 @@ def run(queries_path, out_path, fusion_p):
             query, gtid, gmid = q["query"], q["thread_id"], q["answer_message_id"]
             gold = _gold_email(client, gmid)
             thread_text = _thread_text(client, gtid)
-            ranks_c = _ranks_for(s_c, query, gtid, gmid)
-            ranks_cp = _ranks_for(s_cp, query, gtid, gmid)
+            search_q = combine_query(query, hyde_map.get(query, ""), hyde_mode) if hyde_mode != "off" else query
+            ranks_c = _ranks_for(s_c, search_q, gtid, gmid)
+            ranks_cp = _ranks_for(s_cp, search_q, gtid, gmid)
             bucket = classify_miss(ranks_cp, TOP_HITS, N, K)   # headline = C'
 
             row = {
@@ -149,7 +164,7 @@ def run(queries_path, out_path, fusion_p):
             print(f"  {bucket:8s} {query[:48]!r}", flush=True)
 
     total = sum(hist.values())
-    print(f"\n=== cause histogram (C', N={N}, p={fusion_p}) ===", flush=True)
+    print(f"\n=== cause histogram (C', N={N}, p={fusion_p}, hyde={hyde_mode}) ===", flush=True)
     for b in ("covered", "budget", "fusion", "hard"):
         c = hist.get(b, 0)
         pct = (100 * c / total) if total else 0.0
@@ -163,8 +178,11 @@ def main():
     ap.add_argument("--out", default="eval/out/coverage_diag.jsonl")
     ap.add_argument("--fusion-p", type=float, default=1.0,
                     help="power-mean exponent for hybrid fusion (1=RRF sum, inf=max)")
+    ap.add_argument("--hyde", choices=["off", "pure", "augment"], default="off",
+                    help="query-side transform: off | pure (search hypothetical) | augment (query+hypothetical)")
+    ap.add_argument("--hyde-file", default="eval/out/hyde_queries.jsonl")
     args = ap.parse_args()
-    run(args.queries, args.out, args.fusion_p)
+    run(args.queries, args.out, args.fusion_p, args.hyde, args.hyde_file)
 
 
 if __name__ == "__main__":
