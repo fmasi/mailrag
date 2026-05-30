@@ -48,6 +48,9 @@ def main(argv=None):
     ap.add_argument("--embed-batch", type=int, default=32)
     ap.add_argument("--upsert-batch", type=int, default=256)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--only-files", default=None,
+                    help="path to a newline list of .eml paths; restrict the build "
+                         "to their intersection with the selection (spike slice)")
     ap.add_argument("--profile", action="store_true", help="report cleaned body token lengths + suggest chunk_size, then exit")
     ap.add_argument("--recreate", action="store_true")
     ap.add_argument("--embed-summary", action="store_true",
@@ -60,6 +63,10 @@ def main(argv=None):
 
     sel = json.load(open(args.selection))
     kept, skipped = resolve_index_files(sel["root"], sel["selection_rules"], args.blacklist)
+    if args.only_files:
+        only = {l.strip() for l in open(args.only_files) if l.strip()}
+        kept = [p for p in kept if p in only]
+        print(f"--only-files: restricted to {len(kept)} of {len(only)} slice paths")
     if args.limit:
         kept = kept[: args.limit]
     print(f"selected {len(kept)} file(s); {len(skipped)} blacklisted")
