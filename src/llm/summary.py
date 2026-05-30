@@ -73,14 +73,17 @@ Return ONLY this JSON (no markdown, no extra text):
 
 
 def _format_preceding(preceding, per_email_chars: int) -> str:
-    """Render the earlier-thread context block (empty string if no preceding)."""
+    """Render the earlier-thread context block (empty string if no preceding).
+
+    Each preceding message body is truncated to ``per_email_chars`` characters.
+    """
     if not preceding:
         return ""
     lines = ["EARLIER messages in this thread (context only, oldest first):"]
     for e in preceding:
         body = (e.get("body") or "").strip()
         if len(body) > per_email_chars:
-            body = body[:per_email_chars] + " […]"
+            body = body[:per_email_chars] + " […truncated]"
         sender = (e.get("sender") or "")[:120]
         date = e.get("date") or "unknown"
         lines.append(f"- From {sender} ({date}): {body}")
@@ -96,7 +99,7 @@ def build_thread_aware_prompt(email: Dict[str, Any], preceding,
     design (no future context); emits the same schema as :func:`build_prompt`.
     Only the last ``max_preceding`` messages are shown, to bound densification.
     """
-    pre = list(preceding)[-max_preceding:] if preceding else []
+    pre = list(preceding)[-max_preceding:] if (preceding and max_preceding > 0) else []
     body = (email.get("body") or "").strip()
     if len(body) > body_chars:
         body = body[:body_chars] + " […truncated]"

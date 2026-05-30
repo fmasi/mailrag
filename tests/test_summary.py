@@ -40,6 +40,12 @@ class TestBuildThreadAwarePrompt(unittest.TestCase):
         self.assertIn("MSG8", p)
         self.assertNotIn("MSG0", p)
 
+    def test_max_preceding_zero_suppresses_all_context(self):
+        pre = [self._email(body="SHOULD_NOT_APPEAR")]
+        p = build_thread_aware_prompt(self._email(), pre, max_preceding=0)
+        self.assertNotIn("SHOULD_NOT_APPEAR", p)
+        self.assertNotIn("EARLIER messages in this thread (context only", p)
+
 
 if __name__ == "__main__":
     unittest.main()
