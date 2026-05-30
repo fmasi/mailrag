@@ -490,6 +490,69 @@ CombMAX warning, realised. Widen-N is a comparable lever (N3→N5 ≈ +3pts at a
 
 ---
 
+## 12. Query-side retrieval — HyDE / anchored query expansion (#16, 2026-05-30)
+
+§10/§11 left the query→document **matching** gap as the lead. The query-side bet (HyDE): instead
+of searching with the user's question, generate a *hypothetical answer* and search with that — it
+"looks like" a real answer email, so it should match the gold better, especially for terse
+request→reply threads where no single email carries the query's vocabulary. Pure logic in
+`src/query/hyde.py` (prompt + fail-safe `combine_query`); hypotheticals pre-generated once
+(`scripts/eval/gen_hyde.py`) and consumed by the coverage diagnostic via `--hyde {off,pure,augment}`
+(`pure` = search the hypothetical alone; `augment` = query + hypothetical).
+
+**This stopped at Stage-1 (coverage), because Stage-1 is decisively negative** — no configuration
+beats the raw-query baseline, so there is nothing for an end-to-end Stage-2 to recover (you cannot
+answer from a thread retrieval never surfaced).
+
+**Two prompts, two failure modes.** The first finding was that a *from-scratch* hypothetical
+**fabricates competing specifics** (invented names/dates/times) that drag retrieval toward sibling
+threads. So we added an **anchored** prompt (`build_hyde_prompt_anchored`): reshape the query into
+answer-surface form, keep every real anchor verbatim, invent nothing. To rule out
+"the generator is just too weak," we ran a **generator-quality ladder** spanning ~3 orders of
+magnitude of model size — local **e4b** (4B), **Sonnet**, **Opus** (cloud, ~$1.50 total for 120×2;
+the only cloud spend, query strings only).
+
+**Stage-1 coverage (C′, N=3, n=120; terse = the 48 request→reply queries HyDE targets):**
+
+| generator · prompt · mode | cov@N3 | cov@N5 | terse@N3 |
+|---|---|---|---|
+| **off — raw query (baseline)** | **82%** | **85%** | **77%** |
+| e4b · from-scratch · pure | 56% | 63% | 50% |
+| e4b · from-scratch · augment | 73% | 75% | 65% |
+| e4b · anchored · pure | 75% | 79% | 73% |
+| e4b · anchored · augment | 77% | 81% | 77% |
+| Sonnet · anchored · pure | 71% | 76% | 69% |
+| Sonnet · anchored · augment | 74% | 78% | 71% |
+| **Opus · anchored · pure** (best HyDE) | **78%** | 81% | 77% |
+| Opus · anchored · augment | 76% | 81% | 73% |
+
+**Verdict — a negative result, but a sharply diagnostic one:**
+- **No HyDE arm beats the raw query.** Best (Opus · anchored · pure) is **78% (−4 pts)** and only
+  *ties* terse (77%). The conclusion is robust across generator (4B → frontier), prompt, and mode.
+- **The anchored prompt is monotonically better than from-scratch** at every generator (e4b: 56→75
+  pure, 73→77 augment) — it removes the fabrication drift and restores terse to baseline. The idea
+  was right; it just asymptotes *to* the baseline, not past it.
+- **Faithfulness, not capability, is what matters.** Sonnet (anchored) *underperformed* local e4b
+  (anchored) — because it still invented concrete values (a made-up time, a made-up duration); Opus
+  followed "invent nothing" and wrote around unknowns generically, reclaiming the top spot. A
+  better model only helps insofar as it fabricates *less*.
+- **Mechanism (airtight):** this corpus is entity-rich and **specific-fact**. The user's query
+  *already contains the optimal retrieval anchors* (the real names/terms). A hypothetical can only
+  (1) fabricate competing specifics → drift → harm, or (2) faithfully echo the query's anchors plus
+  generic answer-vocab → *approach but never exceed* the raw query, because it adds no new *correct*
+  signal, only dilution. The remaining gap is specific-fact **discriminability**, which the query
+  side cannot manufacture — you would need the actual answer.
+- **Ship decision: do not adopt HyDE on this corpus** (default stays raw-query hybrid retrieval).
+  `build_hyde_prompt` / `build_hyde_prompt_anchored` / `combine_query` / `gen_hyde.py --anchored`
+  stay in-tree as tested apparatus — HyDE may still pay off on a *lexical/open-domain* corpus where
+  queries are keyword-sparse (the opposite regime), aligning with the clone-and-tune-your-own-corpus
+  vision.
+- **This justifies the doc-side lever (#11/#13).** Two opposite-end levers attacked the same gap;
+  the cheap query-side one is now ruled out *with a mechanism*. The fix must make the **documents**
+  more retrievable (thread-aware embedded summaries), not dress up the query.
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
@@ -505,9 +568,16 @@ CombMAX warning, realised. Widen-N is a comparable lever (N3→N5 ≈ +3pts at a
 - ~~**Cheap fusion/widen-N wins** (#17)~~ — DONE (§11). **Negative result:** tunable power-mean
   fusion + widen-N are within-noise / counterproductive end-to-end here; kept RRF default, shipped
   `make_rank_fusion` as a corpus-tunable knob. Retrieval-knob tuning is second-order.
-- **▶ LEAD: query-side retrieval (#16)** — query expansion / HyDE for the **terse hard core**
-  (the queries every prior lever left on the table). The highest-leverage remaining fix.
-  Secondary: **#11/#13** (doc-side queryable summaries). **#14 (chunk size) de-prioritised.**
+- ~~**Query-side retrieval (#16)**~~ — DONE (§12). **Negative result:** HyDE / anchored query
+  expansion never beats the raw query on this entity-rich corpus, confirmed across an e4b→Opus
+  generator ladder. The query already holds the optimal anchors; a hypothetical can only fabricate
+  drift or echo the query. Apparatus kept (`src/query/hyde.py`) for lexical corpora.
+- **▶ LEAD: doc-side queryable summaries (#11/#13)** — the surviving lever. Make the **documents**
+  more retrievable: thread-aware (whole-thread-context) embedded summaries, so terse request→reply
+  threads carry the answer's vocabulary at the unit that gets matched. EXPENSIVE (re-summarize +
+  re-embed ~21.5k emails) → confirm scope with Fred (cloud vs deliberate-local) before building;
+  one pass *per thread* emitting `{is_noise, thread-aware summary}` serves both noise-filtering and
+  C′-embedding (≈1× compute, since threads ≪ emails). **#14 (chunk size) de-prioritised.**
 - ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
   by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain
