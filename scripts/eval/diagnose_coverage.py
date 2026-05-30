@@ -57,6 +57,8 @@ def _gold_email(client, message_id):
 
 def _thread_text(client, thread_id):
     """Concatenated bodies of every email in the gold thread (for query<->thread overlap)."""
+    # C (work-rag) is where the eval queries were generated, so the gold thread is
+    # guaranteed present here regardless of which collection is being diagnosed.
     payloads = fetch_thread_payloads(client, C, [thread_id])
     emails = group_into_emails(payloads)
     return "\n".join(e.body for e in emails if e.body).strip()
@@ -141,7 +143,7 @@ def run(queries_path, out_path):
             print(f"  {bucket:8s} {query[:48]!r}", flush=True)
 
     total = sum(hist.values())
-    print("\n=== cause histogram (C', N=3) ===", flush=True)
+    print(f"\n=== cause histogram (C', N={N}) ===", flush=True)
     for b in ("covered", "budget", "fusion", "hard"):
         c = hist.get(b, 0)
         pct = (100 * c / total) if total else 0.0
