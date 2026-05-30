@@ -52,6 +52,10 @@ class TestEmbedMaxLength(unittest.TestCase):
         """An override exceeding 8192 is clamped to 8192."""
         self.assertEqual(embed_max_length(512, True, override=9000), 8192)
 
+    def test_body_only_clamped_to_max(self):
+        # chunk_size above bge-m3's 8192 ceiling is clamped even with no summary
+        self.assertEqual(embed_max_length(9000, False), 8192)
+
 
 if __name__ == "__main__":
     unittest.main()

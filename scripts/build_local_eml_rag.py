@@ -151,7 +151,8 @@ def main(argv=None):
     t_start = time.time()
     enc_max_len = embed_max_length(args.chunk_size, args.embed_summary, override=args.embed_max_length)
     if args.embed_summary:
-        print(f"embed max_length = {enc_max_len} (chunk_size {args.chunk_size} + summary headroom)")
+        _src = "override" if args.embed_max_length is not None else f"chunk_size {args.chunk_size} + summary headroom"
+        print(f"embed max_length = {enc_max_len} ({_src})")
     for i in range(0, total, args.upsert_batch):
         batch = nodes[i : i + args.upsert_batch]
         embed_texts = []
