@@ -91,7 +91,7 @@ def build_hybrid_searcher(
 ) -> HybridSearcher:
     """Wire a HybridSearcher over an existing bge-m3 collection.
 
-    mode="dense" -> dense-only baseline; mode="hybrid" -> dense+sparse RRF.
+    mode="dense" -> dense-only baseline; mode="sparse" -> sparse-only; mode="hybrid" -> dense+sparse RRF.
     rerank=True attaches the cross-encoder reranker (top_n results).
     rerank_with_summary=True scores the cross-encoder on summary+body (takes precedence over rerank).
     `client`/`embedder` are injectable for testing; built lazily otherwise.
@@ -121,7 +121,7 @@ def build_hybrid_searcher(
     index = VectorStoreIndex.from_vector_store(
         vector_store, embed_model=BgeM3LlamaIndexEmbedding(embedder=embedder)
     )
-    query_mode = "hybrid" if mode == "hybrid" else "default"
+    query_mode = {"hybrid": "hybrid", "sparse": "sparse"}.get(mode, "default")
     # sparse_top_k is forwarded in both modes; LlamaIndex ignores it in "default" (dense) mode.
     retriever = index.as_retriever(
         vector_store_query_mode=query_mode,

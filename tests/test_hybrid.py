@@ -46,6 +46,15 @@ class TestBuildHybridSearcher(unittest.TestCase):
             retr_kwargs = IDX.from_vector_store.return_value.as_retriever.call_args.kwargs
             self.assertEqual(retr_kwargs["vector_store_query_mode"], "default")
 
+    def test_sparse_mode_uses_sparse_query_mode(self):
+        p_vs, p_idx, p_rr = self._patches()
+        with p_vs, p_idx as IDX, p_rr:
+            hybrid.build_hybrid_searcher(
+                "work-rag", client=MagicMock(), embedder=MagicMock(), mode="sparse",
+            )
+            retr_kwargs = IDX.from_vector_store.return_value.as_retriever.call_args.kwargs
+            self.assertEqual(retr_kwargs["vector_store_query_mode"], "sparse")
+
     def test_rerank_true_attaches_reranker(self):
         p_vs, p_idx, p_rr = self._patches()
         with p_vs, p_idx, p_rr as RR:
