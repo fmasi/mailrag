@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from src.ingest.embedder import BgeM3Embedder
 from src.query.hybrid import build_hybrid_searcher, _qdrant_client
-from src.query.thread_expand import _node_metadata, group_into_emails
+from src.query.thread_expand import _node_metadata, fetch_thread_payloads, group_into_emails
 from src.eval.coverage_diag import (
     best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap)
 
@@ -49,10 +49,17 @@ def _gold_email(client, message_id):
     pts, _ = client.scroll(collection_name=C, scroll_filter=flt, limit=64,
                            with_payload=True, with_vectors=False)
     if not pts:
-        return {"subject": "", "body": "", "thread_text": ""}
+        return {"subject": "", "body": ""}
     emails = group_into_emails([p.payload for p in pts])
     e = emails[0]
-    return {"subject": e.subject or "", "body": e.body or "", "thread_text": e.body or ""}
+    return {"subject": e.subject or "", "body": e.body or ""}
+
+
+def _thread_text(client, thread_id):
+    """Concatenated bodies of every email in the gold thread (for query<->thread overlap)."""
+    payloads = fetch_thread_payloads(client, C, [thread_id])
+    emails = group_into_emails(payloads)
+    return "\n".join(e.body for e in emails if e.body).strip()
 
 
 def _ranks_for(searchers, query, gtid, gmid):
@@ -94,6 +101,7 @@ def run(queries_path, out_path):
         for q in queries:
             query, gtid, gmid = q["query"], q["thread_id"], q["answer_message_id"]
             gold = _gold_email(client, gmid)
+            thread_text = _thread_text(client, gtid)
             ranks_c = _ranks_for(s_c, query, gtid, gmid)
             ranks_cp = _ranks_for(s_cp, query, gtid, gmid)
             bucket = classify_miss(ranks_cp, TOP_HITS, N, K)   # headline = C'
@@ -106,7 +114,7 @@ def run(queries_path, out_path):
                 "ranks_c": ranks_c, "ranks_cprime": ranks_cp,
                 "gold_terse": is_terse(gold["body"]),
                 "overlap_query_gold": lexical_overlap(query, gold["body"]),
-                "overlap_query_thread": lexical_overlap(query, gold["thread_text"]),
+                "overlap_query_thread": lexical_overlap(query, thread_text),
             }
 
             # Oracle escalation on hard misses (on C', the headline setup).
