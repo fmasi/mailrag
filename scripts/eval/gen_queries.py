@@ -96,7 +96,7 @@ def _gen_one(client, model, category, tid, emails):
 
 
 def _validate_one(client, model, row, emails):
-    """LLM validator gate: True iff the candidate query is a good content question.
+    """LLM validator gate: returns parse_validation's verdict dict {"keep", "reason"}.
 
     Builds the validation prompt from the thread text + the answer email's body, calls
     the model, and returns parse_validation's verdict dict {"keep", "reason"}.
@@ -140,6 +140,8 @@ def run(collection, counts, out_path, seed):
                 continue
             rows.append(row); made += 1
             print(f"  [{category}] {made}/{k}", flush=True)
+        if made < k:
+            print(f"  WARNING: {category} under-delivered ({made}/{k})", flush=True)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as fh:
         for r in rows:
