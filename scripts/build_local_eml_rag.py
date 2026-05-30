@@ -56,6 +56,10 @@ def main(argv=None):
     ap.add_argument("--embed-summary", action="store_true",
                     help="contextual retrieval: prepend each email's Pass-2 summary "
                          "to the chunk text before embedding (needs --summary-cache)")
+    ap.add_argument("--embed-max-length", type=int, default=None,
+                    help="token ceiling for embedding; default = chunk_size "
+                         "(body-only) or chunk_size + summary headroom when --embed-summary "
+                         "(so the summary augments, not displaces, the body chunk)")
     args = ap.parse_args(argv)
 
     from src.ingest.local_source import resolve_index_files
@@ -133,7 +137,7 @@ def main(argv=None):
     from src.ingest.embedder import BgeM3Embedder
     from src.ingest.sparse import lexical_weights_to_sparse
     from src.ingest import hybrid_qdrant as hq
-    from src.ingest.embed_text import prepend_summary
+    from src.ingest.embed_text import prepend_summary, embed_max_length
 
     if args.embed_summary:
         print("contextual retrieval ON: prepending Pass-2 summaries to embedded text")
@@ -145,6 +149,9 @@ def main(argv=None):
     total = len(nodes)
     done = 0
     t_start = time.time()
+    enc_max_len = embed_max_length(args.chunk_size, args.embed_summary, override=args.embed_max_length)
+    if args.embed_summary:
+        print(f"embed max_length = {enc_max_len} (chunk_size {args.chunk_size} + summary headroom)")
     for i in range(0, total, args.upsert_batch):
         batch = nodes[i : i + args.upsert_batch]
         embed_texts = []
@@ -153,7 +160,7 @@ def main(argv=None):
             if args.embed_summary:
                 t = prepend_summary(t, n.metadata.get("summary"))
             embed_texts.append(t)
-        dense, sparse = embedder.encode(embed_texts, batch_size=args.embed_batch, max_length=args.chunk_size)
+        dense, sparse = embedder.encode(embed_texts, batch_size=args.embed_batch, max_length=enc_max_len)
         points = []
         for n, dv, lw in zip(batch, dense, sparse):
             idx, val = lexical_weights_to_sparse(lw)
