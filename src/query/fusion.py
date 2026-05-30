@@ -9,10 +9,51 @@ RRF score for a document = sum over each result list of 1 / (k + rank), where
 rank is 0-based position in that list. ``alpha`` is accepted for signature
 compatibility but unused (RRF is rank-based, not score-weighted).
 """
-from typing import Dict
+import math
+from typing import Dict, List
 
 from llama_index.core.schema import BaseNode
 from llama_index.core.vector_stores.types import VectorStoreQueryResult
+
+
+def _rank_fusion(
+    dense_result: VectorStoreQueryResult,
+    sparse_result: VectorStoreQueryResult,
+    top_k: int,
+    k: int,
+    p: float,
+) -> VectorStoreQueryResult:
+    """Fuse two ranked lists by the power-mean of per-list RRF terms 1/(k+rank).
+
+    p=1 -> arithmetic sum (classic RRF); p->inf -> CombMAX (per-doc best term),
+    with the sum of terms as a deterministic tiebreak. Inputs are rank scores, so
+    no score normalization is needed. ids/similarities/nodes stay strictly parallel
+    (ids whose node is absent are dropped), then the top_k are returned.
+    """
+    terms: Dict[str, List[float]] = {}
+    node_by_id: Dict[str, BaseNode] = {}
+    for result in (dense_result, sparse_result):
+        ids = result.ids or []
+        nodes = result.nodes or []
+        for rank, _id in enumerate(ids):
+            terms.setdefault(_id, []).append(1.0 / (k + rank + 1))
+            if rank < len(nodes):
+                node_by_id.setdefault(_id, nodes[rank])
+
+    def score(_id: str) -> float:
+        xs = terms[_id]
+        if math.isinf(p):
+            return max(xs)
+        return math.fsum(x ** p for x in xs) ** (1.0 / p)
+
+    # Sort by (combined score, sum-of-terms tiebreak), descending. terms.keys()
+    # preserves first-seen order, so equal keys keep a stable order (matches the
+    # original RRF at p=1).
+    ranked = sorted(terms.keys(), key=lambda i: (score(i), math.fsum(terms[i])), reverse=True)
+    fused_ids = [i for i in ranked if i in node_by_id][:top_k]
+    fused_sims = [score(i) for i in fused_ids]
+    fused_nodes = [node_by_id[i] for i in fused_ids]
+    return VectorStoreQueryResult(nodes=fused_nodes, similarities=fused_sims, ids=fused_ids)
 
 
 def reciprocal_rank_fusion(
@@ -22,21 +63,24 @@ def reciprocal_rank_fusion(
     top_k: int = 2,
     k: int = 60,
 ) -> VectorStoreQueryResult:
-    scores: Dict[str, float] = {}
-    node_by_id: Dict[str, BaseNode] = {}
-    for result in (dense_result, sparse_result):
-        ids = result.ids or []
-        nodes = result.nodes or []
-        for rank, _id in enumerate(ids):
-            scores[_id] = scores.get(_id, 0.0) + 1.0 / (k + rank + 1)
-            if rank < len(nodes):
-                node_by_id.setdefault(_id, nodes[rank])
-    # Keep ids/similarities/nodes strictly parallel: drop any id whose node is
-    # absent (e.g. a sparse-only leg that returned ids without nodes), then take
-    # the top_k, so consumers can safely zip the three lists.
-    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
-    fused = [(i, s) for i, s in ranked if i in node_by_id][:top_k]
-    fused_ids = [i for i, _ in fused]
-    fused_sims = [s for _, s in fused]
-    fused_nodes = [node_by_id[i] for i in fused_ids]
-    return VectorStoreQueryResult(nodes=fused_nodes, similarities=fused_sims, ids=fused_ids)
+    """Classic RRF (sum of 1/(k+rank)) as a LlamaIndex hybrid_fusion_fn callback.
+
+    The p=1 special case of _rank_fusion. `alpha` is accepted for signature
+    compatibility but unused (RRF is rank-based, not score-weighted).
+    """
+    return _rank_fusion(dense_result, sparse_result, top_k=top_k, k=k, p=1.0)
+
+
+def make_rank_fusion(p: float = 1.0, k: int = 60):
+    """Build a hybrid_fusion_fn that fuses by power-mean with exponent `p` (>=1).
+
+    p=1 == reciprocal_rank_fusion; p=inf == CombMAX. p<1 is rejected (it rewards
+    agreement — the wrong direction for un-burying single-modality top hits).
+    """
+    if p < 1:
+        raise ValueError("p must be >= 1 (p<1 rewards agreement, the wrong direction)")
+
+    def fusion_fn(dense_result, sparse_result, alpha: float = 0.5, top_k: int = 2, k: int = k):
+        return _rank_fusion(dense_result, sparse_result, top_k=top_k, k=k, p=p)
+
+    return fusion_fn
