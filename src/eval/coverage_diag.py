@@ -94,3 +94,28 @@ def classify_miss(ranks: dict, top_hits: int = 10, n: int = 3, k: int = 20) -> s
     if (de is not None and de < k) or (sp is not None and sp < k):
         return "fusion"
     return "hard"
+
+
+def oracle_root_cause(body_rank: Optional[int], top_hits: int = 10) -> str:
+    """Root-cause a hard miss from the gold-body-as-query oracle probe.
+
+    `body_rank` is the gold thread's rank when the gold email's own body is used as
+    the query (None = not surfaced). If even that fails to surface the thread within
+    `top_hits`, the email is effectively invisible to search -> "index_or_chunking";
+    otherwise the thread IS findable and the user query simply missed it -> "vocab_gap".
+    """
+    body_fail = body_rank is None or body_rank >= top_hits
+    return "index_or_chunking" if body_fail else "vocab_gap"
+
+
+def is_bad_query(body_rank: Optional[int], overlap_query_thread: float,
+                 top_hits: int = 10, overlap_threshold: float = 0.15) -> bool:
+    """True when a hard miss is likely a bad synthetic query, not a retrieval bug.
+
+    Flags the case where even the gold body-as-query fails to surface the thread AND
+    the query shares almost no vocabulary with the thread (overlap strictly below
+    `overlap_threshold`) — i.e. the generated question isn't really answerable from
+    the labelled thread. Excluded from cause stats; reported separately.
+    """
+    body_fail = body_rank is None or body_rank >= top_hits
+    return bool(body_fail and overlap_query_thread < overlap_threshold)

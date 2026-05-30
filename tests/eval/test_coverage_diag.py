@@ -2,7 +2,8 @@
 import unittest
 
 from src.eval.coverage_diag import (
-    best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap)
+    best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap,
+    oracle_root_cause, is_bad_query)
 
 
 def _h(tid, mid):
@@ -116,6 +117,35 @@ class TestClassifyMiss(unittest.TestCase):
     def test_fusion_boundary_exactly_at_k_is_not_fusion(self):
         # dense rank == K (20) is outside "within first K" (0-based) -> hard
         self.assertEqual(self._c(dense_thread_rank=20), "hard")
+
+
+class TestOracleRootCause(unittest.TestCase):
+    def test_index_when_body_not_found(self):
+        self.assertEqual(oracle_root_cause(None, 10), "index_or_chunking")
+
+    def test_index_when_body_rank_at_or_past_top_hits(self):
+        self.assertEqual(oracle_root_cause(10, 10), "index_or_chunking")
+        self.assertEqual(oracle_root_cause(50, 10), "index_or_chunking")
+
+    def test_vocab_when_body_surfaces_thread(self):
+        self.assertEqual(oracle_root_cause(0, 10), "vocab_gap")
+        self.assertEqual(oracle_root_cause(9, 10), "vocab_gap")
+
+
+class TestIsBadQuery(unittest.TestCase):
+    def test_bad_when_body_fails_and_overlap_low(self):
+        self.assertTrue(is_bad_query(None, 0.05, 10, 0.15))
+
+    def test_not_bad_when_body_fails_but_overlap_high(self):
+        self.assertFalse(is_bad_query(None, 0.5, 10, 0.15))
+
+    def test_not_bad_when_body_surfaces_thread(self):
+        # body-as-query found it -> it's a real vocab gap, not a bad query
+        self.assertFalse(is_bad_query(3, 0.0, 10, 0.15))
+
+    def test_overlap_boundary_equal_threshold_is_not_bad(self):
+        # overlap == threshold is NOT below it -> not bad (strict <)
+        self.assertFalse(is_bad_query(None, 0.15, 10, 0.15))
 
 
 if __name__ == "__main__":

@@ -24,10 +24,12 @@ from src.ingest.embedder import BgeM3Embedder
 from src.query.hybrid import build_hybrid_searcher, _qdrant_client
 from src.query.thread_expand import _node_metadata, fetch_thread_payloads, group_into_emails
 from src.eval.coverage_diag import (
-    best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap)
+    best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap,
+    oracle_root_cause, is_bad_query)
 
 C, CP = "work-rag", "work-rag-ctx"
-DEEP_K = 200          # how far down each ranked list we look
+DEEP_K = 200          # search/rank-trace depth: how far down each ranked list we look
+                      # (distinct from K below, which is the "good rank" cutoff for fusion)
 TOP_HITS, N, K = 10, 3, 20   # expansion pool / thread budget / single-mode "good rank"
 OVERLAP_BAD = 0.15    # query<->thread overlap below this + hard + oracle-fail => bad query
 
@@ -44,6 +46,8 @@ def _hits(searcher, query):
 def _gold_email(client, message_id):
     """Fetch the gold email (subject/body) for oracle queries; '' fields if missing."""
     from qdrant_client import models
+    # Read the gold email from C (work-rag): the eval queries were generated from C,
+    # so the gold email/thread is guaranteed present here; bodies are identical in C'.
     flt = models.Filter(must=[models.FieldCondition(
         key="message_id", match=models.MatchValue(value=message_id))])
     pts, _ = client.scroll(collection_name=C, scroll_filter=flt, limit=64,
@@ -131,12 +135,9 @@ def run(queries_path, out_path):
                     else:
                         oracle[name] = None
                 row["oracle"] = oracle
-                body_rank = oracle.get("body")
-                body_fail = body_rank is None or body_rank >= TOP_HITS
-                row["root_cause"] = (
-                    "index_or_chunking" if body_fail else "vocab_gap")
-                row["bad_query"] = bool(
-                    body_fail and row["overlap_query_thread"] < OVERLAP_BAD)
+                row["root_cause"] = oracle_root_cause(oracle.get("body"), TOP_HITS)
+                row["bad_query"] = is_bad_query(
+                    oracle.get("body"), row["overlap_query_thread"], TOP_HITS, OVERLAP_BAD)
 
             out.write(json.dumps(row) + "\n")
             hist[bucket] += 1
