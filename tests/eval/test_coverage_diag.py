@@ -1,7 +1,8 @@
 """Tests for the coverage-miss diagnostic logic (issue #12)."""
 import unittest
 
-from src.eval.coverage_diag import best_gold_rank, distinct_thread_rank
+from src.eval.coverage_diag import (
+    best_gold_rank, distinct_thread_rank, is_terse, lexical_overlap)
 
 
 def _h(tid, mid):
@@ -43,6 +44,38 @@ class TestDistinctThreadRank(unittest.TestCase):
     def test_absent(self):
         hits = [_h("T1", "a"), _h("T2", "b")]
         self.assertIsNone(distinct_thread_rank(hits, "T9"))
+
+
+class TestIsTerse(unittest.TestCase):
+    def test_empty(self):
+        self.assertTrue(is_terse(""))
+
+    def test_whitespace_only(self):
+        self.assertTrue(is_terse("   \n  "))
+
+    def test_short_body(self):
+        self.assertTrue(is_terse("ok thanks"))
+
+    def test_long_body_not_terse(self):
+        self.assertFalse(is_terse("x" * 200))
+
+
+class TestLexicalOverlap(unittest.TestCase):
+    def test_full_overlap(self):
+        self.assertEqual(lexical_overlap("release timeline", "the release timeline is set"), 1.0)
+
+    def test_zero_overlap(self):
+        self.assertEqual(lexical_overlap("alpha beta", "gamma delta"), 0.0)
+
+    def test_case_and_punctuation_normalized(self):
+        self.assertEqual(lexical_overlap("Release, Timeline!", "release timeline"), 1.0)
+
+    def test_partial_overlap(self):
+        # 1 of 2 distinct query tokens present
+        self.assertEqual(lexical_overlap("alpha beta", "alpha gamma"), 0.5)
+
+    def test_empty_query_is_zero(self):
+        self.assertEqual(lexical_overlap("", "anything"), 0.0)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ docs/superpowers/specs/2026-05-30-coverage-miss-diagnostic-design.md.
 """
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 
 
@@ -44,3 +45,24 @@ def distinct_thread_rank(hits: List[dict], gold_thread_id: str) -> Optional[int]
             if tid == gold_thread_id:
                 return len(seen) - 1
     return None
+
+
+_TERSE_MAX_CHARS = 80
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def is_terse(body: str, max_chars: int = _TERSE_MAX_CHARS) -> bool:
+    """True when the email body is empty or shorter than `max_chars` after strip."""
+    return len((body or "").strip()) < max_chars
+
+
+def _tokens(text: str) -> set:
+    return set(_WORD.findall((text or "").lower()))
+
+
+def lexical_overlap(query: str, text: str) -> float:
+    """Fraction of distinct query tokens present in `text` (0..1); 0 if query empty."""
+    q = _tokens(query)
+    if not q:
+        return 0.0
+    return len(q & _tokens(text)) / len(q)
