@@ -99,13 +99,14 @@ def _ranks_for(searchers, query, gtid, gmid):
     }
 
 
-def run(queries_path, out_path, fusion_p, hyde_mode, hyde_file):
+def run(queries_path, out_path, fusion_p, hyde_mode, hyde_file,
+        collection=CP, sparse_weight=1.0, skip_c=False):
     print("loading bge-m3 (silent ~1 min)...", flush=True)
     embedder = BgeM3Embedder()
     client = _qdrant_client()
 
     def modes(coll, p):
-        fusion_fn = make_rank_fusion(p=p)
+        fusion_fn = make_rank_fusion(p=p, sparse_weight=sparse_weight)
         out = {}
         for m in ("dense", "sparse", "hybrid"):
             out[m] = build_hybrid_searcher(
@@ -114,7 +115,8 @@ def run(queries_path, out_path, fusion_p, hyde_mode, hyde_file):
                 fusion_fn=(fusion_fn if m == "hybrid" else None))
         return out
 
-    s_c, s_cp = modes(C, fusion_p), modes(CP, fusion_p)
+    s_cp = modes(collection, fusion_p)
+    s_c = None if skip_c else modes(C, fusion_p)
     hyde_map = _load_hyde(hyde_file) if hyde_mode != "off" else {}
 
     with open(queries_path) as fh:
@@ -128,15 +130,15 @@ def run(queries_path, out_path, fusion_p, hyde_mode, hyde_file):
             gold = _gold_email(client, gmid)
             thread_text = _thread_text(client, gtid)
             search_q = combine_query(query, hyde_map.get(query, ""), hyde_mode) if hyde_mode != "off" else query
-            ranks_c = _ranks_for(s_c, search_q, gtid, gmid)
             ranks_cp = _ranks_for(s_cp, search_q, gtid, gmid)
+            ranks_c = _ranks_for(s_c, search_q, gtid, gmid) if s_c is not None else None
             bucket = classify_miss(ranks_cp, TOP_HITS, N, K)   # headline = C'
 
             row = {
                 "query": query, "category": q["category"],
                 "thread_id": gtid, "answer_message_id": gmid,
                 "bucket_cprime": bucket,
-                "bucket_c": classify_miss(ranks_c, TOP_HITS, N, K),
+                "bucket_c": classify_miss(ranks_c, TOP_HITS, N, K) if ranks_c else None,
                 "ranks_c": ranks_c, "ranks_cprime": ranks_cp,
                 "gold_terse": is_terse(gold["body"]),
                 "overlap_query_gold": lexical_overlap(query, gold["body"]),
@@ -164,7 +166,8 @@ def run(queries_path, out_path, fusion_p, hyde_mode, hyde_file):
             print(f"  {bucket:8s} {query[:48]!r}", flush=True)
 
     total = sum(hist.values())
-    print(f"\n=== cause histogram (C', N={N}, p={fusion_p}, hyde={hyde_mode}) ===", flush=True)
+    print(f"\n=== cause histogram ({collection}, N={N}, p={fusion_p}, "
+          f"sw={sparse_weight}, hyde={hyde_mode}) ===", flush=True)
     for b in ("covered", "budget", "fusion", "hard"):
         c = hist.get(b, 0)
         pct = (100 * c / total) if total else 0.0
@@ -181,8 +184,15 @@ def main():
     ap.add_argument("--hyde", choices=["off", "pure", "augment"], default="off",
                     help="query-side transform: off | pure (search hypothetical) | augment (query+hypothetical)")
     ap.add_argument("--hyde-file", default="eval/out/hyde_queries.jsonl")
+    ap.add_argument("--collection", default=CP,
+                    help="headline collection to diagnose (default C'=work-rag-ctx)")
+    ap.add_argument("--sparse-weight", type=float, default=1.0,
+                    help="fusion sparse-list weight (>1 favours keyword hits)")
+    ap.add_argument("--skip-c", action="store_true",
+                    help="skip the C (work-rag) arm; diagnose only --collection (spike speed)")
     args = ap.parse_args()
-    run(args.queries, args.out, args.fusion_p, args.hyde, args.hyde_file)
+    run(args.queries, args.out, args.fusion_p, args.hyde, args.hyde_file,
+        collection=args.collection, sparse_weight=args.sparse_weight, skip_c=args.skip_c)
 
 
 if __name__ == "__main__":
