@@ -15,6 +15,7 @@ Run on the HOST (rag env; LM Studio loaded with the summary model):
     | tee eval/out/gen_thread_summaries.log
 """
 import argparse
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -32,6 +33,16 @@ from src.data.threading import compute_thread_id
 from src.llm.cache import Pass2Cache
 from src.llm.client import make_client, chat, default_model
 from src.llm.summary import build_prompt, build_thread_aware_prompt, parse_response
+
+
+def _record_failure(path: str, **rec) -> None:
+    """Append one failure record (JSON line) to *path* so failed emails are
+    tracked for diagnosis + deliberate retry. Best-effort; never raises."""
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:  # noqa: BLE001 - tracking must never crash the run
+        pass
 
 
 def _as_dict(e):
@@ -80,9 +91,10 @@ def run(slice_path, out_path, mode, model):
 
     client = make_client()
     cache = Pass2Cache(out_path)
+    failures_path = out_path + ".failures.jsonl"
     print(
         f"summary model: {model}  mode: {mode}  threads: {len(by_thread)}"
-        f"  emails: {len(emails)}",
+        f"  emails: {len(emails)}  failures -> {failures_path}",
         flush=True,
     )
 
@@ -109,8 +121,10 @@ def run(slice_path, out_path, mode, model):
                     if mode == "thread"
                     else build_prompt(ed)
                 )
+                raw = None
                 try:
-                    record = parse_response(chat(client, model, prompt))
+                    raw = chat(client, model, prompt)
+                    record = parse_response(raw)
                     mid, chash = email_identity(
                         sender=ed["sender"],
                         subject=ed["subject"],
@@ -127,6 +141,16 @@ def run(slice_path, out_path, mode, model):
                     counts["done"] += 1
                 except Exception as exc:  # noqa: BLE001 — keep going on single-email errors
                     print(f"  error on {e.source_id}: {exc}", flush=True)
+                    _record_failure(
+                        failures_path,
+                        source_id=e.source_id,
+                        sha=sha,
+                        message_id=getattr(e, "message_id", "") or "",
+                        mode=mode,
+                        model=model,
+                        error=str(exc),
+                        raw_response=raw,
+                    )
                     counts["error"] += 1
             # Append the dict (not the NormalizedEmail) so _format_preceding can
             # call .get() safely on it.
