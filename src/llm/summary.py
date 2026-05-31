@@ -140,17 +140,39 @@ def _loads_lenient(text: str) -> Dict[str, Any]:
         return json.loads(obj)
 
 
-def parse_response(text: str) -> Dict[str, Any]:
-    """Parse the model's JSON reply into a normalized record.
+def _extract_fields_regex(text: str) -> Optional[Dict[str, Any]]:
+    """Last-resort field extraction for malformed JSON (e.g. unescaped inner quotes).
 
-    Tolerates fenced and prose-wrapped output by extracting the first balanced
-    JSON object. Raises ``ValueError`` on no/invalid JSON or a missing
-    ``is_noise`` field.
+    Returns a raw dict with the four expected keys, or ``None`` if ``is_noise``
+    cannot be found (preserves the "missing is_noise => invalid" contract).
     """
-    cleaned = text.strip()
-    cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", cleaned)
-    cleaned = re.sub(r"\n?```$", "", cleaned).strip()
-    data = _loads_lenient(cleaned)
+    # is_noise — required; absence means we cannot recover
+    m = re.search(r'"is_noise"\s*:\s*(true|false)', text, re.IGNORECASE)
+    if m is None:
+        return None
+    is_noise = m.group(1).lower() == "true"
+
+    # confidence — optional, default 0.0
+    mc = re.search(r'"confidence"\s*:\s*([0-9]*\.?[0-9]+)', text)
+    confidence = float(mc.group(1)) if mc else 0.0
+
+    # summary — capture between "summary": " and the subsequent ","reason"
+    ms = re.search(r'"summary"\s*:\s*"(.*?)"\s*,\s*"reason"', text, re.DOTALL)
+    if ms is None:
+        # fallback: summary is the last field before closing brace
+        ms = re.search(r'"summary"\s*:\s*"(.*)"\s*}', text, re.DOTALL)
+    summary = ms.group(1) if ms else ""
+
+    # reason — capture between "reason": " and the closing brace
+    mr = re.search(r'"reason"\s*:\s*"(.*?)"\s*}', text, re.DOTALL)
+    reason = mr.group(1) if mr else ""
+
+    return {"is_noise": is_noise, "confidence": confidence,
+            "summary": summary, "reason": reason}
+
+
+def _normalize(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply the standard post-processing to a raw parsed dict."""
     if "is_noise" not in data:
         raise ValueError("response missing 'is_noise'")
     is_noise = bool(data["is_noise"])
@@ -163,3 +185,24 @@ def parse_response(text: str) -> Dict[str, Any]:
     reason = str(data.get("reason", "")).strip()
     return {"is_noise": is_noise, "confidence": confidence,
             "summary": summary, "reason": reason}
+
+
+def parse_response(text: str) -> Dict[str, Any]:
+    """Parse the model's JSON reply into a normalized record.
+
+    Tolerates fenced and prose-wrapped output by extracting the first balanced
+    JSON object.  When json.loads still fails (e.g. unescaped inner quotes),
+    falls back to regex field extraction before giving up.
+
+    Raises ``ValueError`` on no/invalid JSON or a missing ``is_noise`` field.
+    """
+    cleaned = text.strip()
+    cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", cleaned)
+    cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+    try:
+        data = _loads_lenient(cleaned)
+    except Exception:
+        data = _extract_fields_regex(cleaned)
+        if data is None:
+            raise ValueError("no JSON object found in response")
+    return _normalize(data)

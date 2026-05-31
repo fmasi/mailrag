@@ -1,7 +1,7 @@
-"""Tests for build_thread_aware_prompt (stdlib-only, no network)."""
+"""Tests for build_thread_aware_prompt and parse_response (stdlib-only, no network)."""
 import unittest
 
-from src.llm.summary import build_thread_aware_prompt
+from src.llm.summary import build_thread_aware_prompt, parse_response
 
 
 class TestBuildThreadAwarePrompt(unittest.TestCase):
@@ -45,6 +45,39 @@ class TestBuildThreadAwarePrompt(unittest.TestCase):
         p = build_thread_aware_prompt(self._email(), pre, max_preceding=0)
         self.assertNotIn("SHOULD_NOT_APPEAR", p)
         self.assertNotIn("EARLIER messages in this thread (context only", p)
+
+
+class TestParseResponseLenient(unittest.TestCase):
+    NOKIA = ('{"is_noise": false, "confidence": 1.0, "summary": "Darrell Jordan-Smith '
+             'provides a brief "+1" endorsement of the news regarding the signed Nokia '
+             'CRAN R&D collaboration agreement.", "reason": "The email is a genuine human '
+             'response expressing agreement/support in an ongoing business thread."}')
+
+    def test_recovers_unescaped_inner_quotes(self):
+        r = parse_response(self.NOKIA)  # must NOT raise
+        self.assertFalse(r["is_noise"])
+        self.assertEqual(r["confidence"], 1.0)
+        self.assertIn("+1", r["summary"])
+        self.assertIn("Darrell Jordan-Smith", r["summary"])
+        self.assertIn("Nokia CRAN", r["summary"])
+        self.assertIn("genuine human response", r["reason"])
+
+    def test_strict_path_unchanged_for_valid_json(self):
+        good = '{"is_noise": false, "confidence": 0.9, "summary": "hello world", "reason": "ok"}'
+        r = parse_response(good)
+        self.assertEqual(r["summary"], "hello world")
+        self.assertEqual(r["reason"], "ok")
+
+    def test_still_raises_when_no_fields_recoverable(self):
+        with self.assertRaises(ValueError):
+            parse_response("total garbage, no json, no fields here")
+
+    def test_is_noise_true_blanks_summary_in_fallback(self):
+        # consistency with the strict path: is_noise=true => summary forced empty
+        s = '{"is_noise": true, "confidence": 0.8, "summary": "should be "blanked" anyway", "reason": "newsletter"}'
+        r = parse_response(s)
+        self.assertTrue(r["is_noise"])
+        self.assertEqual(r["summary"], "")
 
 
 if __name__ == "__main__":
