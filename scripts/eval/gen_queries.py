@@ -10,7 +10,7 @@ Run on the HOST (rag env; QDRANT_URL + RAG_LLM_* set; .env loaded for keys):
   QDRANT_URL=http://localhost:6333 RAG_LLM_BASE_URL=http://localhost:1234/v1 \
     conda run -n rag --no-capture-output \
     python scripts/eval/gen_queries.py --collection work-rag \
-    --n-terse 18 --n-content 18 --n-spanning 9 --out eval/out/queries.jsonl
+    --n-terse 48 --n-content 48 --n-spanning 24 --out eval/out/queries.jsonl
 """
 import argparse
 import json
@@ -28,6 +28,7 @@ except ImportError:
 from src.query.hybrid import _qdrant_client
 from src.query.thread_expand import group_into_emails, render_thread
 from src.llm.client import make_client, default_model, chat
+from src.eval.query_validator import build_validation_prompt, parse_validation
 
 _PAGE = 512
 
@@ -41,6 +42,13 @@ _CATEGORY_PROMPT = {
     "spanning": "Ask a question whose answer must be assembled across several emails in "
                 "the thread (e.g. what was decided and when, how a plan evolved).",
 }
+
+# Appended to every category instruction: force content questions, ban artifact/meta ones.
+_ARTIFACT_RULE = (
+    " The answer MUST be a specific content fact stated in the chosen answer email. "
+    "NEVER ask about the email/thread/meeting as an artifact (its subject line, who is on "
+    "it, how many messages it has, or when it was sent)."
+)
 
 
 def _sample_threads(client, collection, k, min_emails, max_emails, seed):
@@ -72,7 +80,7 @@ def _gen_one(client, model, category, tid, emails):
     mids = [e.message_id for e in emails]
     prompt = (
         "You are building a search-eval question from an email thread.\n"
-        f"{_CATEGORY_PROMPT[category]}\n\n"
+        f"{_CATEGORY_PROMPT[category]}{_ARTIFACT_RULE}\n\n"
         "Return STRICT JSON: {\"query\": <user question>, \"answer_message_id\": <one of "
         f"these ids: {mids}>}}. Use ONLY information present below.\n\nTHREAD:\n{body}"
     )
@@ -87,14 +95,30 @@ def _gen_one(client, model, category, tid, emails):
     return {"query": q, "category": category, "thread_id": tid, "answer_message_id": amid}
 
 
+def _validate_one(client, model, row, emails):
+    """LLM validator gate: returns parse_validation's verdict dict {"keep", "reason"}.
+
+    Builds the validation prompt from the thread text + the answer email's body, calls
+    the model, and returns parse_validation's verdict dict {"keep", "reason"}.
+    """
+    thread_text = render_thread(row["thread_id"], emails)
+    answer_body = next(
+        (e.body for e in emails if e.message_id == row["answer_message_id"]), "")
+    raw = chat(client, model, build_validation_prompt(
+        row["query"], thread_text, answer_body))
+    return parse_validation(raw)
+
+
 def run(collection, counts, out_path, seed):
     client = _qdrant_client()
     llm = make_client()
     model = os.getenv("RAG_GEN_MODEL", "").strip() or default_model()
     print(f"generator model: {model}", flush=True)
+    vmodel = os.getenv("RAG_VALIDATE_MODEL", "").strip() or model
+    print(f"validator model: {vmodel}", flush=True)
     rows = []
     for category, k in counts.items():
-        threads = _sample_threads(client, collection, k * 3, 3, 25, seed + hash(category) % 1000)
+        threads = _sample_threads(client, collection, k * 5, 3, 25, seed + hash(category) % 1000)
         made = 0
         for tid, emails in threads:
             if made >= k:
@@ -104,9 +128,20 @@ def run(collection, counts, out_path, seed):
             except Exception as e:  # noqa: BLE001 - skip a bad generation, keep going
                 print(f"  skip ({category}): {e}", flush=True)
                 row = None
-            if row:
-                rows.append(row); made += 1
-                print(f"  [{category}] {made}/{k}", flush=True)
+            if not row:
+                continue
+            try:
+                verdict = _validate_one(llm, vmodel, row, emails)
+            except Exception as e:  # noqa: BLE001 - skip on validator error, keep going
+                print(f"  validate-skip ({category}): {e}", flush=True)
+                continue
+            if not verdict["keep"]:
+                print(f"  reject ({category}): {verdict['reason'][:60]}", flush=True)
+                continue
+            rows.append(row); made += 1
+            print(f"  [{category}] {made}/{k}", flush=True)
+        if made < k:
+            print(f"  WARNING: {category} under-delivered ({made}/{k})", flush=True)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as fh:
         for r in rows:
@@ -117,9 +152,9 @@ def run(collection, counts, out_path, seed):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--collection", default="work-rag")
-    ap.add_argument("--n-terse", type=int, default=18)
-    ap.add_argument("--n-content", type=int, default=18)
-    ap.add_argument("--n-spanning", type=int, default=9)
+    ap.add_argument("--n-terse", type=int, default=48)
+    ap.add_argument("--n-content", type=int, default=48)
+    ap.add_argument("--n-spanning", type=int, default=24)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="eval/out/queries.jsonl")
     args = ap.parse_args()

@@ -369,6 +369,324 @@ Findings:
 
 ---
 
+## 10. Coverage-miss diagnostic — why the answer thread isn't retrieved (#12, 2026-05-30)
+
+§9 located the ceiling at **retrieval coverage** (~76% on C′ + top-3 threads): for ~24% of
+queries the answer-bearing thread never reaches the answer model. This diagnostic traces
+*where* each gold thread sinks and *why*. Method: for all 45 labeled queries, find the best
+rank of the gold thread under **dense-only, sparse-only, and hybrid** retrieval on C and C′
+(deep top-200), bucket the cause, and on the hard core run an **oracle escalation** —
+re-query with the gold email's own subject/body to test whether the email is retrievable *at
+all*. The classification logic is unit-tested (`src/eval/coverage_diag.py`); driver is
+`scripts/eval/diagnose_coverage.py`. The diagnostic reproduces the §9 number exactly
+(covered 34/45 = 76%), which validates the buckets.
+
+**Cause split (C′, top-3 threads, n=45):**
+
+| Bucket | n | % | meaning | lever |
+|---|---|---|---|---|
+| covered | 34 | 76% | gold thread in top-3 | — |
+| budget | 3 | 7% | in the top-10 pool but past the 3rd thread | widen N / rerank |
+| fusion | 2 | 4% | dense **or** sparse ranks it well; RRF buries it | fusion tuning |
+| hard | 6 | 13% | deep/absent in **both** single modes | representation |
+
+- **The ceiling is a query→document *matching* problem, not an indexing/chunking one.** All 6
+  hard misses are `vocab_gap`; **zero** are `index_or_chunking`. The oracle is unambiguous:
+  querying with the gold email's own *body* surfaces its thread at **rank 0 in 5 of 6** hard
+  misses (rank 3 in the 6th). The answer email is perfectly indexed and findable — the
+  natural-language *question* simply fails to rank it. **→ de-prioritises #14 (chunk size):
+  chunking is not the lever for these misses.**
+- **It's discriminability, not vocabulary absence.** Hard misses have *high* query↔thread
+  lexical overlap (mean **0.62** vs 0.75 for covered) — the query words *are* in the thread.
+  They are also in many *other* threads (recurring terms like "confirmed", customer/product
+  names), so vocabulary-similar siblings out-rank the gold thread. The email body wins as a
+  query because it is far more specific than the question.
+- **Budget misses are one-rank near-misses.** The 3 sit at distinct-thread ranks 3, 3, 5 (the
+  budget is 3). Widening top-3 → top-5 recovers 2 of 3 immediately — this *is* the 76%→84%
+  gap the §9 top-N sweep showed. Near-free coverage (cost: a few k tokens).
+- **Fusion misses are RRF dilution.** One: sparse ranks the gold thread at 6 but dense never
+  returns it (>200) and RRF pushes the fused result to 58. The other: sparse 10 / dense 29 →
+  fused 14. When one modality has a strong hit and the other is blind, RRF dilutes it; a
+  min-rank fallback or weight tuning recovers both.
+- **C′ net-helps coverage.** Embedded summaries cover **34 vs C's 32** (C′ rescues 3 — two
+  fusion→covered, one hard→covered — and costs 1; net +2 / +4%). Corroborates §9's "keep C′".
+- **Eval-hygiene caveat.** ≥2 of the 6 hard misses are meta/degenerate *generated* queries
+  ("what was the subject of the email thread / of the meeting") — not real product questions.
+  The automated `bad_query` guard flagged 0 because it keys on the oracle *failing*, and here
+  the oracle *succeeds*; these are mislabeled `vocab_gap`. The genuinely retrieval-fixable hard
+  core is therefore **~4, not 6**. N=45 is small — treat sub-bucket percentages as directional.
+
+**Verdict — where the leverage is:**
+- **Cheap, non-ML wins first (~5 of 11 misses, ~76%→~87% coverage):** widen the thread budget
+  (3→5) and tune/guard RRF fusion. No model or index changes. → **#17.**
+- **The real ceiling is query↔document matching.** The oracle proves a better *query* retrieves
+  the gold thread at rank 0, so the highest-leverage real fix is **query-side**: query expansion
+  / HyDE / multi-query — make the query look like the answer. → **#16** (filed as the new lead).
+  Doc-side queryable summaries (#11/#13) attack the same gap from the other end.
+- **De-prioritise #14 (chunk size)** for coverage — 0/6 hard misses are chunking defects.
+- **Tighten the eval** — filter meta/degenerate generated queries and extend the `bad_query`
+  guard before the next coverage measurement. → **#18.**
+
+**Eval refresh (#18, 2026-05-30).** Replaced the 45-query set with **120 validated** queries
+(48 terse / 48 content / 24 spanning) generated with a hardened prompt + an LLM validator gate
+(`src/eval/query_validator.py`); the validator rejected ~24% of candidates. On the clean set the
+hard-miss bucket **no longer contains any meta/artifact queries**, and the picture sharpens:
+coverage **82%** (C′, top-3) · budget 6 (5%) · fusion 8 (7%) · hard 8 (7%). The hard core is now
+**overwhelmingly terse-reply discriminability** — 7 of 8 hard misses are *terse* questions
+("what did X decide/say"), all `vocab_gap`, **zero index/chunking**, oracle body-rank 0 every
+time (the answer email is findable; the short reply just can't rank). C′'s coverage edge also
+**grew on the cleaner set** (covers 98 vs C's 89, +9 — was +2 on the 45-set), reinforcing "keep
+C′". This 82% is the trustworthy baseline for #17 (widen-N recovers ~4 of 6 budget misses) and
+#16 (query-side help for the terse hard core).
+
+---
+
+## 11. Tunable fusion (power-mean) + widen-N — end-to-end (#17, 2026-05-30)
+
+§10 pinpointed RRF-**sum** burying strong single-modality hits (7/8 fusion misses = gold thread
+at sparse rank 0, drowned by mediocre-in-both siblings). We implemented a **tunable power-mean
+fusion** over the per-list RRF terms `1/(k+rank)` — `p=1` is exactly RRF-sum, `p→∞` is CombMAX,
+the continuum is a single tunable knob (`src/query/fusion.py: make_rank_fusion`). Evaluated it +
+widen-N **end-to-end** on the clean 120-query set (§ eval-refresh): coverage (cheap p-sweep),
+context tokens, and answer quality (local **26b@6bit** answer-gen, **26b@8bit** judge,
+answer-vs-gold 0–3).
+
+**Stage-1 coverage p-sweep (C′, N=3, n=120):** coverage rises only modestly with p — `p=1` 82%
+→ `p=∞` **84% (+2pts)**; `p=∞` *regresses* the tight N=1 budget (69%→66%) — the tie/churn
+CombMAX warning, realised. Widen-N is a comparable lever (N3→N5 ≈ +3pts at any p).
+
+**Stage-2 end-to-end arm table:**
+
+| arm | coverage | avg tokens | grade (0–3) |
+|---|---|---|---|
+| no_context (anchor) | – | 0 | 0.10 |
+| answer_only (anchor) | – | 172 | 1.99 |
+| C′ thread N3, RRF sum (baseline) | 82% | 6,150 | 1.54 |
+| C′ thread N3, max-fusion | 84% | 6,730 | 1.59 |
+| C′ thread N5, max-fusion | 87% | 11,910 | 1.61 |
+
+**Paired (per-query) analysis — the gains are within noise:**
+- **max-fusion vs baseline (N3):** only **8 of 120** queries changed grade — 5 better, 3 worse
+  (**net +2**, meanΔ +0.05). It *reshuffles* rather than uniformly lifts: rescues some buried
+  hits (3 queries +3 grade) but **demotes some terse answer-threads** (2 queries −2 grade).
+- **widen-N5 vs N3:** **net −1 on grade** (2 wins / 3 losses) for ~2× the tokens; spanning grade
+  drops (1.83→1.79). The extra threads add distraction. Counterproductive.
+
+**Verdict — a negative result:**
+- **Retrieval-knob tuning is second-order on this corpus** (reconfirms §9/§10). Neither
+  max-fusion nor widen-N gives a meaningful end-to-end answer-quality gain: the fusion fix is a
+  near-wash (helps and hurts roughly equally), and widening N to 5 is net-negative for double the
+  tokens.
+- **Keep RRF (`p=1`) as the default; reject widen-N→5.** We do not flip the default on a
+  within-noise, partly-regressive (N=1) change.
+- **The tunable combiner ships as available, corpus-tunable infrastructure** (not the default):
+  `make_rank_fusion(p)` is a clean, tested knob anyone tuning mailrag for *their own* corpus can
+  sweep — on a more lexical/heterogeneous corpus the buried-hit fix may pay off more than here.
+- **The real lever remains query-side (#16).** The threads max-fusion *demoted* were terse —
+  the exact class query expansion / HyDE targets.
+- Caveat: the grade ceiling is low (`answer_only` = 1.99) — even gold-email-only doesn't grade as
+  fully complete (judge strictness + terse-email self-containment), so treat absolute grades as
+  relative, not calibrated.
+
+---
+
+## 12. Query-side retrieval — HyDE / anchored query expansion (#16, 2026-05-30)
+
+§10/§11 left the query→document **matching** gap as the lead. The query-side bet (HyDE): instead
+of searching with the user's question, generate a *hypothetical answer* and search with that — it
+"looks like" a real answer email, so it should match the gold better, especially for terse
+request→reply threads where no single email carries the query's vocabulary. Pure logic in
+`src/query/hyde.py` (prompt + fail-safe `combine_query`); hypotheticals pre-generated once
+(`scripts/eval/gen_hyde.py`) and consumed by the coverage diagnostic via `--hyde {off,pure,augment}`
+(`pure` = search the hypothetical alone; `augment` = query + hypothetical).
+
+**This stopped at Stage-1 (coverage), because Stage-1 is decisively negative** — no configuration
+beats the raw-query baseline, so there is nothing for an end-to-end Stage-2 to recover (you cannot
+answer from a thread retrieval never surfaced).
+
+**Two prompts, two failure modes.** The first finding was that a *from-scratch* hypothetical
+**fabricates competing specifics** (invented names/dates/times) that drag retrieval toward sibling
+threads. So we added an **anchored** prompt (`build_hyde_prompt_anchored`): reshape the query into
+answer-surface form, keep every real anchor verbatim, invent nothing. To rule out
+"the generator is just too weak," we ran a **generator-quality ladder** spanning ~3 orders of
+magnitude of model size — local **e4b** (4B), **Sonnet**, **Opus** (cloud, ~$1.50 total for 120×2;
+the only cloud spend, query strings only).
+
+**Stage-1 coverage (C′, N=3, n=120; terse = the 48 request→reply queries HyDE targets):**
+
+| generator · prompt · mode | cov@N3 | cov@N5 | terse@N3 |
+|---|---|---|---|
+| **off — raw query (baseline)** | **82%** | **85%** | **77%** |
+| e4b · from-scratch · pure | 56% | 63% | 50% |
+| e4b · from-scratch · augment | 73% | 75% | 65% |
+| e4b · anchored · pure | 75% | 79% | 73% |
+| e4b · anchored · augment | 77% | 81% | 77% |
+| Sonnet · anchored · pure | 71% | 76% | 69% |
+| Sonnet · anchored · augment | 74% | 78% | 71% |
+| **Opus · anchored · pure** (best HyDE) | **78%** | 81% | 77% |
+| Opus · anchored · augment | 76% | 81% | 73% |
+
+**Verdict — a negative result, but a sharply diagnostic one:**
+- **No HyDE arm beats the raw query.** Best (Opus · anchored · pure) is **78% (−4 pts)** and only
+  *ties* terse (77%). The conclusion is robust across generator (4B → frontier), prompt, and mode.
+- **The anchored prompt is monotonically better than from-scratch** at every generator (e4b: 56→75
+  pure, 73→77 augment) — it removes the fabrication drift and restores terse to baseline. The idea
+  was right; it just asymptotes *to* the baseline, not past it.
+- **Faithfulness, not capability, is what matters.** Sonnet (anchored) *underperformed* local e4b
+  (anchored) — because it still invented concrete values (a made-up time, a made-up duration); Opus
+  followed "invent nothing" and wrote around unknowns generically, reclaiming the top spot. A
+  better model only helps insofar as it fabricates *less*.
+- **Mechanism (airtight):** this corpus is entity-rich and **specific-fact**. The user's query
+  *already contains the optimal retrieval anchors* (the real names/terms). A hypothetical can only
+  (1) fabricate competing specifics → drift → harm, or (2) faithfully echo the query's anchors plus
+  generic answer-vocab → *approach but never exceed* the raw query, because it adds no new *correct*
+  signal, only dilution. The remaining gap is specific-fact **discriminability**, which the query
+  side cannot manufacture — you would need the actual answer.
+- **Ship decision: do not adopt HyDE on this corpus** (default stays raw-query hybrid retrieval).
+  `build_hyde_prompt` / `build_hyde_prompt_anchored` / `combine_query` / `gen_hyde.py --anchored`
+  stay in-tree as tested apparatus — HyDE may still pay off on a *lexical/open-domain* corpus where
+  queries are keyword-sparse (the opposite regime), aligning with the clone-and-tune-your-own-corpus
+  vision.
+- **This justifies the doc-side lever (#11/#13).** Two opposite-end levers attacked the same gap;
+  the cheap query-side one is now ruled out *with a mechanism*. The fix must make the **documents**
+  more retrievable (thread-aware embedded summaries), not dress up the query.
+
+---
+
+## 13. Doc-side thread-aware summaries — the evolution ladder (#11/#13, 2026-06-01)
+
+§12 ruled out the query side *with a mechanism*: this corpus is entity-rich, so the query already
+holds the optimal anchors. The remaining lever is the **document** side — make a terse reply carry
+the answer's vocabulary *at the unit that gets matched*. We do this with a per-email LLM summary,
+**prepended to the body and embedded** (contextual retrieval), where the summary is conditioned on
+the email's **preceding thread context** (causal, append-only). The whole point is to read this as
+an **evolution ladder** — what each increment adds, and at what cost — not a single hero number.
+
+### The ladder (each row adds one technique; retrieval is otherwise identical)
+
+| Row | Increment | LLM? |
+|---|---|---|
+| 0 | plain email RAG (body-only, email-level rank) | no |
+| 1 | + small→big retrieval (thread-level rank — match a unit, return its thread) | no |
+| 2 | + isolated per-email summary, embedded | yes |
+| 3 | + preceding-thread-context summary (this work) | yes |
+
+Rows 1–2 are existing techniques: small→big is parent-document / auto-merging retrieval
+(LlamaIndex, LangChain); embedding an LLM context blurb with each chunk is contextual retrieval
+(Anthropic, 2024). Row 3 is the variant we test — the summary sees only the email's *preceding*
+messages (causal, append-only) rather than the whole thread. The rest of this section measures what
+that change buys, and at what cost.
+
+**Result (n=360 validated queries, thread-level coverage, all summary arms at the same 26b@8bit
+quant — see "the quant confound" below for why same-quant matters):**
+
+| arm | R@1 | R@3 | R@5 | R@10 | MRR |
+|---|---|---|---|---|---|
+| row 1 — body-only | 60 | 71 | 76 | 81 | .675 |
+| row 2 — isolated summary @8bit | 70 | 81 | 86 | 89 | .763 |
+| **row 3 — preceding-context @8bit (ours)** | 70 | **84** | 87 | 91 | .779 |
+
+The ladder is monotone. The two biggest jumps tell the story: **row 0→1** (R@1 36→60, LLM-free) is
+the value of thread expansion alone; **row 2→3** is the increment this work adds.
+
+### ⚠ The quant confound (the key methodology lesson)
+
+An earlier pass compared preceding-context @**8bit** against an isolated control @**6bit** and
+reported +6pp R@3 (p=0.0017). Re-running the isolated control at the **same 8bit quant** showed
+that was inflated — it bundled two independent steps:
+
+- **6→8bit quantization of the summarizer:** isolated R@3 78 → 81 (+3pp) — nothing to do with
+  thread context.
+- **Preceding-context (same-quant):** isolated 81 → preceding 84 (+3pp) — the real method effect.
+
+Lesson: a summary-quality experiment must hold the **summarizer quant fixed**, or a quant step
+masquerades as a method effect. (Build controls: all arms share the 19,859-email corpus, 21,590
+chunks, `--chunk-size 512`, and `--embed-summary` with `embed_max_length` decoupled from chunk_size
+(#14) so the summary *adds* headroom rather than *displacing* body tokens.)
+
+### Honest significance (same-quant, n=360)
+
+- **Corpus-wide:** preceding vs isolated, covered@3 = 302/360 (83.9%) vs 290/360 (80.6%), net +12.
+  McNemar exact two-sided **p = 0.058 — directional, not significant.**
+- **By category (R@3), where the effect actually lives:**
+
+  | category (n) | isolated @8bit | preceding @8bit | Δ | McNemar p |
+  |---|---|---|---|---|
+  | terse (144) | 75% | 81% | +6pp | **0.035 ✓** |
+  | content (144) | 79% | 81% | +2pp | 0.61 |
+  | spanning (72) | 94% | 94% | 0 | 1.00 |
+
+- **The defensible claim:** *preceding-thread-context summaries significantly improve **terse-reply**
+  retrieval at the top-3 operating point (75%→81%, p=0.035, same-quant).* This is exactly the design
+  target — terse request→reply threads where no single email carries the query's vocabulary (§10).
+  The corpus-wide effect is real but modest (+3pp) and not yet significant; content/spanning are
+  unchanged, and within terse only R@3 (not R@1/5/10) reaches significance. We report the scoped
+  result, not a broad win.
+
+### What the LLM is really buying
+
+It's fair to ask whether a per-email LLM pass earns a +3pp retrieval gain. The framing that answers
+it is **one pass, paid twice**. The summary is not a separate call — it is a byproduct of the
+noise-classification pass the pipeline already runs on every email (§1–§5): a single call returns
+both `is_noise` and the summary. Used this way, that one pass pays twice — it removes the noise a
+**regex cannot** (§2: roughly a third of the noise needs the LLM to catch), *and* it yields the
+retrieval summary.
+
+The right baseline for the cleanup half is not "no cleanup" but the cleanup you get **free from a
+regex**; the LLM's marginal value is the noise the regex *misses*. We tested this directly: a
+body-only corpus cleaned by regex rules only (`config/noise_rules.yaml`) leaves ~8.7k LLM-only-noise
+emails in as distractors (28,628 emails vs the regex+LLM-clean 19,859); rerun the 360-query coverage
+and compare.
+
+The result is smaller than the hypothesis predicted, and worth stating plainly: gold-thread
+coverage@3 drops only **71% → 69%** when that residue is left in (+2pp for the LLM's incremental
+cleanup; McNemar p = 0.15 — directional, not significant). On this corpus the explanation is the same
+one from §12 — newsletter/notification noise is semantically far from the entity-rich queries, so it
+rarely out-ranks a specific gold thread. The **recall** cost of leaving it in is small.
+
+So the cleanup's value is not a gold-recall effect — it is a **precision** effect the recall metric
+cannot see, and we measured it directly (no answer-LLM, just a top-N retrieval and a
+clean-vs-noise membership check on `source_id`). On the regex-only corpus, the vector DB is **not**
+good enough to keep noise out: **21% of queries surface at least one noise email in their top-3, and
+~11% of all top-3 retrieval slots are noise** (top-5: 30% of queries, 12% of slots; top-10: 43%,
+13%). That is the junk a regex misses, sitting in the very context an answer model would receive —
+removed *for free* by the same LLM pass that produced the summary.
+
+Net, the "one pass, paid twice" economics hold and now have numbers on both sides: the summary lifts
+terse **recall** (+6pp, significant), and the cleanup lifts **precision** (~11% of top-3 slots
+de-junked). The recall gains are modest and we say so — but the cleaner earns most of its keep in
+precision, which a coverage metric alone would have missed entirely.
+
+### Where this sits in the literature
+
+Prepending an LLM context blurb before embedding is Anthropic's *Contextual Retrieval* (2024), which
+conditions on the whole document. The email-RAG tools we looked at take a different cut: RAG-Mail is
+thread-aware but embeds raw text; msgvault and Onyx are hybrid/contextual but not per-email
+thread-conditioned; the causal-ancestor idea appears in email-thread *summarization* (EmailSum, 2021)
+but not as an embedded retrieval signal. The combination we did not find already done is the specific
+one here — a per-email summary conditioned on *preceding* thread context, embedded as the retrieval
+surrogate. It is a deliberate specialization of contextual retrieval to causal conversation
+structure, not a new primitive, and the motivation is practical: preceding-only is **append-only**,
+so live ingest summarizes each message once against what already exists, rather than re-summarizing
+and re-embedding a whole thread every time it grows.
+
+### Open questions / future work
+
+- **Whole-thread (bidirectional) control.** A third summary arm conditioned on the *whole* thread
+  (the way Anthropic's contextual retrieval conditions on the whole document) would test whether
+  preceding-only leaves accuracy on the table. The expectation is **whole ≈ preceding** — in which
+  case preceding-only is the better design precisely because it is **append-only**: live ingest
+  summarizes each message once against what already exists, where a whole-thread index has to
+  re-embed a thread's earlier messages every time it grows. Implemented behind
+  `gen_thread_summaries.py --mode whole`; measurement pending.
+- **End-to-end answer-quality impact of cleanup.** We have shown the cleanup is a *precision* win at
+  retrieval (~11% of top-3 slots de-junked, above) — the open question is how much that junk actually
+  degrades *answers*. An end-to-end A/B (regex+LLM vs regex-only corpus, same queries, scored by the
+  answer judge) would price it; expected to matter most on terse queries, where noise crowds a thin
+  answer signal.
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
@@ -376,8 +694,23 @@ Findings:
   parent-id segmentation).
 - ~~**Larger labeled eval set**~~ — DONE (§9). Settled it: keep C′, C′+top-1–3 threads, rerank
   off, a small model suffices. **New lead: retrieval coverage (~76%) is the ceiling, not the
-  answer model** — see #12 (diagnose the misses), #11 (per-thread summaries), #13 (summary
-  prompt), #14 (chunk size).
+  answer model.**
+- ~~**Diagnose the coverage ceiling** (#12)~~ — DONE (§10). The ceiling is a **query→document
+  matching** problem, not indexing/chunking (0/6 hard misses are chunk defects; the gold email
+  is retrievable at rank ~0 from its own text).
+- ~~**Eval hygiene** (#18)~~ — DONE (§ eval-refresh). 120 validated queries; clean 82% baseline.
+- ~~**Cheap fusion/widen-N wins** (#17)~~ — DONE (§11). **Negative result:** tunable power-mean
+  fusion + widen-N are within-noise / counterproductive end-to-end here; kept RRF default, shipped
+  `make_rank_fusion` as a corpus-tunable knob. Retrieval-knob tuning is second-order.
+- ~~**Query-side retrieval (#16)**~~ — DONE (§12). **Negative result:** HyDE / anchored query
+  expansion never beats the raw query on this entity-rich corpus, confirmed across an e4b→Opus
+  generator ladder. The query already holds the optimal anchors; a hypothetical can only fabricate
+  drift or echo the query. Apparatus kept (`src/query/hyde.py`) for lexical corpora.
+- ~~**Doc-side queryable summaries (#11/#13)**~~ — DONE (§13). Preceding-thread-context embedded
+  summaries **significantly improve terse-reply retrieval** (75%→81% covered@3, p=0.035, same-quant
+  n=360); corpus-wide effect modest (+3pp, n.s.). Key lesson: an earlier +6pp was half a 6→8bit
+  **quant confound** — the same-quant control halved it. Whole-thread (bidirectional) control PENDING
+  to settle the append-only novelty framing. **#14 (chunk-size) closed via `embed_max_length` decoupling.**
 - ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
   by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain

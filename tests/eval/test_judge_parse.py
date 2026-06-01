@@ -1,6 +1,6 @@
 # tests/eval/test_judge_parse.py
 import unittest
-from src.eval.judge_parse import build_judge_prompt, parse_grade, RUBRIC
+from src.eval.judge_parse import build_judge_prompt, parse_grade, RUBRIC, build_answer_judge_prompt
 
 
 class BuildPromptTest(unittest.TestCase):
@@ -11,6 +11,20 @@ class BuildPromptTest(unittest.TestCase):
         self.assertIn("0", p)
         self.assertIn("3", p)
         self.assertIn(RUBRIC.strip().splitlines()[0], p)
+
+
+class TestBuildAnswerJudgePrompt(unittest.TestCase):
+    def test_embeds_query_answer_reference(self):
+        p = build_answer_judge_prompt("the QUERY", "the ANSWER", "the REFERENCE")
+        self.assertIn("the QUERY", p)
+        self.assertIn("the ANSWER", p)
+        self.assertIn("the REFERENCE", p)
+
+    def test_asks_for_single_integer_grade(self):
+        p = build_answer_judge_prompt("q", "a", "r")
+        self.assertIn("0", p)
+        self.assertIn("3", p)
+        self.assertIn("ONLY", p)
 
 
 class ParseGradeTest(unittest.TestCase):

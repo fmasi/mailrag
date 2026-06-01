@@ -46,6 +46,35 @@ class TestBuildHybridSearcher(unittest.TestCase):
             retr_kwargs = IDX.from_vector_store.return_value.as_retriever.call_args.kwargs
             self.assertEqual(retr_kwargs["vector_store_query_mode"], "default")
 
+    def test_sparse_mode_uses_sparse_query_mode(self):
+        p_vs, p_idx, p_rr = self._patches()
+        with p_vs, p_idx as IDX, p_rr:
+            hybrid.build_hybrid_searcher(
+                "work-rag", client=MagicMock(), embedder=MagicMock(), mode="sparse",
+            )
+            retr_kwargs = IDX.from_vector_store.return_value.as_retriever.call_args.kwargs
+            self.assertEqual(retr_kwargs["vector_store_query_mode"], "sparse")
+
+    def test_custom_fusion_fn_is_passed_to_vector_store(self):
+        p_vs, p_idx, p_rr = self._patches()
+        with p_vs as VS, p_idx, p_rr:
+            sentinel = object()
+            hybrid.build_hybrid_searcher(
+                "work-rag", client=MagicMock(), embedder=MagicMock(),
+                mode="hybrid", fusion_fn=sentinel,
+            )
+            _, kwargs = VS.call_args
+            self.assertIs(kwargs["hybrid_fusion_fn"], sentinel)
+
+    def test_default_fusion_fn_is_reciprocal_rank_fusion(self):
+        p_vs, p_idx, p_rr = self._patches()
+        with p_vs as VS, p_idx, p_rr:
+            hybrid.build_hybrid_searcher(
+                "work-rag", client=MagicMock(), embedder=MagicMock(), mode="hybrid",
+            )
+            _, kwargs = VS.call_args
+            self.assertIs(kwargs["hybrid_fusion_fn"], hybrid.reciprocal_rank_fusion)
+
     def test_rerank_true_attaches_reranker(self):
         p_vs, p_idx, p_rr = self._patches()
         with p_vs, p_idx, p_rr as RR:

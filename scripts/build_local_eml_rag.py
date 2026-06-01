@@ -48,11 +48,18 @@ def main(argv=None):
     ap.add_argument("--embed-batch", type=int, default=32)
     ap.add_argument("--upsert-batch", type=int, default=256)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--only-files", default=None,
+                    help="path to a newline list of .eml paths; restrict the build "
+                         "to their intersection with the selection (spike slice)")
     ap.add_argument("--profile", action="store_true", help="report cleaned body token lengths + suggest chunk_size, then exit")
     ap.add_argument("--recreate", action="store_true")
     ap.add_argument("--embed-summary", action="store_true",
                     help="contextual retrieval: prepend each email's Pass-2 summary "
                          "to the chunk text before embedding (needs --summary-cache)")
+    ap.add_argument("--embed-max-length", type=int, default=None,
+                    help="token ceiling for embedding; default = chunk_size "
+                         "(body-only) or chunk_size + summary headroom when --embed-summary "
+                         "(so the summary augments, not displaces, the body chunk)")
     args = ap.parse_args(argv)
 
     from src.ingest.local_source import resolve_index_files
@@ -60,6 +67,10 @@ def main(argv=None):
 
     sel = json.load(open(args.selection))
     kept, skipped = resolve_index_files(sel["root"], sel["selection_rules"], args.blacklist)
+    if args.only_files:
+        only = {l.strip() for l in open(args.only_files) if l.strip()}
+        kept = [p for p in kept if p in only]
+        print(f"--only-files: restricted to {len(kept)} of {len(only)} slice paths")
     if args.limit:
         kept = kept[: args.limit]
     print(f"selected {len(kept)} file(s); {len(skipped)} blacklisted")
@@ -126,7 +137,7 @@ def main(argv=None):
     from src.ingest.embedder import BgeM3Embedder
     from src.ingest.sparse import lexical_weights_to_sparse
     from src.ingest import hybrid_qdrant as hq
-    from src.ingest.embed_text import prepend_summary
+    from src.ingest.embed_text import prepend_summary, embed_max_length
 
     if args.embed_summary:
         print("contextual retrieval ON: prepending Pass-2 summaries to embedded text")
@@ -138,6 +149,10 @@ def main(argv=None):
     total = len(nodes)
     done = 0
     t_start = time.time()
+    enc_max_len = embed_max_length(args.chunk_size, args.embed_summary, override=args.embed_max_length)
+    if args.embed_summary:
+        _src = "override" if args.embed_max_length is not None else f"chunk_size {args.chunk_size} + summary headroom"
+        print(f"embed max_length = {enc_max_len} ({_src})")
     for i in range(0, total, args.upsert_batch):
         batch = nodes[i : i + args.upsert_batch]
         embed_texts = []
@@ -146,7 +161,7 @@ def main(argv=None):
             if args.embed_summary:
                 t = prepend_summary(t, n.metadata.get("summary"))
             embed_texts.append(t)
-        dense, sparse = embedder.encode(embed_texts, batch_size=args.embed_batch, max_length=args.chunk_size)
+        dense, sparse = embedder.encode(embed_texts, batch_size=args.embed_batch, max_length=enc_max_len)
         points = []
         for n, dv, lw in zip(batch, dense, sparse):
             idx, val = lexical_weights_to_sparse(lw)

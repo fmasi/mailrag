@@ -85,15 +85,17 @@ def build_hybrid_searcher(
     mode: str = "hybrid",
     rerank: bool = False,
     rerank_with_summary: bool = False,
+    fusion_fn=None,
     dense_top_k: int = 20,
     sparse_top_k: int = 20,
     top_n: int = 5,
 ) -> HybridSearcher:
     """Wire a HybridSearcher over an existing bge-m3 collection.
 
-    mode="dense" -> dense-only baseline; mode="hybrid" -> dense+sparse RRF.
+    mode="dense" -> dense-only baseline; mode="sparse" -> sparse-only; mode="hybrid" -> dense+sparse RRF.
     rerank=True attaches the cross-encoder reranker (top_n results).
     rerank_with_summary=True scores the cross-encoder on summary+body (takes precedence over rerank).
+    fusion_fn overrides the hybrid fusion callback (default RRF; see make_rank_fusion).
     `client`/`embedder` are injectable for testing; built lazily otherwise.
     """
     if client is None:
@@ -108,6 +110,8 @@ def build_hybrid_searcher(
     # sparse_doc_fn (fastembed/SPLADE) when one isn't supplied — which both pulls an
     # unwanted dep and would be the wrong vocabulary. Passing our bge-m3 fn avoids that.
     sparse_fn = make_bge_m3_sparse_query_fn(embedder)
+    if fusion_fn is None:
+        fusion_fn = reciprocal_rank_fusion
     vector_store = QdrantVectorStore(
         client=client,
         collection_name=collection,
@@ -116,12 +120,12 @@ def build_hybrid_searcher(
         sparse_vector_name=SPARSE_VECTOR_NAME,
         sparse_query_fn=sparse_fn,
         sparse_doc_fn=sparse_fn,
-        hybrid_fusion_fn=reciprocal_rank_fusion,
+        hybrid_fusion_fn=fusion_fn,
     )
     index = VectorStoreIndex.from_vector_store(
         vector_store, embed_model=BgeM3LlamaIndexEmbedding(embedder=embedder)
     )
-    query_mode = "hybrid" if mode == "hybrid" else "default"
+    query_mode = {"hybrid": "hybrid", "sparse": "sparse"}.get(mode, "default")
     # sparse_top_k is forwarded in both modes; LlamaIndex ignores it in "default" (dense) mode.
     retriever = index.as_retriever(
         vector_store_query_mode=query_mode,

@@ -40,3 +40,24 @@ def parse_grade(text: str) -> int:
     if m:
         return min(int(m.group(0)), 3)
     return 0
+
+
+ANSWER_RUBRIC = """
+Grade how well the ANSWER answers the QUESTION, using the REFERENCE answer email
+as the ground truth, on a 0-3 scale:
+3 = fully correct and complete per the reference
+2 = mostly correct; a minor omission or imprecision
+1 = partially correct, or mixes correct and incorrect claims
+0 = incorrect, unsupported, or "I don't know"
+""".strip()
+
+
+def build_answer_judge_prompt(query: str, answer: str, reference: str) -> str:
+    """Prompt to grade a generated ANSWER (0-3) against the gold REFERENCE email."""
+    return (
+        f"{ANSWER_RUBRIC}\n\n"
+        f"QUESTION:\n{query}\n\n"
+        f"REFERENCE (ground truth email):\n{reference}\n\n"
+        f"ANSWER:\n{answer}\n\n"
+        "Respond with ONLY the single integer grade (0, 1, 2, or 3)."
+    )
