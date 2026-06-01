@@ -72,14 +72,19 @@ Return ONLY this JSON (no markdown, no extra text):
 {{"is_noise": <bool>, "confidence": <float>, "summary": "<text>", "reason": "<text>"}}"""
 
 
-def _format_preceding(preceding, per_email_chars: int) -> str:
-    """Render the earlier-thread context block (empty string if no preceding).
+def _format_preceding(
+    preceding, per_email_chars: int,
+    header: str = "EARLIER messages in this thread (context only, oldest first):",
+) -> str:
+    """Render a thread-context block (empty string if no context messages).
 
-    Each preceding message body is truncated to ``per_email_chars`` characters.
+    Each context message body is truncated to ``per_email_chars`` characters. The
+    *header* line is parameterized so the same renderer serves both the
+    preceding-only (causal) and whole-thread (bidirectional) prompts.
     """
     if not preceding:
         return ""
-    lines = ["EARLIER messages in this thread (context only, oldest first):"]
+    lines = [header]
     for e in preceding:
         body = (e.get("body") or "").strip()
         if len(body) > per_email_chars:
@@ -105,6 +110,61 @@ def build_thread_aware_prompt(email: Dict[str, Any], preceding,
         body = body[:body_chars] + " […truncated]"
     return _THREAD_PROMPT_TEMPLATE.format(
         preceding_block=_format_preceding(pre, per_email_chars),
+        sender=(email.get("sender") or "")[:200],
+        date=email.get("date") or "unknown",
+        subject=(email.get("subject") or "")[:300],
+        body=body,
+    )
+
+
+_WHOLE_THREAD_PROMPT_TEMPLATE = """You are cleaning a corporate email archive for a retrieval system.
+You are given ALL OTHER messages in this email thread (full context, both earlier and
+later), then the TARGET email. Read them and return STRICT JSON only about the TARGET.
+
+{others_block}TARGET email:
+Sender: {sender}
+Date: {date}
+Subject: {subject}
+Body:
+{body}
+
+Decide:
+- "is_noise": true if the TARGET is NOT a real human business conversation
+  (newsletter, automated notification, marketing, social-media alert, system
+  digest, calendar spam); false if it is genuine human business correspondence.
+- "confidence": your confidence in the is_noise judgment, 0.0 to 1.0.
+- "summary": one or two sentences capturing the key entities, decisions, and dates
+  and what the TARGET says or asks, RESOLVING references using the full-thread
+  context (a terse reply should name what it is replying to), suitable for search.
+  Keep it tight. Empty string if is_noise is true.
+- "reason": one short sentence justifying the judgment.
+
+Return ONLY this JSON (no markdown, no extra text):
+{{"is_noise": <bool>, "confidence": <float>, "summary": "<text>", "reason": "<text>"}}"""
+
+
+def build_whole_thread_prompt(email: Dict[str, Any], others,
+                              body_chars: int = _BODY_CHARS,
+                              per_email_chars: int = 800,
+                              max_others: int = 24) -> str:
+    """Per-email summarize+judge prompt conditioned on the WHOLE thread.
+
+    The bidirectional control for the row-3 (preceding-only) method: *others* are all
+    OTHER messages in the thread (before AND after the target), mirroring Anthropic-
+    style whole-document contextual retrieval. Unlike
+    :func:`build_thread_aware_prompt` this is NOT append-only — it sees later replies,
+    so the index would change as a thread grows. Emits the same schema as
+    :func:`build_prompt`. At most ``max_others`` messages are shown (tail-biased when
+    exceeded) to bound tokens; threads are sampled at <=25 emails so this rarely trims.
+    """
+    ctx = list(others)[-max_others:] if (others and max_others > 0) else []
+    body = (email.get("body") or "").strip()
+    if len(body) > body_chars:
+        body = body[:body_chars] + " […truncated]"
+    return _WHOLE_THREAD_PROMPT_TEMPLATE.format(
+        others_block=_format_preceding(
+            ctx, per_email_chars,
+            header="OTHER messages in this thread (full context, oldest first):"),
         sender=(email.get("sender") or "")[:200],
         date=email.get("date") or "unknown",
         subject=(email.get("subject") or "")[:300],

@@ -553,6 +553,140 @@ the only cloud spend, query strings only).
 
 ---
 
+## 13. Doc-side thread-aware summaries — the evolution ladder (#11/#13, 2026-06-01)
+
+§12 ruled out the query side *with a mechanism*: this corpus is entity-rich, so the query already
+holds the optimal anchors. The remaining lever is the **document** side — make a terse reply carry
+the answer's vocabulary *at the unit that gets matched*. We do this with a per-email LLM summary,
+**prepended to the body and embedded** (contextual retrieval), where the summary is conditioned on
+the email's **preceding thread context** (causal, append-only). The whole point is to read this as
+an **evolution ladder** — what each increment adds, and at what cost — not a single hero number.
+
+### The ladder (each row adds one technique; retrieval is otherwise identical)
+
+| Row | Increment | LLM? |
+|---|---|---|
+| 0 | plain email RAG (body-only, email-level rank) | no |
+| 1 | + small→big retrieval (thread-level rank — match a unit, return its thread) | no |
+| 2 | + isolated per-email summary, embedded | yes |
+| 3 | + preceding-thread-context summary (this work) | yes |
+
+Rows 1–2 are existing techniques: small→big is parent-document / auto-merging retrieval
+(LlamaIndex, LangChain); embedding an LLM context blurb with each chunk is contextual retrieval
+(Anthropic, 2024). Row 3 is the variant we test — the summary sees only the email's *preceding*
+messages (causal, append-only) rather than the whole thread. The rest of this section measures what
+that change buys, and at what cost.
+
+**Result (n=360 validated queries, thread-level coverage, all summary arms at the same 26b@8bit
+quant — see "the quant confound" below for why same-quant matters):**
+
+| arm | R@1 | R@3 | R@5 | R@10 | MRR |
+|---|---|---|---|---|---|
+| row 1 — body-only | 60 | 71 | 76 | 81 | .675 |
+| row 2 — isolated summary @8bit | 70 | 81 | 86 | 89 | .763 |
+| **row 3 — preceding-context @8bit (ours)** | 70 | **84** | 87 | 91 | .779 |
+
+The ladder is monotone. The two biggest jumps tell the story: **row 0→1** (R@1 36→60, LLM-free) is
+the value of thread expansion alone; **row 2→3** is the increment this work adds.
+
+### ⚠ The quant confound (the key methodology lesson)
+
+An earlier pass compared preceding-context @**8bit** against an isolated control @**6bit** and
+reported +6pp R@3 (p=0.0017). Re-running the isolated control at the **same 8bit quant** showed
+that was inflated — it bundled two independent steps:
+
+- **6→8bit quantization of the summarizer:** isolated R@3 78 → 81 (+3pp) — nothing to do with
+  thread context.
+- **Preceding-context (same-quant):** isolated 81 → preceding 84 (+3pp) — the real method effect.
+
+Lesson: a summary-quality experiment must hold the **summarizer quant fixed**, or a quant step
+masquerades as a method effect. (Build controls: all arms share the 19,859-email corpus, 21,590
+chunks, `--chunk-size 512`, and `--embed-summary` with `embed_max_length` decoupled from chunk_size
+(#14) so the summary *adds* headroom rather than *displacing* body tokens.)
+
+### Honest significance (same-quant, n=360)
+
+- **Corpus-wide:** preceding vs isolated, covered@3 = 302/360 (83.9%) vs 290/360 (80.6%), net +12.
+  McNemar exact two-sided **p = 0.058 — directional, not significant.**
+- **By category (R@3), where the effect actually lives:**
+
+  | category (n) | isolated @8bit | preceding @8bit | Δ | McNemar p |
+  |---|---|---|---|---|
+  | terse (144) | 75% | 81% | +6pp | **0.035 ✓** |
+  | content (144) | 79% | 81% | +2pp | 0.61 |
+  | spanning (72) | 94% | 94% | 0 | 1.00 |
+
+- **The defensible claim:** *preceding-thread-context summaries significantly improve **terse-reply**
+  retrieval at the top-3 operating point (75%→81%, p=0.035, same-quant).* This is exactly the design
+  target — terse request→reply threads where no single email carries the query's vocabulary (§10).
+  The corpus-wide effect is real but modest (+3pp) and not yet significant; content/spanning are
+  unchanged, and within terse only R@3 (not R@1/5/10) reaches significance. We report the scoped
+  result, not a broad win.
+
+### What the LLM is really buying
+
+It's fair to ask whether a per-email LLM pass earns a +3pp retrieval gain. The framing that answers
+it is **one pass, paid twice**. The summary is not a separate call — it is a byproduct of the
+noise-classification pass the pipeline already runs on every email (§1–§5): a single call returns
+both `is_noise` and the summary. Used this way, that one pass pays twice — it removes the noise a
+**regex cannot** (§2: roughly a third of the noise needs the LLM to catch), *and* it yields the
+retrieval summary.
+
+The right baseline for the cleanup half is not "no cleanup" but the cleanup you get **free from a
+regex**; the LLM's marginal value is the noise the regex *misses*. We tested this directly: a
+body-only corpus cleaned by regex rules only (`config/noise_rules.yaml`) leaves ~8.7k LLM-only-noise
+emails in as distractors (28,628 emails vs the regex+LLM-clean 19,859); rerun the 360-query coverage
+and compare.
+
+The result is smaller than the hypothesis predicted, and worth stating plainly: gold-thread
+coverage@3 drops only **71% → 69%** when that residue is left in (+2pp for the LLM's incremental
+cleanup; McNemar p = 0.15 — directional, not significant). On this corpus the explanation is the same
+one from §12 — newsletter/notification noise is semantically far from the entity-rich queries, so it
+rarely out-ranks a specific gold thread. The **recall** cost of leaving it in is small.
+
+So the cleanup's value is not a gold-recall effect — it is a **precision** effect the recall metric
+cannot see, and we measured it directly (no answer-LLM, just a top-N retrieval and a
+clean-vs-noise membership check on `source_id`). On the regex-only corpus, the vector DB is **not**
+good enough to keep noise out: **21% of queries surface at least one noise email in their top-3, and
+~11% of all top-3 retrieval slots are noise** (top-5: 30% of queries, 12% of slots; top-10: 43%,
+13%). That is the junk a regex misses, sitting in the very context an answer model would receive —
+removed *for free* by the same LLM pass that produced the summary.
+
+Net, the "one pass, paid twice" economics hold and now have numbers on both sides: the summary lifts
+terse **recall** (+6pp, significant), and the cleanup lifts **precision** (~11% of top-3 slots
+de-junked). The recall gains are modest and we say so — but the cleaner earns most of its keep in
+precision, which a coverage metric alone would have missed entirely.
+
+### Where this sits in the literature
+
+Prepending an LLM context blurb before embedding is Anthropic's *Contextual Retrieval* (2024), which
+conditions on the whole document. The email-RAG tools we looked at take a different cut: RAG-Mail is
+thread-aware but embeds raw text; msgvault and Onyx are hybrid/contextual but not per-email
+thread-conditioned; the causal-ancestor idea appears in email-thread *summarization* (EmailSum, 2021)
+but not as an embedded retrieval signal. The combination we did not find already done is the specific
+one here — a per-email summary conditioned on *preceding* thread context, embedded as the retrieval
+surrogate. It is a deliberate specialization of contextual retrieval to causal conversation
+structure, not a new primitive, and the motivation is practical: preceding-only is **append-only**,
+so live ingest summarizes each message once against what already exists, rather than re-summarizing
+and re-embedding a whole thread every time it grows.
+
+### Open questions / future work
+
+- **Whole-thread (bidirectional) control.** A third summary arm conditioned on the *whole* thread
+  (the way Anthropic's contextual retrieval conditions on the whole document) would test whether
+  preceding-only leaves accuracy on the table. The expectation is **whole ≈ preceding** — in which
+  case preceding-only is the better design precisely because it is **append-only**: live ingest
+  summarizes each message once against what already exists, where a whole-thread index has to
+  re-embed a thread's earlier messages every time it grows. Implemented behind
+  `gen_thread_summaries.py --mode whole`; measurement pending.
+- **End-to-end answer-quality impact of cleanup.** We have shown the cleanup is a *precision* win at
+  retrieval (~11% of top-3 slots de-junked, above) — the open question is how much that junk actually
+  degrades *answers*. An end-to-end A/B (regex+LLM vs regex-only corpus, same queries, scored by the
+  answer judge) would price it; expected to matter most on terse queries, where noise crowds a thin
+  answer signal.
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
@@ -572,12 +706,11 @@ the only cloud spend, query strings only).
   expansion never beats the raw query on this entity-rich corpus, confirmed across an e4b→Opus
   generator ladder. The query already holds the optimal anchors; a hypothetical can only fabricate
   drift or echo the query. Apparatus kept (`src/query/hyde.py`) for lexical corpora.
-- **▶ LEAD: doc-side queryable summaries (#11/#13)** — the surviving lever. Make the **documents**
-  more retrievable: thread-aware (whole-thread-context) embedded summaries, so terse request→reply
-  threads carry the answer's vocabulary at the unit that gets matched. EXPENSIVE (re-summarize +
-  re-embed ~21.5k emails) → confirm scope with Fred (cloud vs deliberate-local) before building;
-  one pass *per thread* emitting `{is_noise, thread-aware summary}` serves both noise-filtering and
-  C′-embedding (≈1× compute, since threads ≪ emails). **#14 (chunk size) de-prioritised.**
+- ~~**Doc-side queryable summaries (#11/#13)**~~ — DONE (§13). Preceding-thread-context embedded
+  summaries **significantly improve terse-reply retrieval** (75%→81% covered@3, p=0.035, same-quant
+  n=360); corpus-wide effect modest (+3pp, n.s.). Key lesson: an earlier +6pp was half a 6→8bit
+  **quant confound** — the same-quant control halved it. Whole-thread (bidirectional) control PENDING
+  to settle the append-only novelty framing. **#14 (chunk-size) closed via `embed_max_length` decoupling.**
 - ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
   by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain

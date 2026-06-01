@@ -1,6 +1,8 @@
 """Generate summaries over the spike slice into a Pass2Cache (#11/#13).
 
 --mode thread   : summarize each email with its PRECEDING thread context (the method)
+--mode whole    : summarize each email with the WHOLE thread (bidirectional) — the
+                  control that isolates preceding-only's novelty vs whole-document CR
 --mode isolated : summarize each email alone (control / today's prompt, new model)
 
 Walks the slice's threads chronologically (append-only, = the live-ingest order),
@@ -32,7 +34,23 @@ from src.data.identity import email_identity
 from src.data.threading import compute_thread_id
 from src.llm.cache import Pass2Cache
 from src.llm.client import make_client, chat, default_model
-from src.llm.summary import build_prompt, build_thread_aware_prompt, parse_response
+from src.llm.summary import (
+    build_prompt, build_thread_aware_prompt, build_whole_thread_prompt, parse_response,
+)
+
+
+def _build_prompt_for(mode, ed, preceding, others):
+    """Pure mode->prompt dispatch (unit-tested; keeps run() network-only).
+
+    thread   -> preceding-only (causal, append-only) context
+    whole    -> whole-thread (bidirectional) context — the row-3 novelty control
+    isolated -> no thread context (today's Pass-2 control)
+    """
+    if mode == "thread":
+        return build_thread_aware_prompt(ed, preceding)
+    if mode == "whole":
+        return build_whole_thread_prompt(ed, others)
+    return build_prompt(ed)
 
 
 def _record_failure(path: str, **rec) -> None:
@@ -109,18 +127,17 @@ def run(slice_path, out_path, mode, model):
         # preceding is a list of *dicts* — _format_preceding calls .get() on each
         # item, so NormalizedEmail objects would silently return empty strings for
         # every field.  Convert before accumulating.
+        # thread_dicts is the whole thread (for --mode whole = bidirectional context).
+        thread_dicts = [_as_dict(e) for e in thread]
         preceding = []
-        for e in thread:
+        for idx, e in enumerate(thread):
             sha = file_sha256(e.source_id)
-            ed = _as_dict(e)
+            ed = thread_dicts[idx]
             if cache.has(sha):
                 counts["cached"] += 1
             else:
-                prompt = (
-                    build_thread_aware_prompt(ed, preceding)
-                    if mode == "thread"
-                    else build_prompt(ed)
-                )
+                others = thread_dicts[:idx] + thread_dicts[idx + 1:]
+                prompt = _build_prompt_for(mode, ed, preceding, others)
                 raw = None
                 try:
                     raw = chat(client, model, prompt)
@@ -172,8 +189,9 @@ def main():
                     help="Newline-delimited list of .eml paths (from select_spike_slice.py)")
     ap.add_argument("--out", required=True,
                     help="Pass2Cache sqlite path (e.g. ~/rag_pass2/spike_A.db)")
-    ap.add_argument("--mode", choices=["thread", "isolated"], default="thread",
-                    help="thread = build_thread_aware_prompt; isolated = build_prompt (control)")
+    ap.add_argument("--mode", choices=["thread", "whole", "isolated"], default="thread",
+                    help="thread = preceding-only (causal); whole = full-thread "
+                         "(bidirectional) context; isolated = no thread context (control)")
     args = ap.parse_args()
     model = os.getenv("RAG_SUMMARY_MODEL", "").strip() or default_model()
     run(os.path.expanduser(args.slice), os.path.expanduser(args.out), args.mode, model)

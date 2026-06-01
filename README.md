@@ -8,6 +8,14 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
+> **Headline.** On a real ~32k-email corporate mailbox, the full stack takes answer coverage from
+> **45% (plain email RAG) → 84%** (coverage@3) — nearly doubling recall@1 (36% → 70%) — as the
+> *compound* effect of thread-aware expansion and preceding-context contextual summaries. The point
+> isn't only the number; it's the **methodology and rigor** behind it: **360 validated queries, an evolution ladder
+> that prices every increment, significance tests, and confounds caught and corrected** (a +6pp
+> headline that proved half a quantization artifact), **with all negative results kept in.**
+> A reproducible, documented worked example.
+
 ## What it does
 
 `mailrag` turns a mailbox into a queryable knowledge base:
@@ -21,9 +29,9 @@
   (match a small unit, answer from its full conversation).
 - **LLM "Pass-2"** — optional local-LLM summarization/judging of each email,
   content-addressed and cached.
-- **A measured methodology** — a labeled, LLM-judged retrieval eval (see the case
-  study below) that quantifies each technique and, in one case, *overturned* the
-  intuitive choice.
+- **A measured methodology** — a labeled, LLM-judged retrieval eval (360 validated
+  queries) that quantifies each technique, controls for confounds, reports
+  significance, and in several cases *overturned* the intuitive choice.
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
 
 ## Quickstart (runs against the public Enron dataset)
@@ -109,25 +117,42 @@ only it can produce.**
 |-----------|--------------|----------------------|
 | **Dense (semantic) only** | matches meaning & paraphrase | misses rare exact tokens (acronyms, IDs); returns redundant near-duplicate chunks |
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token / acronym precision, fused with semantics | needs a sparse-capable embedder + fusion; more storage |
-| **+ LLM noise removal** | precision — junk can't surface (≈1,000 spam-quarantine digests and ≈1,500 calendar notifications removed from results) | one-time LLM cost (see above) |
+| **+ LLM noise removal** | precision — catches the ~⅓ of noise that regex can't; *without it*, **21% of queries surface noise in their top-3 and ~11% of retrieval slots are junk** (measured) | one-time LLM cost (see above) |
 | **+ contextual retrieval** (prepend each email's summary before embedding — `C′`) | short/terse emails match by *gist*; in the labeled eval, the **best ranked arm** *and* the end-to-end winner | one extra embedded collection to build/maintain |
 | **+ cross-encoder reranker** | *(intuition: reorder candidates for precision)* | **measured to HURT** — under an LLM judge it demotes answer-bearing emails (§9); **off by default** |
 | **+ thread-aware expansion** (pull the full conversation of each top hit) | **~doubles answer-coverage** (terse replies 33% → ~80%) — match a small unit, answer from its thread | larger context per query (tunable: expand top-N threads) |
 
-**What a labeled eval settled** (45 queries × **3 lenses** — ranked metrics, answer-coverage,
-and end-to-end answer quality — × 2 answer models; LLM-as-judge calibrated against a stronger
-reference model; full write-up in [`EXPERIMENTS.md` §9](docs/EXPERIMENTS.md)):
+**What the labeled evals settled.** The eval set grew to **360 validated, LLM-screened queries**,
+scored as an **evolution ladder** — body-only → +thread expansion → +summary → +thread-aware summary
+— with significance tests and confound controls (full write-ups in
+[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md)):
 
-- **Thread-aware retrieval is the win.** Pulling a hit's full conversation roughly *doubles*
-  how often the answer actually reaches the LLM (terse queries 33% → ~80%) — confirming the
-  match-small / answer-from-the-thread design.
-- **Recommended stack: `C′` + expand the top ~1–3 threads, reranker OFF** — best end-to-end
-  answers (especially on terse replies), at a small context (~2 k tokens for the top thread).
-- **The reranker *hurt*** under LLM-judged relevance — a finding that *overturned* an earlier
-  eyeballed conclusion. The eval was built specifically to put that intuition to the test.
-- **The ceiling is retrieval, not the model.** When the answer was in the retrieved context,
-  even a **4 B** model answered correctly ~88% of the time; the lost points are queries where
-  retrieval never surfaced the right thread (~24%). Model size was second-order here.
+- **Thread expansion is the biggest single win — and it needs no LLM.** Matching a small unit and
+  returning its whole conversation lifts recall@1 from 36% → 60% (terse answer-coverage 33% → ~80%):
+  match-small, answer-from-the-thread.
+- **Thread-aware summaries help where they're designed to — terse replies.** Conditioning each
+  email's embedded summary on its *preceding* thread context significantly improves terse-reply
+  retrieval (covered@3 75% → 81%, p = 0.035). The corpus-wide effect is real but modest (+3pp), and
+  we report it as such rather than rounding up.
+- **A confound caught and reported.** An early +6pp headline turned out to be half a *quantization*
+  artifact; re-running the control at matched quant split it into +3pp (quant) + +3pp (method).
+  Holding the summarizer fixed is the difference between a result and a mirage.
+- **Cleanup pays in precision, not recall.** Leaving the noise a regex can't catch in the corpus
+  barely dents gold recall (the DB still finds the answer), but then **21% of queries surface noise
+  in their top-3** (~11% of slots) — junk the LLM removes for free in the same pass that writes the
+  summary.
+- **Two intuitive ideas, measured and rejected.** A cross-encoder reranker *hurt* under LLM-judged
+  relevance; query-side HyDE never beat the raw query on this entity-rich corpus. Both are kept
+  in-tree, off by default, for corpora where they'd pay off.
+- **The ceiling is retrieval, not the model.** With the answer in context, even a **4 B** model
+  answered ~88% correctly; the lost points are queries where retrieval never surfaced the thread.
+  Model size was second-order.
+
+**Compound effect — the whole point.** End to end, these layers take coverage@3 from **45% (plain
+email RAG) to 84%**, recall@1 from **36% → 70%**, and MRR **.43 → .78** — most of it from
+thread-awareness, the remainder from the contextual summary, each increment individually measured
+above. The value isn't any single trick; it's the **methodology** — a disciplined stack, with the
+**rigor** to prove every layer earns its place.
 
 **Worked example.** Searching for a partner certification program by its acronym
 (`"ACP"`) mixes a *semantic* concept (certification readiness) with a *rare exact token*
@@ -158,7 +183,7 @@ finds the token but misses paraphrases; **hybrid + RRF gets both.** Multi-query 
 - [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points
 - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning
-- [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs (cleanup economics, regex-vs-LLM, retrieval methodology, and the **§9 labeled eval**: thread-aware retrieval, the reranker reversal, and "retrieval is the ceiling, not the model") with real, anonymized numbers
+- [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs: cleanup economics, regex-vs-LLM, and the **labeled-eval ladder (§9–§13)** — thread-aware retrieval, the contextual-summary result and its quant-confound control, the cleanup precision finding, the reranker and HyDE reversals, and "retrieval is the ceiling, not the model" — all with real, anonymized numbers
 - [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware expansion
 - [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent)
 
