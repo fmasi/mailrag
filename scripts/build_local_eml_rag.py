@@ -25,7 +25,6 @@ import json
 import os
 import statistics
 import sys
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -118,64 +117,32 @@ def main(argv=None):
         return 0
 
     # ---- build mode ----
-    from llama_index.core.node_parser import SentenceSplitter
-    from llama_index.core.schema import MetadataMode
-
-    splitter = SentenceSplitter(
-        chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap, tokenizer=encode_len
-    )
-    nodes = splitter.get_nodes_from_documents(docs, show_progress=False)
-    print(f"{len(nodes)} chunks before dedup")
-
-    from src.data.dedup import dedup_by_content
-    nodes = dedup_by_content(nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE))
-    print(f"{len(nodes)} chunks after dedup")
-    if not nodes:
-        print("nothing to index")
-        return 0
-
     from src.ingest.embedder import BgeM3Embedder
-    from src.ingest.sparse import lexical_weights_to_sparse
-    from src.ingest import hybrid_qdrant as hq
-    from src.ingest.embed_text import prepend_summary, embed_max_length
+    from src.indexing.contextual_index import build_contextual_index
 
     if args.embed_summary:
         print("contextual retrieval ON: prepending Pass-2 summaries to embedded text")
 
-    client = hq.get_client(args.qdrant_url)
-    hq.ensure_hybrid_collection(client, args.collection, dim=1024, recreate=args.recreate)
+    # summaries=None: inject_summaries() already set e.summary on each email;
+    # to_document() surfaces that as metadata["summary"], and build_contextual_index
+    # reads it from there. Passing summaries=None avoids a second injection pass.
     embedder = BgeM3Embedder(device="mps", use_fp16=True)
+    res = build_contextual_index(
+        emails,
+        collection=args.collection,
+        embedder=embedder,
+        summaries=None,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
+        embed_summary=args.embed_summary,
+        embed_max_length_override=args.embed_max_length,
+        embed_batch=args.embed_batch,
+        upsert_batch=args.upsert_batch,
+        recreate=args.recreate,
+        qdrant_url=args.qdrant_url,
+    )
 
-    total = len(nodes)
-    done = 0
-    t_start = time.time()
-    enc_max_len = embed_max_length(args.chunk_size, args.embed_summary, override=args.embed_max_length)
-    if args.embed_summary:
-        _src = "override" if args.embed_max_length is not None else f"chunk_size {args.chunk_size} + summary headroom"
-        print(f"embed max_length = {enc_max_len} ({_src})")
-    for i in range(0, total, args.upsert_batch):
-        batch = nodes[i : i + args.upsert_batch]
-        embed_texts = []
-        for n in batch:
-            t = n.get_content(metadata_mode=MetadataMode.EMBED)
-            if args.embed_summary:
-                t = prepend_summary(t, n.metadata.get("summary"))
-            embed_texts.append(t)
-        dense, sparse = embedder.encode(embed_texts, batch_size=args.embed_batch, max_length=enc_max_len)
-        points = []
-        for n, dv, lw in zip(batch, dense, sparse):
-            idx, val = lexical_weights_to_sparse(lw)
-            payload = dict(n.metadata)
-            payload["text"] = n.get_content(metadata_mode=MetadataMode.NONE)
-            points.append(hq.make_point(n.node_id, dv, idx, val, payload))
-        hq.upsert(client, args.collection, points)
-        done += len(batch)
-        rate = done / (time.time() - t_start)
-        print(f"  upserted {done}/{total}  ({rate:.0f} chunks/s)")
-
-    print(f"DONE: {done} chunks -> '{args.collection}' in {time.time()-t_start:.1f}s")
-    info = client.get_collection(args.collection)
-    print(f"collection points_count={info.points_count}")
+    print(f"DONE: {res.chunks} chunks -> '{res.collection}'")
     return 0
 
 

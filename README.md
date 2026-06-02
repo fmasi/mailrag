@@ -34,18 +34,20 @@
   significance, and in several cases *overturned* the intuitive choice.
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
 
-## Quickstart (runs against the public Enron dataset)
+## Quickstart (thread-aware contextual RAG over the public Enron dataset)
 
 ```bash
 git clone https://github.com/fmasi/mailrag.git
 cd mailrag
-poetry install            # or: pip install -r requirements.txt
-cp .env.example .env      # add your OPENAI_API_KEY
-python main.py            # builds an index over 100 Enron emails and runs demo queries
+pip install -r requirements.txt        # includes FlagEmbedding (bge-m3); first run downloads ~2 GB of weights
+cp .env.example .env                    # add an LLM key/endpoint (used for summaries + answers)
+make demo                               # starts Qdrant, builds the contextual index, runs thread-aware queries
 ```
 
-`main.py` initializes config, loads 100 Enron emails, builds the index, and runs
-three example queries (pure retrieval, RAG-with-LLM, metadata-filtered).
+`make demo` brings up Qdrant (Docker), builds a **thread-aware contextual** index over 100 Enron
+emails — per-email preceding-context summaries embedded with bge-m3 hybrid vectors — then answers
+example questions by retrieving and assembling whole threads. This is the §13 stack (see the case
+study); a small amount of LLM usage is spent on the Pass-2 summaries and the answers.
 
 ## Architecture
 

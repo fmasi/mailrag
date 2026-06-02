@@ -13,6 +13,7 @@ huggingface-hub
 python-dotenv
 pydantic
 qdrant-client
+FlagEmbedding
 
 # Optional: For better CLI and logging
 tqdm
