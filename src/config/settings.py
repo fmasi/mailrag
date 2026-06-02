@@ -64,7 +64,7 @@ class RAGConfig:
     PINECONE_INDEX_NAME: str = "email-rag"
     QDRANT_URL: str = ""
     QDRANT_API_KEY: str = ""
-    QDRANT_COLLECTION_NAME: str = "email-rag"
+    QDRANT_COLLECTION_NAME: str = "mailrag-demo"
     QDRANT_PREFER_GRPC: bool = False
     
     @staticmethod
