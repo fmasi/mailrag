@@ -623,6 +623,30 @@ chunks, `--chunk-size 512`, and `--embed-summary` with `embed_max_length` decoup
   unchanged, and within terse only R@3 (not R@1/5/10) reaches significance. We report the scoped
   result, not a broad win.
 
+### Preceding vs whole-thread: append-only is free
+
+Does *preceding-only* leave accuracy on the table versus conditioning on the **whole** thread (the
+bidirectional context Anthropic's contextual retrieval uses)? We built that arm too
+(`gen_thread_summaries.py --mode whole`, same 26b@8bit) and measured all three at matched quant:
+
+| arm (thread-level) | R@1 | R@3 | R@5 | R@10 | MRR |
+|---|---|---|---|---|---|
+| iso @8bit | 70 | 81 | 86 | 89 | .763 |
+| preceding @8bit (ours) | 70 | 84 | 87 | 91 | .779 |
+| whole @8bit (bidirectional) | 73 | 84 | 89 | 91 | .799 |
+
+**Whole ≈ preceding.** At the top-3 operating point they are statistically indistinguishable —
+covered@3 84.4% (whole) vs 83.9% (preceding), McNemar p = 0.82; per-category R@3 is within a point
+everywhere (terse 82 vs 81, content 82 vs 81, spanning tied). Both significantly beat iso (whole vs
+iso p = 0.02). Whole holds a slight edge at R@1 (73 vs 70) and MRR (.799 vs .779) — seeing later
+replies refines the *top* rank a little — but buys nothing at top-3.
+
+That is the result the method was designed around: **bidirectional context adds no coverage over
+preceding-only, so the append-only property comes for free.** Preceding-only summarizes each message
+once, against what already existed when it arrived, and never re-summarizes or re-embeds a thread's
+earlier messages as it grows — where a whole-thread index is unstable, every new reply invalidating
+its siblings' vectors. Same accuracy, live-ingest-friendly by construction.
+
 ### What the LLM is really buying
 
 It's fair to ask whether a per-email LLM pass earns a +3pp retrieval gain. The framing that answers
@@ -672,13 +696,6 @@ and re-embedding a whole thread every time it grows.
 
 ### Open questions / future work
 
-- **Whole-thread (bidirectional) control.** A third summary arm conditioned on the *whole* thread
-  (the way Anthropic's contextual retrieval conditions on the whole document) would test whether
-  preceding-only leaves accuracy on the table. The expectation is **whole ≈ preceding** — in which
-  case preceding-only is the better design precisely because it is **append-only**: live ingest
-  summarizes each message once against what already exists, where a whole-thread index has to
-  re-embed a thread's earlier messages every time it grows. Implemented behind
-  `gen_thread_summaries.py --mode whole`; measurement pending.
 - **End-to-end answer-quality impact of cleanup.** We have shown the cleanup is a *precision* win at
   retrieval (~11% of top-3 slots de-junked, above) — the open question is how much that junk actually
   degrades *answers*. An end-to-end A/B (regex+LLM vs regex-only corpus, same queries, scored by the
