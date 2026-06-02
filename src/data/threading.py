@@ -77,3 +77,30 @@ def compute_thread_id(
         if slug:
             return f"subj:{slug}"
     return key
+
+
+def assign_subject_fallback_thread_ids(emails):
+    """Set a subject-slug ``thread_id`` on every email that lacks one.
+
+    Header-less corpora (e.g. the public HF Enron export) have no RFC threading
+    headers, so without this every email lands in one empty-key bucket. Setting
+    the id up front makes summary grouping, chunk persistence, and retrieval-time
+    assembly share one key. Returns the count assigned. Tolerates frozen/mocked
+    objects (skips them silently)."""
+    n = 0
+    for e in emails:
+        if getattr(e, "thread_id", None):
+            continue
+        tid = compute_thread_id(
+            getattr(e, "message_id", "") or "",
+            getattr(e, "in_reply_to", "") or "",
+            getattr(e, "references", "") or "",
+            subject=getattr(e, "subject", "") or "",
+        )
+        if tid:
+            try:
+                e.thread_id = tid
+                n += 1
+            except (AttributeError, TypeError):
+                pass
+    return n

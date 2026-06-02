@@ -79,24 +79,8 @@ def run_demo(
     _init_settings()
     _require_qdrant()
     emails = _load_demo_emails(num_samples)
-    # Enron emails have no RFC threading headers, so thread_id would be empty
-    # when persisted by NormalizedEmail.to_document().  Pre-set the subject-slug
-    # fallback on every email that lacks one so that summary-grouping, chunk
-    # persistence, and retrieval-time assembly all use the same key.
-    from src.data.threading import compute_thread_id
-    for e in emails:
-        if not getattr(e, "thread_id", None):
-            tid = compute_thread_id(
-                getattr(e, "message_id", "") or "",
-                getattr(e, "in_reply_to", "") or "",
-                getattr(e, "references", "") or "",
-                subject=getattr(e, "subject", "") or "",
-            )
-            if tid:
-                try:
-                    e.thread_id = tid
-                except (AttributeError, TypeError):
-                    pass  # tolerate mocked / frozen objects in tests
+    from src.data.threading import assign_subject_fallback_thread_ids
+    assign_subject_fallback_thread_ids(emails)
     print(f"Loaded {len(emails)} Enron emails; generating thread-aware summaries (LLM)...")
     summaries = generate_thread_summaries(emails)
     res = build_contextual_index(
