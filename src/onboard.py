@@ -9,6 +9,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.data.threading import assign_subject_fallback_thread_ids
+
 
 def collection_slug(source_dir):
     """Default collection name for a source directory: ``mailrag-<slug>``."""
@@ -154,3 +156,80 @@ def validate_coverage(collection, *, searcher=None, queries_path=None,
     except Exception as exc:  # best-effort validation
         print(f"validation skipped: {exc}")
         return None, 0
+
+
+def _require_qdrant(qdrant_url):
+    """Fail fast (before the expensive LLM pass) if Qdrant is unreachable."""
+    from src.ingest import hybrid_qdrant as hq
+    try:
+        hq.get_client(qdrant_url).get_collections()
+    except Exception as e:
+        raise ValueError(
+            f"Qdrant not reachable at {qdrant_url}. Start it with "
+            f"`docker compose up -d qdrant`. ({e})")
+
+
+def _profile_chunk_size(emails):
+    from transformers import AutoTokenizer
+    from src.ingest.profile import suggest_chunk_size
+    tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")
+    lengths = [len(tok.encode(e.body or "", add_special_tokens=False))
+               for e in emails if (e.body or "").strip()]
+    return suggest_chunk_size(lengths)
+
+
+def run_onboard(source_dir, *, collection=None, chunk_size=None, queries_path=None,
+                validate=True, limit=None, noise_min_confidence=0.7, model=None,
+                qdrant_url="http://localhost:6333", embedder=None, cache_path=None):
+    """Profile -> single resumable LLM pass -> filter+build -> validate -> report."""
+    from src.llm.cache import Pass2Cache
+    from src.llm.onboard_pass import generate_thread_judgments
+    from src.indexing.contextual_index import build_contextual_index
+
+    collection = collection or collection_slug(source_dir)
+    _require_qdrant(qdrant_url)
+
+    emails = load_eml_dir(source_dir, limit=limit)
+    assign_subject_fallback_thread_ids(emails)
+
+    if chunk_size is None:
+        chunk_size = _profile_chunk_size(emails)
+
+    cache_path = cache_path or str(MANIFEST_DIR / f"{collection}.pass.db")
+    MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+    cache = Pass2Cache(cache_path)
+    try:
+        from tqdm import tqdm
+        bar = tqdm(total=len(emails), desc="clean+summarize")
+        judgments = generate_thread_judgments(
+            emails, cache=cache, model=model, progress=bar.update)
+        bar.close()
+    finally:
+        cache.close()
+
+    llm_failures = sum(1 for r in judgments.values()
+                       if str(r.get("reason", "")).startswith("llm_error"))
+    kept, noise_dropped = filter_kept(
+        emails, judgments, min_confidence=noise_min_confidence)
+    if not kept:
+        raise ValueError("all emails were filtered as noise; nothing to index")
+
+    if embedder is None:
+        from src.ingest.embedder import BgeM3Embedder
+        embedder = BgeM3Embedder(use_fp16=True)
+    res = build_contextual_index(
+        kept, collection=collection, embedder=embedder, summaries=None,
+        embed_summary=True, chunk_size=chunk_size, recreate=True,
+        qdrant_url=qdrant_url)
+
+    coverage, n_queries = (None, 0)
+    if validate:
+        coverage, n_queries = validate_coverage(collection, queries_path=queries_path)
+
+    report = OnboardReport(
+        collection=collection, kept=len(kept), noise_dropped=noise_dropped,
+        llm_failures=llm_failures, chunks=res.chunks, chunk_size=chunk_size,
+        coverage_at3=coverage, n_queries=n_queries,
+        validated=(coverage is not None))
+    write_manifest(report, source=str(source_dir), model=(model or ""))
+    return report
