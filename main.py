@@ -54,18 +54,6 @@ def _require_qdrant(url="http://localhost:6333"):
         )
 
 
-def _answer(query, contexts):
-    """Generate a grounded answer using the project LLM client and retrieved thread contexts."""
-    from src.llm.client import make_client, chat, default_model
-    if not contexts:
-        return "No relevant threads retrieved."
-    joined = "\n\n---\n\n".join(c.text for c in contexts[:3])
-    prompt = (
-        f"Answer the question using only these email threads.\n\n"
-        f"Threads:\n{joined}\n\nQuestion: {query}\nAnswer:"
-    )
-    return chat(make_client(), default_model(), prompt)
-
 
 def run_demo(
     num_samples=100,
@@ -79,24 +67,9 @@ def run_demo(
     _init_settings()
     _require_qdrant()
     emails = _load_demo_emails(num_samples)
-    # Enron emails have no RFC threading headers, so thread_id would be empty
-    # when persisted by NormalizedEmail.to_document().  Pre-set the subject-slug
-    # fallback on every email that lacks one so that summary-grouping, chunk
-    # persistence, and retrieval-time assembly all use the same key.
-    from src.data.threading import compute_thread_id
-    for e in emails:
-        if not getattr(e, "thread_id", None):
-            tid = compute_thread_id(
-                getattr(e, "message_id", "") or "",
-                getattr(e, "in_reply_to", "") or "",
-                getattr(e, "references", "") or "",
-                subject=getattr(e, "subject", "") or "",
-            )
-            if tid:
-                try:
-                    e.thread_id = tid
-                except (AttributeError, TypeError):
-                    pass  # tolerate mocked / frozen objects in tests
+    from src.data.threading import assign_subject_fallback_thread_ids
+    from src.llm.answer import answer_from_threads
+    assign_subject_fallback_thread_ids(emails)
     print(f"Loaded {len(emails)} Enron emails; generating thread-aware summaries (LLM)...")
     summaries = generate_thread_summaries(emails)
     res = build_contextual_index(
@@ -113,7 +86,7 @@ def run_demo(
         print(f"\nQ: {q}")
         contexts = searcher.search_threads(q)
         print(f"  retrieved {len(contexts)} thread(s); answering...")
-        print("  A:", _answer(q, contexts))
+        print("  A:", answer_from_threads(q, contexts))
 
 
 def main():

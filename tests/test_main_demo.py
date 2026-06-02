@@ -10,7 +10,7 @@ class TestMainDemo(unittest.TestCase):
              mock.patch.object(m, "generate_thread_summaries", return_value={}), \
              mock.patch.object(m, "build_contextual_index") as build, \
              mock.patch.object(m, "build_hybrid_searcher") as mk_searcher, \
-             mock.patch.object(m, "_answer", return_value="ANSWER"), \
+             mock.patch("src.llm.answer.answer_from_threads", return_value="ANSWER"), \
              mock.patch.object(m, "_make_embedder", return_value=mock.Mock()), \
              mock.patch.object(m, "_require_qdrant", return_value=None), \
              mock.patch.object(m, "_init_settings", return_value=None):

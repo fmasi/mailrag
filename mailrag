@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Thin shim so `mailrag onboard ...` works without packaging (poetry package-mode=false).
+exec python -m src.cli "$@"
