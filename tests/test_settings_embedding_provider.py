@@ -38,7 +38,7 @@ class TestEmbeddingProviderSettings(unittest.TestCase):
         clear=True,
     )
     @patch("src.config.settings.Settings")
-    @patch("src.config.settings.OpenAIEmbedding")
+    @patch("llama_index.embeddings.openai.OpenAIEmbedding")
     def test_lmstudio_embedding_does_not_require_openai_key(
         self, mock_embedding, _mock_settings
     ):
@@ -74,7 +74,7 @@ class TestEmbeddingProviderSettings(unittest.TestCase):
         clear=True,
     )
     @patch("src.config.settings.Settings")
-    @patch("src.config.settings.OpenAIEmbedding")
+    @patch("llama_index.embeddings.openai.OpenAIEmbedding")
     @patch("builtins.print")
     def test_invalid_embedding_provider_falls_back_to_default(
         self, mock_print, mock_embedding, _mock_settings
@@ -104,8 +104,8 @@ class TestEmbeddingProviderSettings(unittest.TestCase):
         clear=True,
     )
     @patch("src.config.settings.Settings")
-    @patch("src.config.settings.OpenAIEmbedding")
-    @patch("src.config.settings.OpenAI")
+    @patch("llama_index.embeddings.openai.OpenAIEmbedding")
+    @patch("llama_index.llms.openai.OpenAI")
     def test_lmstudio_llm_does_not_require_openai_key(
         self, mock_llm, _mock_embedding, _mock_settings
     ):

@@ -11,9 +11,6 @@ import os
 from typing import Optional
 
 from llama_index.core import Settings
-from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.llms.openai import OpenAI
-from llama_index.llms.perplexity import Perplexity
 
 
 class RAGConfig:
@@ -223,20 +220,42 @@ class RAGConfig:
         )
     
     @staticmethod
-    def initialize_settings(include_llm: bool = True) -> None:
+    def initialize_settings(
+        include_llm: bool = True,
+        include_embeddings: bool = True,
+    ) -> None:
         """
         Initialize the LlamaIndex Settings object with configured LLM and embeddings.
-        
+
         This is where we set up the global LlamaIndex settings. By centralizing this,
         we avoid having to pass these objects around throughout the codebase.
         Instead, LlamaIndex components will use these global settings automatically.
+
+        Args:
+            include_llm: When True (default), build and set Settings.llm.  Pass
+                False to skip LLM construction (e.g. indexing-only pipelines).
+            include_embeddings: When True (default), build and set
+                Settings.embed_model.  Pass False when the caller manages its own
+                embedding model directly (e.g. the novel demo uses bge-m3 via
+                FlagEmbedding and does not need the LlamaIndex embed model).
+                Skipping also avoids importing ``llama_index.embeddings.openai``,
+                which is not available in all environments.
+
+        Both the LLM and embedding imports are lazy (deferred to call time) so
+        that ``import src.config.settings`` is safe in environments that have
+        ``llama-index-core`` but not the optional LLM / embedding integrations.
         """
         # Load config from environment variables
         RAGConfig.load_from_env()
-        
+
         llm = None
         if include_llm:
+            # Lazy imports: only require llama_index.llms.* when we actually
+            # build the LLM.  This keeps ``import src.config.settings`` safe in
+            # environments (e.g. the novel demo's ``rag`` conda env) that have
+            # llama-index-core but NOT llama-index-llms-openai/perplexity.
             if RAGConfig.LLM_PROVIDER == "openai":
+                from llama_index.llms.openai import OpenAI  # noqa: PLC0415
                 openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
                 if not openai_api_key:
                     raise ValueError("OPENAI_API_KEY environment variable is not set")
@@ -246,6 +265,7 @@ class RAGConfig:
                     api_key=openai_api_key,
                 )
             elif RAGConfig.LLM_PROVIDER == "perplexity":
+                from llama_index.llms.perplexity import Perplexity  # noqa: PLC0415
                 perplexity_api_key = os.getenv("PERPLEXITY_API_KEY", "").strip()
                 if not perplexity_api_key:
                     raise ValueError("PERPLEXITY_API_KEY environment variable is not set")
@@ -255,6 +275,7 @@ class RAGConfig:
                     api_key=perplexity_api_key,
                 )
             elif RAGConfig.LLM_PROVIDER == "lmstudio":
+                from llama_index.llms.openai import OpenAI  # noqa: PLC0415
                 llm = OpenAI(
                     model=RAGConfig.LLM_MODEL,
                     temperature=RAGConfig.LLM_TEMPERATURE,
@@ -266,45 +287,54 @@ class RAGConfig:
             else:
                 raise ValueError(f"Unknown LLM provider: {RAGConfig.LLM_PROVIDER}")
 
-        if RAGConfig.EMBEDDING_PROVIDER == "openai":
-            openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
-            if not openai_api_key:
-                raise ValueError("OPENAI_API_KEY environment variable is not set")
-            embed_model = OpenAIEmbedding(
-                model=RAGConfig.EMBEDDING_MODEL,
-                api_key=openai_api_key,
-                embed_batch_size=RAGConfig.EMBEDDING_BATCH_SIZE,
-                num_workers=RAGConfig.EMBEDDING_NUM_WORKERS,
-            )
-        elif RAGConfig.EMBEDDING_PROVIDER == "lmstudio":
-            embedding_kwargs = {
-                # LlamaIndex OpenAIEmbedding validates `model` against OpenAI enums.
-                # Use `model_name` to support arbitrary OpenAI-compatible model IDs
-                # served by LM Studio (e.g., text-embedding-bge-m3).
-                "model_name": RAGConfig.EMBEDDING_MODEL,
-                "api_base": RAGConfig.EMBEDDING_API_BASE,
-                "embed_batch_size": RAGConfig.EMBEDDING_BATCH_SIZE,
-                "num_workers": RAGConfig.EMBEDDING_NUM_WORKERS,
-                # LM Studio can take several minutes on a cold start (model load).
-                # The OpenAI client default is 600s, which is not enough when the
-                # GPU has to pull a large model into VRAM before the first inference.
-                "timeout": RAGConfig.EMBEDDING_TIMEOUT,
-            }
-            # LM Studio OpenAI-compatible endpoints usually do not require auth.
-            if RAGConfig.EMBEDDING_API_KEY:
-                embedding_kwargs["api_key"] = RAGConfig.EMBEDDING_API_KEY
-            embed_model = OpenAIEmbedding(**embedding_kwargs)
-        else:
-            raise ValueError(
-                f"Unknown embedding provider: {RAGConfig.EMBEDDING_PROVIDER}. "
-                "Expected one of: openai, lmstudio."
-            )
-        
+        if include_embeddings:
+            # Lazy import: only require llama_index.embeddings.openai when we
+            # actually need to build the embed model.  This keeps
+            # ``import src.config.settings`` safe in environments (e.g. the
+            # novel demo's ``rag`` conda env) that have FlagEmbedding/bge-m3
+            # but NOT llama_index.embeddings.openai.
+            from llama_index.embeddings.openai import OpenAIEmbedding  # noqa: PLC0415
+
+            if RAGConfig.EMBEDDING_PROVIDER == "openai":
+                openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+                if not openai_api_key:
+                    raise ValueError("OPENAI_API_KEY environment variable is not set")
+                embed_model = OpenAIEmbedding(
+                    model=RAGConfig.EMBEDDING_MODEL,
+                    api_key=openai_api_key,
+                    embed_batch_size=RAGConfig.EMBEDDING_BATCH_SIZE,
+                    num_workers=RAGConfig.EMBEDDING_NUM_WORKERS,
+                )
+            elif RAGConfig.EMBEDDING_PROVIDER == "lmstudio":
+                embedding_kwargs = {
+                    # LlamaIndex OpenAIEmbedding validates `model` against OpenAI enums.
+                    # Use `model_name` to support arbitrary OpenAI-compatible model IDs
+                    # served by LM Studio (e.g., text-embedding-bge-m3).
+                    "model_name": RAGConfig.EMBEDDING_MODEL,
+                    "api_base": RAGConfig.EMBEDDING_API_BASE,
+                    "embed_batch_size": RAGConfig.EMBEDDING_BATCH_SIZE,
+                    "num_workers": RAGConfig.EMBEDDING_NUM_WORKERS,
+                    # LM Studio can take several minutes on a cold start (model load).
+                    # The OpenAI client default is 600s, which is not enough when the
+                    # GPU has to pull a large model into VRAM before the first inference.
+                    "timeout": RAGConfig.EMBEDDING_TIMEOUT,
+                }
+                # LM Studio OpenAI-compatible endpoints usually do not require auth.
+                if RAGConfig.EMBEDDING_API_KEY:
+                    embedding_kwargs["api_key"] = RAGConfig.EMBEDDING_API_KEY
+                embed_model = OpenAIEmbedding(**embedding_kwargs)
+            else:
+                raise ValueError(
+                    f"Unknown embedding provider: {RAGConfig.EMBEDDING_PROVIDER}. "
+                    "Expected one of: openai, lmstudio."
+                )
+
+            Settings.embed_model = embed_model
+
         # Set the global LlamaIndex settings
         # Now all LlamaIndex components will use these settings by default
         if include_llm:
             Settings.llm = llm
-        Settings.embed_model = embed_model
         Settings.chunk_size = RAGConfig.CHUNK_SIZE
         Settings.chunk_overlap = RAGConfig.CHUNK_OVERLAP
     

@@ -19,8 +19,14 @@ from src.query.hybrid import build_hybrid_searcher
 
 
 def _init_settings():
-    """Initialise LLM + LlamaIndex Settings (requires an API key in the env)."""
-    RAGConfig.initialize_settings()
+    """Initialise LLM + LlamaIndex Settings (requires an API key in the env).
+
+    The demo uses bge-m3 (FlagEmbedding) directly for all embedding work, so
+    we skip the LlamaIndex embed model entirely.  This also avoids importing
+    ``llama_index.embeddings.openai`` which is not installed in the ``rag``
+    conda environment that runs the novel demo.
+    """
+    RAGConfig.initialize_settings(include_embeddings=False)
 
 
 def _load_demo_emails(num_samples):
