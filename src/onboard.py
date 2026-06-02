@@ -26,3 +26,23 @@ def load_eml_dir(source_dir, *, limit=None):
         raise ValueError(f"no .eml files found under {source_dir}")
     from src.data.loaders.mail_archive_x import MailArchiveXLoader
     return MailArchiveXLoader(eml_files=paths).load()
+
+
+def filter_kept(emails, judgments, *, min_confidence=0.7):
+    """Drop emails judged noise with confidence >= ``min_confidence``; set
+    ``.summary`` on the kept ones from their judgment. Emails with no judgment are
+    kept (conservative). Returns ``(kept_emails, n_noise_dropped)``."""
+    kept, dropped = [], 0
+    for e in emails:
+        mid = getattr(e, "message_id", "") or ""
+        rec = judgments.get(mid)
+        if rec and rec["is_noise"] and rec["confidence"] >= min_confidence:
+            dropped += 1
+            continue
+        if rec and rec.get("summary"):
+            try:
+                e.summary = rec["summary"]
+            except (AttributeError, TypeError):
+                pass
+        kept.append(e)
+    return kept, dropped
