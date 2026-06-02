@@ -198,13 +198,13 @@ def run_onboard(source_dir, *, collection=None, chunk_size=None, queries_path=No
     cache_path = cache_path or str(MANIFEST_DIR / f"{collection}.pass.db")
     MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     cache = Pass2Cache(cache_path)
+    from tqdm import tqdm
+    bar = tqdm(total=len(emails), desc="clean+summarize")
     try:
-        from tqdm import tqdm
-        bar = tqdm(total=len(emails), desc="clean+summarize")
         judgments = generate_thread_judgments(
             emails, cache=cache, model=model, progress=bar.update)
-        bar.close()
     finally:
+        bar.close()
         cache.close()
 
     llm_failures = sum(1 for r in judgments.values()
