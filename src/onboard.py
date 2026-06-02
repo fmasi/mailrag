@@ -2,7 +2,11 @@
 .eml directory in one bounded LLM pass. See
 docs/superpowers/specs/2026-06-02-zth-onboard-design.md.
 """
+import json
+import os
 import re
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -46,3 +50,52 @@ def filter_kept(emails, judgments, *, min_confidence=0.7):
                 pass
         kept.append(e)
     return kept, dropped
+
+
+MANIFEST_DIR = Path(os.path.expanduser("~/.mailrag"))
+
+
+@dataclass
+class OnboardReport:
+    collection: str
+    kept: int
+    noise_dropped: int
+    llm_failures: int
+    chunks: int
+    chunk_size: int
+    coverage_at3: "float | None"
+    n_queries: int
+    validated: bool
+
+    def one_line(self):
+        cov = (f"coverage@3 = {self.coverage_at3:.0%} on {self.n_queries} queries"
+               if self.validated else "validation skipped")
+        fails = f", {self.llm_failures} llm-failures" if self.llm_failures else ""
+        return (f"Onboarded {self.kept} emails ({self.noise_dropped} noise dropped"
+                f"{fails}) -> {self.chunks} chunks in '{self.collection}'; {cov}. "
+                f"Query it: mailrag query --collection {self.collection} '...'")
+
+
+def write_manifest(report, *, source, model):
+    """Persist a reproducibility manifest to ``~/.mailrag/<collection>.json`` and
+    return its path."""
+    MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+    path = MANIFEST_DIR / f"{report.collection}.json"
+    data = asdict(report)
+    data.update(source=source, model=model,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                defaults={"fusion": "rrf", "sparse_weight": 1,
+                          "thread_aware": True, "reranker": False})
+    path.write_text(json.dumps(data, indent=2))
+    return str(path)
+
+
+def latest_manifest_collection():
+    """Collection name from the most-recently-written manifest, or None."""
+    if not MANIFEST_DIR.is_dir():
+        return None
+    manifests = sorted(MANIFEST_DIR.glob("*.json"),
+                       key=lambda p: (p.stat().st_mtime, p.name))
+    if not manifests:
+        return None
+    return json.loads(manifests[-1].read_text()).get("collection")
