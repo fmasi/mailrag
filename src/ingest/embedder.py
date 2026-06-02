@@ -10,8 +10,11 @@ import numpy as np
 
 
 class BgeM3Embedder:
-    def __init__(self, model_name: str = "BAAI/bge-m3", device: str = "mps", use_fp16: bool = True):
+    def __init__(self, model_name: str = "BAAI/bge-m3", device: str | None = None, use_fp16: bool = True):
         from FlagEmbedding import BGEM3FlagModel
+        from src.ingest.device import pick_device
+        if device is None:
+            device = pick_device()
 
         self.model = BGEM3FlagModel(model_name, use_fp16=use_fp16, devices=device)
 
