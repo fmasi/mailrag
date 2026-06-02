@@ -70,8 +70,13 @@ class NormalizedEmail:
         # Thread linkage (RFC 5322). thread_id groups an entire conversation and
         # is always present so it can be used as a vector-store payload filter;
         # the raw ids are kept for debugging / parent-thread lookup.
+        # subject= is passed so that header-less datasets (e.g. the public HF
+        # Enron corpus, which carries no Message-ID/In-Reply-To/References)
+        # fall back to a "subj:<slug>" key instead of persisting an empty string
+        # that breaks thread-aware retrieval.
         metadata["thread_id"] = compute_thread_id(
-            self.message_id or "", self.in_reply_to or "", self.references or ""
+            self.message_id or "", self.in_reply_to or "", self.references or "",
+            subject=self.subject or "",
         )
         if self.message_id:
             metadata["message_id"] = self.message_id
