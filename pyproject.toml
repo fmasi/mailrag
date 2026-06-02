@@ -38,6 +38,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 pythonpath = "."
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
 markers = [
-	"integration: marks tests that require live external services",
+	"integration: needs live Qdrant + LLM + bge-m3 (deselected by default)",
 ]
