@@ -5,6 +5,7 @@ docs/superpowers/specs/2026-06-02-zth-onboard-design.md.
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -146,15 +147,16 @@ def validate_coverage(collection, *, searcher=None, queries_path=None,
         else:
             import tempfile
             from scripts.eval.gen_queries import run as gen_run
-            tmp = os.path.join(tempfile.mkdtemp(), "queries.jsonl")
-            gen_run(collection, counts, tmp, seed)
-            queries = _load_queries(tmp)
+            with tempfile.TemporaryDirectory() as td:
+                tmp = os.path.join(td, "queries.jsonl")
+                gen_run(collection, counts, tmp, seed)
+                queries = _load_queries(tmp)
         if searcher is None:
             from src.query.hybrid import build_hybrid_searcher
             searcher = build_hybrid_searcher(collection, mode="hybrid")
         return _coverage_at3(searcher, queries)
     except Exception as exc:  # best-effort validation
-        print(f"validation skipped: {exc}")
+        print(f"validation skipped: {exc}", file=sys.stderr)
         return None, 0
 
 
@@ -218,7 +220,8 @@ def run_onboard(source_dir, *, collection=None, chunk_size=None, queries_path=No
         from src.ingest.embedder import BgeM3Embedder
         embedder = BgeM3Embedder(use_fp16=True)
     res = build_contextual_index(
-        kept, collection=collection, embedder=embedder, summaries=None,
+        kept, collection=collection, embedder=embedder,
+        summaries=None,  # summaries already set on each e.summary by filter_kept()
         embed_summary=True, chunk_size=chunk_size, recreate=True,
         qdrant_url=qdrant_url)
 

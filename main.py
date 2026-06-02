@@ -68,6 +68,7 @@ def run_demo(
     _require_qdrant()
     emails = _load_demo_emails(num_samples)
     from src.data.threading import assign_subject_fallback_thread_ids
+    from src.llm.answer import answer_from_threads
     assign_subject_fallback_thread_ids(emails)
     print(f"Loaded {len(emails)} Enron emails; generating thread-aware summaries (LLM)...")
     summaries = generate_thread_summaries(emails)
@@ -85,7 +86,6 @@ def run_demo(
         print(f"\nQ: {q}")
         contexts = searcher.search_threads(q)
         print(f"  retrieved {len(contexts)} thread(s); answering...")
-        from src.llm.answer import answer_from_threads
         print("  A:", answer_from_threads(q, contexts))
 
 

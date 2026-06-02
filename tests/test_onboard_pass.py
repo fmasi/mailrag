@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -32,6 +33,7 @@ class TestGenerateThreadJudgments(unittest.TestCase):
 
     def tearDown(self):
         self.cache.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
 
     def test_keeps_noise_judgment_and_summary(self):
         emails = [_Email("m1", "Plan", "let us meet", "2020-01-01", "t1"),

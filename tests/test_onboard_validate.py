@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -36,6 +37,7 @@ class TestCoverage(unittest.TestCase):
 
     def test_validate_uses_queries_file(self):
         d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
         qp = os.path.join(d, "q.jsonl")
         with open(qp, "w") as fh:
             fh.write(json.dumps({"query": "q1", "thread_id": "t1"}) + "\n")

@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,7 @@ class TestReportManifest(unittest.TestCase):
 
     def test_manifest_roundtrip_and_latest(self):
         d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
         with mock.patch.object(onboard, "MANIFEST_DIR", Path(d)):
             p1 = write_manifest(_report("mailrag-a"), source="/x", model="M")
             p2 = write_manifest(_report("mailrag-b"), source="/y", model="M")
