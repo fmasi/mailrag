@@ -29,11 +29,6 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-def _percentiles(values, ps=(50, 90, 95, 99, 100)):
-    s = sorted(values)
-    return {p: s[min(len(s) - 1, int(len(s) * p / 100))] for p in ps}
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--selection", default=os.path.expanduser("~/rag_eml.selection.json"))
@@ -102,15 +97,14 @@ def main(argv=None):
 
     # ---- profile mode: choose chunk_size from cleaned body token lengths ----
     if args.profile:
+        from src.ingest.profile import percentiles, suggest_chunk_size
         lens = [len(encode_len(d.text)) for d in docs if d.text.strip()]
-        pct = _percentiles(lens)
+        pct = percentiles(lens)
         print("\ncleaned body token-length distribution (bge-m3 tokens):")
         for p, v in pct.items():
             print(f"  p{p:<3}: {v}")
         print(f"  mean: {statistics.mean(lens):.0f}  | bodies: {len(lens)}")
-        # round p90 up to nearest 64, clamp to [256, 1024]
-        import math
-        suggested = min(1024, max(256, int(math.ceil(pct[90] / 64) * 64)))
+        suggested = suggest_chunk_size(lens)
         split = sum(1 for L in lens if L > suggested)
         print(f"\nsuggested chunk_size = {suggested} (p90 rounded to /64); "
               f"{split} bodies ({100*split/len(lens):.1f}%) would still split")
