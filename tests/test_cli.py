@@ -41,6 +41,13 @@ class TestCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         ans.assert_called_once_with("hello?", ["CTX"], k=2)
 
+    def test_main_loads_dotenv_before_dispatch(self):
+        with mock.patch("src.cli.load_dotenv") as ld, \
+             mock.patch("src.onboard.run_onboard", return_value=_report()):
+            rc = cli.main(["onboard", "/x"])
+        self.assertEqual(rc, 0)
+        ld.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

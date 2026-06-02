@@ -6,6 +6,8 @@ stays package-mode=false, so no console_scripts are installed.
 import argparse
 import sys
 
+from dotenv import load_dotenv
+
 
 def _cmd_onboard(args):
     from src.onboard import run_onboard
@@ -58,6 +60,7 @@ def build_parser():
 
 
 def main(argv=None):
+    load_dotenv()
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
