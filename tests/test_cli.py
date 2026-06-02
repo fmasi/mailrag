@@ -39,7 +39,7 @@ class TestCli(unittest.TestCase):
              mock.patch("src.llm.answer.answer_from_threads", return_value="A") as ans:
             rc = cli.main(["query", "hello?", "--k", "2"])
         self.assertEqual(rc, 0)
-        ans.assert_called_once()
+        ans.assert_called_once_with("hello?", ["CTX"], k=2)
 
 
 if __name__ == "__main__":
