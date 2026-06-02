@@ -31,6 +31,13 @@ class TestFilterKept(unittest.TestCase):
         self.assertEqual(dropped, 0)
         self.assertEqual(kept, [a])
 
+    def test_drops_noise_at_exact_threshold(self):
+        # confidence == min_confidence must DROP (>= semantics, inclusive boundary)
+        a = _Email("a")
+        kept, dropped = filter_kept([a], {"a": _rec(True, 0.7)}, min_confidence=0.7)
+        self.assertEqual(dropped, 1)
+        self.assertEqual(kept, [])
+
 
 if __name__ == "__main__":
     unittest.main()
