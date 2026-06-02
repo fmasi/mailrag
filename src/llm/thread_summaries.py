@@ -23,11 +23,20 @@ def _as_dict(e):
 
 
 def _tid(e):
-    """Derive the thread_id the same way NormalizedEmail.to_document() does."""
+    """Derive the thread_id the same way NormalizedEmail.to_document() does.
+
+    Passes the subject so that header-less datasets (e.g. the public HF Enron
+    corpus) group by normalised subject slug instead of all landing in a single
+    empty-key bucket.
+    """
+    tid = getattr(e, "thread_id", None)
+    if tid:
+        return tid
     return compute_thread_id(
         getattr(e, "message_id", "") or "",
         getattr(e, "in_reply_to", "") or "",
         getattr(e, "references", "") or "",
+        subject=getattr(e, "subject", "") or "",
     )
 
 
