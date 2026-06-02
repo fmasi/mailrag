@@ -54,18 +54,6 @@ def _require_qdrant(url="http://localhost:6333"):
         )
 
 
-def _answer(query, contexts):
-    """Generate a grounded answer using the project LLM client and retrieved thread contexts."""
-    from src.llm.client import make_client, chat, default_model
-    if not contexts:
-        return "No relevant threads retrieved."
-    joined = "\n\n---\n\n".join(c.text for c in contexts[:3])
-    prompt = (
-        f"Answer the question using only these email threads.\n\n"
-        f"Threads:\n{joined}\n\nQuestion: {query}\nAnswer:"
-    )
-    return chat(make_client(), default_model(), prompt)
-
 
 def run_demo(
     num_samples=100,
@@ -97,7 +85,8 @@ def run_demo(
         print(f"\nQ: {q}")
         contexts = searcher.search_threads(q)
         print(f"  retrieved {len(contexts)} thread(s); answering...")
-        print("  A:", _answer(q, contexts))
+        from src.llm.answer import answer_from_threads
+        print("  A:", answer_from_threads(q, contexts))
 
 
 def main():
