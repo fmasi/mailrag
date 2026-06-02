@@ -65,8 +65,26 @@ class TestGenerateThreadJudgments(unittest.TestCase):
              mock.patch("src.llm.onboard_pass.chat", side_effect=RuntimeError("boom")):
             out = generate_thread_judgments(emails, cache=self.cache)
         self.assertFalse(out["m1"]["is_noise"])
+        self.assertEqual(out["m1"]["confidence"], 0.0)
         self.assertEqual(out["m1"]["summary"], "")
         self.assertTrue(out["m1"]["reason"].startswith("llm_error"))
+
+    def test_failure_is_not_cached_and_retried(self):
+        emails = [_Email("m1", "Plan", "body", "2020-01-01", "t1")]
+        # First run: chat raises -> conservative keep, NOT persisted.
+        with mock.patch("src.llm.onboard_pass.default_model", return_value="M"), \
+             mock.patch("src.llm.onboard_pass.make_client", return_value="C"), \
+             mock.patch("src.llm.onboard_pass.chat", side_effect=RuntimeError("boom")):
+            generate_thread_judgments(emails, cache=self.cache)
+        # Second run (same cache): the email must be retried -> chat IS called again,
+        # and this time it succeeds and is recorded.
+        with mock.patch("src.llm.onboard_pass.default_model", return_value="M"), \
+             mock.patch("src.llm.onboard_pass.make_client", return_value="C"), \
+             mock.patch("src.llm.onboard_pass.chat",
+                        return_value=_reply(False, "recovered")) as chat2:
+            out = generate_thread_judgments(emails, cache=self.cache)
+            self.assertEqual(chat2.call_count, 1)  # retried, not served from cache
+        self.assertEqual(out["m1"]["summary"], "recovered")
 
 
 if __name__ == "__main__":

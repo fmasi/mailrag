@@ -51,11 +51,11 @@ def generate_thread_judgments(emails, *, cache, model=None, client=None,
                 try:
                     raw = chat(client, model, build_thread_aware_prompt(ed, preceding))
                     rec = parse_response(raw)
-                except Exception as exc:  # conservative keep: never delete real mail
+                    cache.put(sha, rec, model=model, message_id=mid or None,
+                              content_sha256=sha)
+                except Exception as exc:  # conservative keep: never cache a transient
                     rec = {"is_noise": False, "confidence": 0.0, "summary": "",
-                           "reason": f"llm_error: {exc}"}
-                cache.put(sha, rec, model=model, message_id=mid or None,
-                          content_sha256=sha)
+                           "reason": f"llm_error: {exc}"}  # not persisted -> retried next run
             if mid:
                 out[mid] = rec
             preceding.append(ed)
