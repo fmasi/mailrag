@@ -1,4 +1,20 @@
-# Email RAG System - Quick Start Guide
+# Quick Start Guide
+
+> **The fastest path is `make demo`.** From a fresh clone:
+> ```bash
+> pip install -r requirements.txt   # includes FlagEmbedding (bge-m3)
+> cp .env.example .env              # add an LLM key/endpoint for summaries + answers
+> make demo                         # starts Qdrant, builds the contextual index, runs thread-aware queries
+> ```
+> This runs the **thread-aware contextual pipeline** (`main.py::run_demo`) over 100 Enron
+> emails — the §13 stack from the [case study](../README.md#case-study-what-the-cleanup--retrieval-choices-actually-bought).
+> See the root [`README.md`](../README.md) for what it does and [`SETUP.md`](SETUP.md) for the
+> full local `.eml` pipeline and the test suite.
+>
+> The manual steps and code patterns below are kept as a reference for wiring the pieces
+> together yourself. The live query API is `build_hybrid_searcher(...).search_threads(query)`
+> (see [`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md#how-to-call-it)); the retired
+> `EmailIndexer` / `EmailQueryEngine` classes referenced in some older snippets no longer exist.
 
 ## 🚀 5-Minute Setup
 
@@ -92,18 +108,19 @@ That's it! 🎉
 
 ### Pattern 1: Simple Retrieval (What emails match this?)
 ```python
-from src.config.settings import RAGConfig
-from src.indexing.indexer import EmailIndexer
-from src.query.engine import EmailQueryEngine
+from src.query.hybrid import build_hybrid_searcher
 
-RAGConfig.initialize_settings()
-index = EmailIndexer.build_index()
-engine = EmailQueryEngine(index)
+# Point at a built collection (see `make demo` / SETUP.md for how it's built)
+searcher = build_hybrid_searcher("mailrag-demo", mode="hybrid")
 
-# Get most relevant emails
-results = engine.retrieval_query("meeting schedule", top_k=5)
-engine.print_query_results(results)
+# Plain retrieval — a list of NodeWithScore objects
+nodes = searcher.search("meeting schedule")
+
+# Thread-aware retrieval — a list of ThreadContext objects (match a unit, get its whole thread)
+contexts = searcher.search_threads("meeting schedule")
 ```
+> See [`RETRIEVAL_GUIDE.md` → How to call it](RETRIEVAL_GUIDE.md#how-to-call-it) for the full
+> `HybridSearcher` API.
 
 ### Pattern 2: Load from Different Sources
 ```python
@@ -200,9 +217,9 @@ src/
 │       ├── enron.py → Enron dataset (HuggingFace)
 │       ├── mail_archive_x.py → Mail Archive X (.eml backups)
 │       └── azure_blob.py → Azure Blob Storage (.eml cloud)
-├── indexing/indexer.py → Build/manage indexes
+├── indexing/contextual_index.py → build_contextual_index(): clean → summary → embed → upsert
 ├── storage/persist.py → Handle disk, Pinecone, or Qdrant storage
-└── query/engine.py → Define query types
+└── query/hybrid.py → HybridSearcher: .search() and .search_threads()
 
 scripts/ → Utility scripts
 ├── batch_index_to_vector_store.py → Batch-index emails; applies noise_rules.yaml before embedding
@@ -267,12 +284,12 @@ Subsequent runs load from `./storage` (local) or your configured cloud vector st
 
 ## 🎓 Learning Path
 
-1. ✅ Run `python main.py` to see it work
-2. Read `docs/README.md` for architecture explanation
-3. Modify example queries in `main.py`
-4. Run `python examples_advanced.py` for advanced features
-5. Read `docs/ARCHITECTURE.md` to understand the design
-6. Look at specific module docs (in each file's docstring)
+1. ✅ Run `make demo` (or `python main.py`) to see it work
+2. Read the root [`README.md`](../README.md) for the overview and case study
+3. Modify the example queries in `main.py::run_demo`
+4. Read [`SETUP.md`](SETUP.md) to run the full local `.eml` pipeline
+5. Read [`ARCHITECTURE.md`](ARCHITECTURE.md) to understand the design
+6. Read [`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md) and [`EXPERIMENTS.md`](EXPERIMENTS.md) for the retrieval stack and measured findings
 7. Extend with your own custom queries
 
 ---
@@ -289,12 +306,12 @@ metadata = {
 }
 ```
 
-### Add custom query method
-Edit `src/query/engine.py`, add method to EmailQueryEngine:
+### Add a custom query helper
+Wrap `HybridSearcher` in `src/query/hybrid.py` (or a helper of your own):
 ```python
-def find_urgent_emails(self):
-    """Find emails about urgent matters."""
-    return self.retrieval_query("urgent OR critical")
+def find_urgent_threads(searcher):
+    """Find threads about urgent matters."""
+    return searcher.search_threads("urgent OR critical")
 ```
 
 ### Use Perplexity instead of OpenAI

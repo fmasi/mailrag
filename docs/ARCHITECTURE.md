@@ -1,3 +1,20 @@
+<!--
+> ⚠️ **API note — some class names below are historical.** The original
+> `EmailIndexer` (`src/indexing/indexer.py`) and `EmailQueryEngine`
+> (`src/query/engine.py`) classes have been **retired**. The live pipeline is:
+>
+> | retired (in older snippets here) | live replacement |
+> |----------------------------------|------------------|
+> | `EmailIndexer.build_index()` (`src/indexing/indexer.py`) | `build_contextual_index(...)` in `src/indexing/contextual_index.py` |
+> | `EmailQueryEngine(index).query(...)` (`src/query/engine.py`) | `build_hybrid_searcher(collection).search()` / `.search_threads()` in `src/query/hybrid.py` |
+> | end-to-end demo | `main.py::run_demo` (what `make demo` runs) |
+>
+> The design principles and extension points below still hold; read class names
+> as the *role* they describe. For the current query API see
+> [`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md), and for the build pipeline see
+> [`SETUP.md`](SETUP.md) and [`EXPERIMENTS.md`](EXPERIMENTS.md).
+-->
+
 """
 Architecture and Extension Guide for the Email RAG System.
 

@@ -225,18 +225,13 @@ Once vectors are in Qdrant, any query path automatically uses it when
 `VECTOR_STORE_PROVIDER=qdrant`:
 
 ```bash
-poetry run python -c "
+python -c "
 from dotenv import load_dotenv; load_dotenv()
-from src.config.settings import RAGConfig
-from src.storage.persist import StorageManager
-from src.query.engine import EmailQueryEngine
+from src.query.hybrid import build_hybrid_searcher
 
-RAGConfig.initialize_settings()
-index = StorageManager.load_index()   # loads from Qdrant
-engine = EmailQueryEngine(index)
-
-results = engine.retrieval_query('meeting schedule', top_k=5)
-engine.print_query_results(results)
+searcher = build_hybrid_searcher('your-collection', mode='hybrid')  # reads QDRANT_URL from .env
+for ctx in searcher.search_threads('meeting schedule'):
+    print(ctx.subject)
 "
 ```
 
@@ -376,18 +371,13 @@ Once vectors are in Pinecone, any query path automatically uses it when
 `VECTOR_STORE_PROVIDER=pinecone`:
 
 ```bash
-poetry run python -c "
+python -c "
 from dotenv import load_dotenv; load_dotenv()
-from src.config.settings import RAGConfig
-from src.storage.persist import StorageManager
-from src.query.engine import EmailQueryEngine
+from src.query.hybrid import build_hybrid_searcher
 
-RAGConfig.initialize_settings()
-index = StorageManager.load_index()   # loads from Pinecone
-engine = EmailQueryEngine(index)
-
-results = engine.retrieval_query('meeting schedule', top_k=5)
-engine.print_query_results(results)
+searcher = build_hybrid_searcher('your-collection', mode='hybrid')
+for ctx in searcher.search_threads('meeting schedule'):
+    print(ctx.subject)
 "
 ```
 
