@@ -1,5 +1,16 @@
 # Email RAG System - Project Structure & Documentation
 
+> ⚠️ **Legacy document — superseded.** The canonical overview now lives in the repo-root
+> [`README.md`](../README.md); the documentation map is [`INDEX.md`](INDEX.md). This page is
+> kept for its detailed project-structure tour, but parts of it are **out of date**: it
+> predates the thread-aware contextual pipeline and still references the **retired**
+> `EmailIndexer` (`src/indexing/indexer.py`) and `EmailQueryEngine` (`src/query/engine.py`)
+> classes. The live pipeline is `build_contextual_index(...)`
+> (`src/indexing/contextual_index.py`) for builds and
+> `build_hybrid_searcher(collection).search_threads(...)` (`src/query/hybrid.py`) for queries,
+> wired together by `main.py::run_demo` (what `make demo` runs). For current usage see
+> [`QUICKSTART.md`](QUICKSTART.md) and [`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md).
+
 [![Test Suite](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml/badge.svg)](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml)
 
 ## 📁 Project Structure

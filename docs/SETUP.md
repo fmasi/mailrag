@@ -1,5 +1,7 @@
 # Setup, running & testing
 
+*[← docs index](INDEX.md) · [README](../README.md)*
+
 How to stand up `mailrag` from scratch, run the full local pipeline, and run the test
 suite — enough for someone else to reach the same point we're at.
 

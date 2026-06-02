@@ -1,5 +1,7 @@
 # Experiments & findings
 
+*[← docs index](INDEX.md) · [README](../README.md) · related: [`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md) (the live stack), [`EMAIL_PREPROCESSING.md`](EMAIL_PREPROCESSING.md) (cleanup mechanics)*
+
 A running log of what we measured building `mailrag` against a real ~32,000-email
 corporate mailbox (all references anonymized). The point is to document the *why* and
 the *trade-offs* with real numbers — including the places where the obvious assumption
@@ -11,6 +13,36 @@ turned out wrong.
 
 ---
 
+## Terminology (read this first)
+
+This log was written incrementally and uses two pieces of shorthand. They are defined
+once here and used consistently throughout.
+
+**Collection labels (`C`, `C′`).** Early sections (§6–§12) compare two collections by a
+short label; §13 onward names the live collections directly. They map as follows:
+
+| label | what it is | live collection name |
+|-------|------------|----------------------|
+| `C`  | cleaned body-only collection (no embedded summary) | `work-rag-bodyonly` |
+| `C′` | contextual-retrieval collection: each email's LLM **summary is prepended before embedding** | `work-rag-ctx-iso-8bit` (isolated summary) → `work-rag-ctx-threadaware` (preceding-context summary, **prod default**); `work-rag-ctx-whole-8bit` is the whole-thread-summary variant |
+
+So "keep `C′`" means "keep the summary-embedded contextual collection"; the production
+collection that realises it is `work-rag-ctx-threadaware`.
+
+**"Thread-aware" means two distinct things** — disambiguated explicitly wherever it appears:
+
+1. **Thread-aware *retrieval*** (a.k.a. *small→big* / *thread expansion*, §8) — a **retrieval**
+   step: match any one unit in a thread, then return/answer from the **whole thread**. No LLM.
+2. **Thread-aware *summary*** (a.k.a. *preceding-context summary*, §13) — a **summary-conditioning**
+   step: each email's embedded summary is written with its *preceding* thread messages as context
+   (causal, append-only), rather than in isolation. Uses the LLM.
+
+The `work-rag-ctx-threadaware` collection is named for sense (2) — it stores thread-aware
+*summaries*. Sense (1), thread-aware *retrieval*, is a query-time expansion applied on top of
+**any** collection.
+
+---
+
 ## 1. The cleanup funnel — measured savings
 
 | stage | what it does | effect |
@@ -19,7 +51,7 @@ turned out wrong.
 | Pass-1 (regex) | cheap sender/subject rules, *before* any embedding | flags **10.4%** (3,332) standalone |
 | Pass-2 (local LLM) | summarize + judge each email | flags **37.9%** (12,123) noise |
 | Calendar-collapse + chunk-dedup | 1-line calendar summaries; drop byte-identical chunks | 22,613 → **21,590** chunks |
-| **Net** | | 31,969 emails → **19,820 kept** → 21,590 chunks |
+| **Net** | | 31,969 emails → **19,859 kept** → 21,590 chunks |
 
 The big embedding-time win — a first-run estimate of **~48 h → under 10 min** — came from
 the **inference method** (FlagEmbedding on Apple-Silicon MPS) plus volume reduction, **not**

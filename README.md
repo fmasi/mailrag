@@ -46,8 +46,9 @@ make demo                               # starts Qdrant, builds the contextual i
 
 `make demo` brings up Qdrant (Docker), builds a **thread-aware contextual** index over 100 Enron
 emails — per-email preceding-context summaries embedded with bge-m3 hybrid vectors — then answers
-example questions by retrieving and assembling whole threads. This is the §13 stack (see the case
-study); a small amount of LLM usage is spent on the Pass-2 summaries and the answers.
+example questions by retrieving and assembling whole threads. This is the
+[§13 stack](docs/EXPERIMENTS.md#13-doc-side-thread-aware-summaries--the-evolution-ladder-1113-2026-06-01)
+(see the case study below); a small amount of LLM usage is spent on the Pass-2 summaries and the answers.
 
 ## Architecture
 
@@ -89,7 +90,7 @@ The corpus is filtered in stages before anything gets embedded:
 | **Pass-1 (regex)** | cheap sender/subject rules drop obvious bulk (newsletters, social, automated senders) *before* any expensive work | flags **10.4%** (3,332) |
 | **Pass-2 (local LLM)** | summarize + judge each email's content | flags **37.9%** (12,123) as noise |
 | **Calendar-collapse + chunk-dedup** | one-line calendar summaries; drop byte-identical chunks | 22,613 → **21,590** chunks (−1,023) |
-| **Net** | | 31,969 emails → **19,820 kept** → 21,590 embedded chunks |
+| **Net** | | 31,969 emails → **19,859 kept** → 21,590 embedded chunks |
 
 **The honest part — how much of this needed an LLM?** We measured it. Regex rules
 *derived from the corpus* (high-noise sender domains + calendar/out-of-office subject
@@ -120,19 +121,21 @@ only it can produce.**
 | **Dense (semantic) only** | matches meaning & paraphrase | misses rare exact tokens (acronyms, IDs); returns redundant near-duplicate chunks |
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token / acronym precision, fused with semantics | needs a sparse-capable embedder + fusion; more storage |
 | **+ LLM noise removal** | precision — catches the ~⅓ of noise that regex can't; *without it*, **21% of queries surface noise in their top-3 and ~11% of retrieval slots are junk** (measured) | one-time LLM cost (see above) |
-| **+ contextual retrieval** (prepend each email's summary before embedding — `C′`) | short/terse emails match by *gist*; in the labeled eval, the **best ranked arm** *and* the end-to-end winner | one extra embedded collection to build/maintain |
+| **+ contextual retrieval** (prepend each email's summary before embedding — the `C′` / `work-rag-ctx-*` collection) | short/terse emails match by *gist*; in the labeled eval, the **best ranked arm** *and* the end-to-end winner | one extra embedded collection to build/maintain |
 | **+ cross-encoder reranker** | *(intuition: reorder candidates for precision)* | **measured to HURT** — under an LLM judge it demotes answer-bearing emails (§9); **off by default** |
 | **+ thread-aware expansion** (pull the full conversation of each top hit) | **~doubles answer-coverage** (terse replies 33% → ~80%) — match a small unit, answer from its thread | larger context per query (tunable: expand top-N threads) |
 
 **What the labeled evals settled.** The eval set grew to **360 validated, LLM-screened queries**,
 scored as an **evolution ladder** — body-only → +thread expansion → +summary → +thread-aware summary
 — with significance tests and confound controls (full write-ups in
-[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md)):
+[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29)):
 
 - **Thread expansion is the biggest single win — and it needs no LLM.** Matching a small unit and
   returning its whole conversation lifts recall@1 from 36% → 60% (terse answer-coverage 33% → ~80%):
   match-small, answer-from-the-thread.
-- **Thread-aware summaries help where they're designed to — terse replies.** Conditioning each
+- **Thread-aware *summaries* help where they're designed to — terse replies.** *(Note: "thread-aware"
+  names two distinct things — the **retrieval** expansion above, and this **summary-conditioning**
+  step; see the [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first).)* Conditioning each
   email's embedded summary on its *preceding* thread context significantly improves terse-reply
   retrieval (covered@3 75% → 81%, p = 0.035). The corpus-wide effect is real but modest (+3pp), and
   we report it as such rather than rounding up.
@@ -181,13 +184,19 @@ finds the token but misses paraphrases; **hybrid + RRF gets both.** Multi-query 
 
 ## Documentation
 
-- [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — 5-minute setup
-- [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points
-- [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning
-- [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs: cleanup economics, regex-vs-LLM, and the **labeled-eval ladder (§9–§13)** — thread-aware retrieval, the contextual-summary result and its quant-confound control, the cleanup precision finding, the reranker and HyDE reversals, and "retrieval is the ceiling, not the model" — all with real, anonymized numbers
-- [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware expansion
-- [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent)
+Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader journey is
+**this page → quickstart → setup → deep dives**:
+
+1. **You are here** (`README.md`) — overview, quickstart, and the case study.
+2. [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — 5-minute setup and copy-paste usage patterns.
+3. [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests.
+4. Deep dives:
+   - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
+   - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
+   - [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware *retrieval* (small→big expansion).
+   - [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs: cleanup economics, regex-vs-LLM, and the **labeled-eval ladder (§9–§13)** — thread-aware retrieval, the contextual-summary result and its quant-confound control, the cleanup precision finding, the reranker and HyDE reversals, and "retrieval is the ceiling, not the model" — all with real, anonymized numbers. Start with its [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first) for the `C`/`C′` labels and the two senses of "thread-aware".
+
+Reference: [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent).
 
 ## License
 
