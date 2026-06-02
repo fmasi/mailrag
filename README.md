@@ -120,7 +120,7 @@ only it can produce.**
 | **Dense (semantic) only** | matches meaning & paraphrase | misses rare exact tokens (acronyms, IDs); returns redundant near-duplicate chunks |
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token / acronym precision, fused with semantics | needs a sparse-capable embedder + fusion; more storage |
 | **+ LLM noise removal** | precision — catches the ~⅓ of noise that regex can't; *without it*, **21% of queries surface noise in their top-3 and ~11% of retrieval slots are junk** (measured) | one-time LLM cost (see above) |
-| **+ contextual retrieval** (prepend each email's summary before embedding — `C′`) | short/terse emails match by *gist*; in the labeled eval, the **best ranked arm** *and* the end-to-end winner | one extra embedded collection to build/maintain |
+| **+ contextual retrieval** (prepend each email's summary before embedding — the `C′` / `work-rag-ctx-*` collection) | short/terse emails match by *gist*; in the labeled eval, the **best ranked arm** *and* the end-to-end winner | one extra embedded collection to build/maintain |
 | **+ cross-encoder reranker** | *(intuition: reorder candidates for precision)* | **measured to HURT** — under an LLM judge it demotes answer-bearing emails (§9); **off by default** |
 | **+ thread-aware expansion** (pull the full conversation of each top hit) | **~doubles answer-coverage** (terse replies 33% → ~80%) — match a small unit, answer from its thread | larger context per query (tunable: expand top-N threads) |
 
@@ -132,7 +132,9 @@ scored as an **evolution ladder** — body-only → +thread expansion → +summa
 - **Thread expansion is the biggest single win — and it needs no LLM.** Matching a small unit and
   returning its whole conversation lifts recall@1 from 36% → 60% (terse answer-coverage 33% → ~80%):
   match-small, answer-from-the-thread.
-- **Thread-aware summaries help where they're designed to — terse replies.** Conditioning each
+- **Thread-aware *summaries* help where they're designed to — terse replies.** *(Note: "thread-aware"
+  names two distinct things — the **retrieval** expansion above, and this **summary-conditioning**
+  step; see the [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first).)* Conditioning each
   email's embedded summary on its *preceding* thread context significantly improves terse-reply
   retrieval (covered@3 75% → 81%, p = 0.035). The corpus-wide effect is real but modest (+3pp), and
   we report it as such rather than rounding up.

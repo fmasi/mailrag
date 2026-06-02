@@ -11,6 +11,36 @@ turned out wrong.
 
 ---
 
+## Terminology (read this first)
+
+This log was written incrementally and uses two pieces of shorthand. They are defined
+once here and used consistently throughout.
+
+**Collection labels (`C`, `C′`).** Early sections (§6–§12) compare two collections by a
+short label; §13 onward names the live collections directly. They map as follows:
+
+| label | what it is | live collection name |
+|-------|------------|----------------------|
+| `C`  | cleaned body-only collection (no embedded summary) | `work-rag-bodyonly` |
+| `C′` | contextual-retrieval collection: each email's LLM **summary is prepended before embedding** | `work-rag-ctx-iso-8bit` (isolated summary) → `work-rag-ctx-threadaware` (preceding-context summary, **prod default**); `work-rag-ctx-whole-8bit` is the whole-thread-summary variant |
+
+So "keep `C′`" means "keep the summary-embedded contextual collection"; the production
+collection that realises it is `work-rag-ctx-threadaware`.
+
+**"Thread-aware" means two distinct things** — disambiguated explicitly wherever it appears:
+
+1. **Thread-aware *retrieval*** (a.k.a. *small→big* / *thread expansion*, §8) — a **retrieval**
+   step: match any one unit in a thread, then return/answer from the **whole thread**. No LLM.
+2. **Thread-aware *summary*** (a.k.a. *preceding-context summary*, §13) — a **summary-conditioning**
+   step: each email's embedded summary is written with its *preceding* thread messages as context
+   (causal, append-only), rather than in isolation. Uses the LLM.
+
+The `work-rag-ctx-threadaware` collection is named for sense (2) — it stores thread-aware
+*summaries*. Sense (1), thread-aware *retrieval*, is a query-time expansion applied on top of
+**any** collection.
+
+---
+
 ## 1. The cleanup funnel — measured savings
 
 | stage | what it does | effect |

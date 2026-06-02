@@ -23,7 +23,7 @@ you can talk through out loud. Grown incrementally as we build the system.
 6. [ColBERT & late interaction](#6-colbert--late-interaction)
 7. [Serving embeddings on Apple Silicon (UMA, MPS vs MLX, M5)](#7-serving-embeddings-on-apple-silicon)
 8. Hybrid retrieval, fusion & reranking — how this project queries (measured; see also `EXPERIMENTS.md` §6–8)
-9. [Thread-aware retrieval](#thread-aware-retrieval) — what/why/how + token bounding
+9. [Thread-aware retrieval (small→big expansion)](#thread-aware-retrieval-smallbig-expansion) — what/why/how + token bounding
 10. [Roadmap / coming next](#roadmap--coming-next) — evaluation metrics, chunking, RAPTOR, late chunking
 
 ---
@@ -87,6 +87,11 @@ it re-reads the *actual* query against the *actual* email, it pushes drifted-in 
 > **⚠️ Superseded by the labeled eval — see [`EXPERIMENTS.md` §9](EXPERIMENTS.md).** The reads
 > below were early, eyeballed, small-sample. A 45-query labeled eval (3 lenses + LLM-as-judge)
 > later **revised two of them**:
+>
+> *Notation:* `C′` is the **summary-embedded contextual collection** (live: `work-rag-ctx-*`);
+> `C` is the cleaned **body-only** collection (live: `work-rag-bodyonly`). See the
+> [terminology box in `EXPERIMENTS.md`](EXPERIMENTS.md#terminology-read-this-first), which also
+> disambiguates the two senses of "thread-aware" (retrieval expansion vs. summary conditioning).
 > - **Reranking measured to *hurt*** under LLM-judged relevance (it demotes answer-bearing
 >   emails) — *not* the clear win the eyeballing suggested. **Off by default.**
 > - **Contextual retrieval (`C′`) was the *best* arm** (ranked and end-to-end) — the "drift"
@@ -491,7 +496,12 @@ fusion is relative-score only, so RRF is supplied as a small callback.
 
 ---
 
-## Thread-aware retrieval
+## Thread-aware retrieval (small→big expansion)
+
+> This is the **retrieval** sense of "thread-aware" — match a unit, return its whole thread.
+> Do not confuse it with the **summary** sense (per-email summaries written with preceding-thread
+> context), which is a build-time step covered in [`EXPERIMENTS.md` §13](EXPERIMENTS.md). See the
+> [terminology box](EXPERIMENTS.md#terminology-read-this-first).
 
 ### What it does
 
