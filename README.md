@@ -89,7 +89,7 @@ The corpus is filtered in stages before anything gets embedded:
 | **Pass-1 (regex)** | cheap sender/subject rules drop obvious bulk (newsletters, social, automated senders) *before* any expensive work | flags **10.4%** (3,332) |
 | **Pass-2 (local LLM)** | summarize + judge each email's content | flags **37.9%** (12,123) as noise |
 | **Calendar-collapse + chunk-dedup** | one-line calendar summaries; drop byte-identical chunks | 22,613 → **21,590** chunks (−1,023) |
-| **Net** | | 31,969 emails → **19,820 kept** → 21,590 embedded chunks |
+| **Net** | | 31,969 emails → **19,859 kept** → 21,590 embedded chunks |
 
 **The honest part — how much of this needed an LLM?** We measured it. Regex rules
 *derived from the corpus* (high-noise sender domains + calendar/out-of-office subject

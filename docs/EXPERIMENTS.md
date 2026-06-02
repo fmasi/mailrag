@@ -19,7 +19,7 @@ turned out wrong.
 | Pass-1 (regex) | cheap sender/subject rules, *before* any embedding | flags **10.4%** (3,332) standalone |
 | Pass-2 (local LLM) | summarize + judge each email | flags **37.9%** (12,123) noise |
 | Calendar-collapse + chunk-dedup | 1-line calendar summaries; drop byte-identical chunks | 22,613 → **21,590** chunks |
-| **Net** | | 31,969 emails → **19,820 kept** → 21,590 chunks |
+| **Net** | | 31,969 emails → **19,859 kept** → 21,590 chunks |
 
 The big embedding-time win — a first-run estimate of **~48 h → under 10 min** — came from
 the **inference method** (FlagEmbedding on Apple-Silicon MPS) plus volume reduction, **not**
