@@ -1,5 +1,7 @@
 # Email Preprocessing: Reply Chain Stripping
 
+*[← docs index](INDEX.md) · [README](../README.md) · the measured cleanup economics are in [`EXPERIMENTS.md` §1–§5](EXPERIMENTS.md)*
+
 ## Why this matters
 
 Work emails stored in reply threads contain the full conversation history

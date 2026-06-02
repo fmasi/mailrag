@@ -1,5 +1,7 @@
 # Experiments & findings
 
+*[← docs index](INDEX.md) · [README](../README.md) · related: [`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md) (the live stack), [`EMAIL_PREPROCESSING.md`](EMAIL_PREPROCESSING.md) (cleanup mechanics)*
+
 A running log of what we measured building `mailrag` against a real ~32,000-email
 corporate mailbox (all references anonymized). The point is to document the *why* and
 the *trade-offs* with real numbers — including the places where the obvious assumption

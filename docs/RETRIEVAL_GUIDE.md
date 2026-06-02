@@ -1,5 +1,7 @@
 # RAG Study Guide
 
+*[← docs index](INDEX.md) · [README](../README.md) · the measured results behind this guide live in [`EXPERIMENTS.md`](EXPERIMENTS.md)*
+
 A working reference for the retrieval techniques behind this project — written to be
 **interview-ready**: crisp definitions, the *why*, the trade-offs, and concrete examples
 you can talk through out loud. Grown incrementally as we build the system.

@@ -1,5 +1,7 @@
 # Quick Start Guide
 
+*[← docs index](INDEX.md) · [README](../README.md) · full setup in [`SETUP.md`](SETUP.md)*
+
 > **The fastest path is `make demo`.** From a fresh clone:
 > ```bash
 > pip install -r requirements.txt   # includes FlagEmbedding (bge-m3)
@@ -188,15 +190,19 @@ In `src/config/settings.py`:
 RAGConfig.EMBEDDING_MODEL = "text-embedding-3-small"
 ```
 
-### Test with small dataset first
-In `main.py`:
+### Test with a small dataset first
+`run_demo` (in `main.py`) takes a sample count:
 ```python
-index = EmailIndexer.build_index(num_samples=50)  # 50 emails instead of 100K
+from main import run_demo
+run_demo(num_samples=50)   # 50 Enron emails instead of the default 100
 ```
 
-### Force rebuild index
+### Force a rebuild of the collection
+`build_contextual_index(..., recreate=True)` recreates the collection from scratch
+(this is what `run_demo` does by default). Call it directly to rebuild a custom collection:
 ```python
-index = EmailIndexer.build_index(force_rebuild=True)
+from src.indexing.contextual_index import build_contextual_index
+build_contextual_index(emails, collection="my-collection", embedder=embedder, recreate=True)
 ```
 
 ---

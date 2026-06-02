@@ -46,8 +46,9 @@ make demo                               # starts Qdrant, builds the contextual i
 
 `make demo` brings up Qdrant (Docker), builds a **thread-aware contextual** index over 100 Enron
 emails — per-email preceding-context summaries embedded with bge-m3 hybrid vectors — then answers
-example questions by retrieving and assembling whole threads. This is the §13 stack (see the case
-study); a small amount of LLM usage is spent on the Pass-2 summaries and the answers.
+example questions by retrieving and assembling whole threads. This is the
+[§13 stack](docs/EXPERIMENTS.md#13-doc-side-thread-aware-summaries--the-evolution-ladder-1113-2026-06-01)
+(see the case study below); a small amount of LLM usage is spent on the Pass-2 summaries and the answers.
 
 ## Architecture
 
@@ -127,7 +128,7 @@ only it can produce.**
 **What the labeled evals settled.** The eval set grew to **360 validated, LLM-screened queries**,
 scored as an **evolution ladder** — body-only → +thread expansion → +summary → +thread-aware summary
 — with significance tests and confound controls (full write-ups in
-[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md)):
+[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29)):
 
 - **Thread expansion is the biggest single win — and it needs no LLM.** Matching a small unit and
   returning its whole conversation lifts recall@1 from 36% → 60% (terse answer-coverage 33% → ~80%):
@@ -183,13 +184,19 @@ finds the token but misses paraphrases; **hybrid + RRF gets both.** Multi-query 
 
 ## Documentation
 
-- [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — 5-minute setup
-- [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points
-- [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning
-- [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs: cleanup economics, regex-vs-LLM, and the **labeled-eval ladder (§9–§13)** — thread-aware retrieval, the contextual-summary result and its quant-confound control, the cleanup precision finding, the reranker and HyDE reversals, and "retrieval is the ceiling, not the model" — all with real, anonymized numbers
-- [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware expansion
-- [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent)
+Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader journey is
+**this page → quickstart → setup → deep dives**:
+
+1. **You are here** (`README.md`) — overview, quickstart, and the case study.
+2. [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — 5-minute setup and copy-paste usage patterns.
+3. [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests.
+4. Deep dives:
+   - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
+   - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
+   - [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware *retrieval* (small→big expansion).
+   - [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — measured findings & trade-offs: cleanup economics, regex-vs-LLM, and the **labeled-eval ladder (§9–§13)** — thread-aware retrieval, the contextual-summary result and its quant-confound control, the cleanup precision finding, the reranker and HyDE reversals, and "retrieval is the ceiling, not the model" — all with real, anonymized numbers. Start with its [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first) for the `C`/`C′` labels and the two senses of "thread-aware".
+
+Reference: [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent).
 
 ## License
 
