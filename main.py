@@ -12,21 +12,22 @@ Run this file to test the full pipeline.
 import os
 from dotenv import load_dotenv
 
-from src.config.settings import RAGConfig
 from src.indexing.contextual_index import build_contextual_index
 from src.llm.thread_summaries import generate_thread_summaries
 from src.query.hybrid import build_hybrid_searcher
 
 
 def _init_settings():
-    """Initialise LLM + LlamaIndex Settings (requires an API key in the env).
+    """Ensure environment variables are loaded for the demo.
 
-    The demo uses bge-m3 (FlagEmbedding) directly for all embedding work, so
-    we skip the LlamaIndex embed model entirely.  This also avoids importing
-    ``llama_index.embeddings.openai`` which is not installed in the ``rag``
-    conda environment that runs the novel demo.
+    The demo uses the project LLM client (``src.llm.client``) and bge-m3
+    (FlagEmbedding) directly, so no LlamaIndex LLM or embedding model is
+    needed.  Calling ``RAGConfig.initialize_settings`` is intentionally
+    skipped because it imports ``llama_index.llms.*`` which is not installed
+    in the ``rag`` conda environment.
     """
-    RAGConfig.initialize_settings(include_embeddings=False)
+    from dotenv import load_dotenv
+    load_dotenv()
 
 
 def _load_demo_emails(num_samples):
@@ -54,8 +55,8 @@ def _require_qdrant(url="http://localhost:6333"):
 
 
 def _answer(query, contexts):
-    """Generate a grounded answer using the LLM and the retrieved thread contexts."""
-    from llama_index.core import Settings
+    """Generate a grounded answer using the project LLM client and retrieved thread contexts."""
+    from src.llm.client import make_client, chat, default_model
     if not contexts:
         return "No relevant threads retrieved."
     joined = "\n\n---\n\n".join(c.text for c in contexts[:3])
@@ -63,7 +64,7 @@ def _answer(query, contexts):
         f"Answer the question using only these email threads.\n\n"
         f"Threads:\n{joined}\n\nQuestion: {query}\nAnswer:"
     )
-    return str(Settings.llm.complete(prompt))
+    return chat(make_client(), default_model(), prompt)
 
 
 def run_demo(
