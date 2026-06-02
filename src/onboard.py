@@ -99,3 +99,58 @@ def latest_manifest_collection():
     if not manifests:
         return None
     return json.loads(manifests[-1].read_text()).get("collection")
+
+
+def _load_queries(path):
+    rows = []
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+
+def _coverage_at3(searcher, queries):
+    """covered@3 over thread-distinct ranks. ``queries``: list of dicts with
+    ``query`` and ``thread_id``. Returns ``(coverage, n_queries)``."""
+    from src.query.thread_expand import _node_metadata
+    from src.eval.coverage_diag import distinct_thread_rank
+    if not queries:
+        return None, 0
+    covered = 0
+    for q in queries:
+        hits = []
+        for node in searcher.search(q["query"]):
+            md = _node_metadata(node)
+            hits.append({"thread_id": md.get("thread_id"),
+                         "message_id": md.get("message_id")})
+        rank = distinct_thread_rank(hits, q["thread_id"])
+        if rank is not None and rank < 3:
+            covered += 1
+    return covered / len(queries), len(queries)
+
+
+def validate_coverage(collection, *, searcher=None, queries_path=None,
+                      counts=None, seed=7):
+    """Return ``(coverage_at3, n_queries)``. Uses ``queries_path`` if given, else
+    auto-generates a small validated set via gen_queries.run. Best-effort: returns
+    ``(None, 0)`` on any failure (the index is already usable). Query rows must
+    carry ``query`` and ``thread_id`` (the gen_queries.run schema)."""
+    counts = counts or {"terse": 5, "content": 5, "spanning": 3}
+    try:
+        if queries_path:
+            queries = _load_queries(queries_path)
+        else:
+            import tempfile
+            from scripts.eval.gen_queries import run as gen_run
+            tmp = os.path.join(tempfile.mkdtemp(), "queries.jsonl")
+            gen_run(collection, counts, tmp, seed)
+            queries = _load_queries(tmp)
+        if searcher is None:
+            from src.query.hybrid import build_hybrid_searcher
+            searcher = build_hybrid_searcher(collection, mode="hybrid")
+        return _coverage_at3(searcher, queries)
+    except Exception as exc:  # best-effort validation
+        print(f"validation skipped: {exc}")
+        return None, 0
