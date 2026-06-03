@@ -8,13 +8,17 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
-> **Headline.** On a real ~32k-email corporate mailbox, the full stack takes answer coverage from
-> **45% (plain email RAG) → 84%** (coverage@3) — nearly doubling recall@1 (36% → 70%) — as the
-> *compound* effect of thread-aware expansion and preceding-context contextual summaries. The point
-> isn't only the number; it's the **methodology and rigor** behind it: **360 validated queries, an evolution ladder
-> that prices every increment, significance tests, and confounds caught and corrected** (a +6pp
-> headline that proved half a quantization artifact), **with all negative results kept in.**
-> A reproducible, documented worked example.
+> **Headline.** On a real ~32k-email corporate mailbox, the full stack lifts answer coverage@3 from
+> 45% (plain email RAG) to 84%, and recall@1 from 36% to 70% — the compound effect of thread-aware
+> expansion and preceding-context contextual summaries.
+>
+> Two honesty notes up front. These figures are author-reported on a *private* mailbox; the public
+> `make demo` reproduces the *method*, not the exact numbers. And the 360 eval queries are
+> LLM-generated and LLM-judged (synthetic) — so the local judge was calibrated against a stronger
+> reference model (Cohen's κ = 0.52, Spearman 0.74), and both pre-registered decisions held under
+> either judge. The eval is scored as an evolution ladder that prices each increment, with
+> significance tests, confound controls (one +6pp gain turned out to be half a quantization
+> artifact), and the negative results left in. Full method in [`EXPERIMENTS.md`](docs/EXPERIMENTS.md).
 
 ## What it does
 
@@ -29,9 +33,10 @@
   (match a small unit, answer from its full conversation).
 - **LLM "Pass-2"** — optional local-LLM summarization/judging of each email,
   content-addressed and cached.
-- **A measured methodology** — a labeled, LLM-judged retrieval eval (360 validated
-  queries) that quantifies each technique, controls for confounds, reports
-  significance, and in several cases *overturned* the intuitive choice.
+- **A measured methodology** — an LLM-generated, LLM-judged retrieval eval (360
+  synthetic queries) that quantifies each technique, controls for confounds, reports
+  significance, and in several cases *overturned* the intuitive choice. (Validating
+  on a public, human-judged benchmark is the open next step.)
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
 
 ## Quickstart (thread-aware contextual RAG over the public Enron dataset)
@@ -125,7 +130,9 @@ only it can produce.**
 | **+ cross-encoder reranker** | *(intuition: reorder candidates for precision)* | **measured to HURT** — under an LLM judge it demotes answer-bearing emails (§9); **off by default** |
 | **+ thread-aware expansion** (pull the full conversation of each top hit) | **~doubles answer-coverage** (terse replies 33% → ~80%) — match a small unit, answer from its thread | larger context per query (tunable: expand top-N threads) |
 
-**What the labeled evals settled.** The eval set grew to **360 validated, LLM-screened queries**,
+**What the labeled evals settled.** The eval set grew to **360 LLM-generated, LLM-judged
+queries** (synthetic — generated from corpus bodies and graded by an LLM; validating on a
+public, human-judged benchmark like the TREC Legal Track is the open next step),
 scored as an **evolution ladder** — body-only → +thread expansion → +summary → +thread-aware summary
 — with significance tests and confound controls (full write-ups in
 [`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29)):

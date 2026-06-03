@@ -25,6 +25,9 @@ matches how deep you want to go.
 
 ## Operations & reference
 
+- **[`AGENT_USAGE.md`](AGENT_USAGE.md)** — driving mailrag from code or another agent:
+  the query API (`search` / `search_threads`), collection selection, retrieval knobs,
+  the query-path env vars, and gotchas. Seeds a future MCP connector.
 - **[`CLOUD_STORAGE_SETUP.md`](CLOUD_STORAGE_SETUP.md)** — Azure Blob Storage + Qdrant Cloud
   (Pinecone optional): batch indexing, cost estimates, validation, and reset.
 - **[`POETRY_MIGRATION.md`](POETRY_MIGRATION.md)** — Poetry dependency-management notes.
