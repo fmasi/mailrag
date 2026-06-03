@@ -232,3 +232,6 @@ docs/superpowers/
 
 # eval harness outputs (contain real corpus content — never commit)
 eval/out/
+docs/AGENT_USAGE.md
+docs/msgvault-eval-proof.md
+docs/ecosystem-port-feasibility.md
