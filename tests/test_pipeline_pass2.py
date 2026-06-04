@@ -23,8 +23,6 @@ class TestPass2Stage(unittest.TestCase):
         from src.pipeline import pass2 as pass2_stage
         prof = CorpusProfile(root="/r", selection_rules=[{"type": "prefix", "value": "a/"}],
                              pass2_cache="/tmp/p.db", rubric="personal")
-        captured = {}
-
         def fake_run_pass(paths, cache, load_email, summarize, model, **kw):
             # Drive the summarize closure once to observe which rubric it builds.
             summarize({"sender": "s", "subject": "j", "date": "d", "body": "b"})
@@ -35,11 +33,9 @@ class TestPass2Stage(unittest.TestCase):
              mock.patch("src.pipeline.pass2.llm_client") as cl, \
              mock.patch("src.pipeline.pass2.rubrics.build_prompt", return_value="P") as bp, \
              mock.patch("src.pipeline.pass2.summary.parse_response",
-                        return_value={"is_noise": False, "confidence": 1.0,
-                                      "summary": "x", "reason": "y"}), \
+                        return_value=mock.MagicMock()), \
              mock.patch("src.pipeline.pass2.run_pass", side_effect=fake_run_pass):
             cl.make_client.return_value = mock.Mock()
-            cl.chat.return_value = "{}"
             pass2_stage.run(prof, model="gemma", workers=1)
         self.assertEqual(bp.call_args.args[0], "personal")
 
