@@ -1,4 +1,3 @@
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +51,14 @@ class TestRubrics(unittest.TestCase):
                 with self.assertRaises(ValueError) as ctx:
                     rubrics.load_rubric("bad")
             self.assertIn("missing placeholders", str(ctx.exception))
+
+    def test_load_empty_yaml_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "empty.yaml").write_text("", encoding="utf-8")
+            with mock.patch.object(rubrics, "_SEARCH_DIRS", (Path(d),)):
+                with self.assertRaises(ValueError) as ctx:
+                    rubrics.load_rubric("empty")
+            self.assertIn("has no 'template' string", str(ctx.exception))
 
     def test_names_lists_shipped_excludes_example(self):
         # work is shipped; personal.example.yaml must NOT appear as a usable name.

@@ -38,7 +38,8 @@ def _find(name: str) -> Path:
     searched = ", ".join(str(d) for d in _SEARCH_DIRS)
     raise ValueError(
         f"no rubric named {name!r} (looked in: {searched}); "
-        f"copy rubrics/{name}.example.yaml to rubrics/local/{name}.yaml")
+        f"create rubrics/local/{name}.yaml "
+        f"(e.g. copy rubrics/{name}.example.yaml if one ships)")
 
 
 def _validate(name: str, template: str) -> None:
