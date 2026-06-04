@@ -4,6 +4,7 @@ Run as `python -m src.cli ...` (the repo-root `mailrag` shim wraps this). Poetry
 stays package-mode=false, so no console_scripts are installed.
 """
 import argparse
+import datetime
 import sys
 
 from dotenv import load_dotenv
@@ -51,6 +52,8 @@ def _cmd_profile(args):
 
 def _cmd_pass2(args):
     prof = CorpusProfile.load(args.profile)
+    if not prof.rubric:
+        raise ValueError("profile has no rubric set")
     cal = prof.calibration
     calibrated = bool(cal) and cal.get("rubric") == prof.rubric and cal.get("passed")
     if not args.force and not calibrated:
@@ -64,11 +67,19 @@ def _cmd_pass2(args):
 
 
 def _cmd_calibrate(args):
-    import datetime
     prof = CorpusProfile.load(args.profile)
+    if not prof.rubric:
+        raise ValueError("profile has no rubric set")
     report = calibrate_stage.run(prof, model=args.model, sample=args.sample,
                                  seed=args.seed, workers=args.workers, progress=True)
     print(calibration_lib.format_report(report))
+    # passed=True records only that calibration was RUN for this rubric (the gate is
+    # a forcing-function to make the human read the buckets above, not an automatic
+    # quality verdict). The human reads false-noise/false-keep and decides; --force
+    # skips the gate entirely.
+    if prof.calibration:
+        print(f"  (overwriting previous calibration for rubric "
+              f"'{prof.calibration.get('rubric')}')")
     prof.calibration = {
         "rubric": report.rubric, "passed": True, "noise_rate": report.noise_rate,
         "sample": report.sample, "false_noise": len(report.false_noise),

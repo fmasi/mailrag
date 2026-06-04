@@ -40,14 +40,19 @@ class TestCliDispatch(unittest.TestCase):
     def test_calibrate_verb_records_calibration(self):
         from src import cli
         from src.llm.calibration import CalibrationReport
+        from io import StringIO
         with tempfile.TemporaryDirectory() as d:
             fp = self._profile_file(d)
             report = CalibrationReport(rubric="personal", sample=5, noise_rate=0.6,
                                        false_noise=[], false_keep=[])
-            with mock.patch("src.cli.calibrate_stage") as cs:
+            with mock.patch("src.cli.calibrate_stage") as cs, \
+                 mock.patch("sys.stdout", new_callable=StringIO) as out:
                 cs.run.return_value = report
                 rc = cli.main(["calibrate", "--profile", fp, "--model", "gemma"])
             self.assertEqual(rc, 0)
+            printed = out.getvalue()
+            self.assertIn("FALSE-NOISE", printed)   # the buckets are surfaced
+            self.assertIn("personal", printed)
             saved = CorpusProfile.load(fp)
             self.assertIsNotNone(saved.calibration)
             self.assertEqual(saved.calibration["rubric"], "personal")
@@ -99,6 +104,19 @@ class TestCliDispatch(unittest.TestCase):
                 rc = cli.main(["pass2", "--profile", fp, "--model", "gemma", "--force"])
         self.assertEqual(rc, 0)
         self.assertTrue(ps.run.called)
+
+
+    def test_pass2_errors_when_profile_has_no_rubric(self):
+        from src import cli
+        with tempfile.TemporaryDirectory() as d:
+            fp = self._profile_file(d)
+            prof = CorpusProfile.load(fp)
+            prof.rubric = ""
+            prof.save(fp)
+            with mock.patch("src.cli.pass2_stage") as ps:
+                rc = cli.main(["pass2", "--profile", fp, "--model", "gemma"])
+        self.assertEqual(rc, 1)  # ValueError -> exit 1
+        self.assertFalse(ps.run.called)
 
 
 if __name__ == "__main__":
