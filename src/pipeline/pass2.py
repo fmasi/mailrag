@@ -5,7 +5,7 @@ from src.ingest.local_source import resolve_index_files
 from src.llm.pass2 import run_pass
 from src.llm.cache import Pass2Cache
 from src.llm import client as llm_client
-from src.llm import summary
+from src.llm import summary, rubrics
 
 
 def _make_load_email(body_chars):
@@ -32,7 +32,8 @@ def run(profile, *, model, workers=1, body_chars=4000, limit=None, sample=None,
 
     def summarize(email):
         return summary.parse_response(
-            llm_client.chat(cl, model, summary.build_prompt(email, body_chars)))
+            llm_client.chat(cl, model,
+                            rubrics.build_prompt(profile.rubric, email, body_chars)))
 
     counts = run_pass(kept, cache, load_email, summarize, model,
                       limit=limit, progress=progress, workers=workers)
