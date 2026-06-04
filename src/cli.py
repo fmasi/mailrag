@@ -14,6 +14,8 @@ from src.data.loaders.mail_archive_x import MailArchiveXLoader
 from src.data.noise_filter import NoiseFilter
 from src.pipeline import pass1, build as build_stage, profile as profile_stage
 from src.pipeline import pass2 as pass2_stage, select as select_stage
+from src.pipeline import calibrate as calibrate_stage
+from src.llm import calibration as calibration_lib
 from src.ingest.embedder import BgeM3Embedder  # module-level so tests patch src.cli.BgeM3Embedder
 
 
@@ -49,8 +51,32 @@ def _cmd_profile(args):
 
 def _cmd_pass2(args):
     prof = CorpusProfile.load(args.profile)
+    cal = prof.calibration
+    calibrated = bool(cal) and cal.get("rubric") == prof.rubric and cal.get("passed")
+    if not args.force and not calibrated:
+        print(f"error: rubric '{prof.rubric}' is not calibrated; run "
+              f"`mailrag calibrate --profile {args.profile} --model {args.model}` "
+              f"first (or pass --force)", file=sys.stderr)
+        return 2
     counts = pass2_stage.run(prof, model=args.model, workers=args.workers)
     print(f"pass2: {counts}")
+    return 0
+
+
+def _cmd_calibrate(args):
+    import datetime
+    prof = CorpusProfile.load(args.profile)
+    report = calibrate_stage.run(prof, model=args.model, sample=args.sample,
+                                 seed=args.seed, workers=args.workers, progress=True)
+    print(calibration_lib.format_report(report))
+    prof.calibration = {
+        "rubric": report.rubric, "passed": True, "noise_rate": report.noise_rate,
+        "sample": report.sample, "false_noise": len(report.false_noise),
+        "false_keep": len(report.false_keep),
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    prof.save(args.profile)
+    print(f"\ncalibration recorded for rubric '{report.rubric}' -> {args.profile}")
     return 0
 
 
@@ -128,7 +154,18 @@ def build_parser():
     _add_profile_arg(sp2)
     sp2.add_argument("--model", required=True)
     sp2.add_argument("--workers", type=int, default=1)
+    sp2.add_argument("--force", action="store_true",
+                     help="run even if the rubric is not calibrated")
     sp2.set_defaults(func=_cmd_pass2)
+
+    sc = sub.add_parser("calibrate",
+                        help="judge a sample with the profile's rubric and bucket mistakes")
+    _add_profile_arg(sc)
+    sc.add_argument("--model", required=True)
+    sc.add_argument("--sample", type=int, default=200)
+    sc.add_argument("--seed", type=int, default=11)
+    sc.add_argument("--workers", type=int, default=4)
+    sc.set_defaults(func=_cmd_calibrate)
 
     ss = sub.add_parser("select", help="interactively build selection rules for a corpus")
     _add_profile_arg(ss)
