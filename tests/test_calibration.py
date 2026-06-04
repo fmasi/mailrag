@@ -47,5 +47,26 @@ class TestCalibration(unittest.TestCase):
         self.assertIn("FALSE-KEEP", text)
 
 
+    def test_format_report_empty_buckets_ok(self):
+        report = calibration.CalibrationReport(rubric="work", sample=0, noise_rate=0.0)
+        text = calibration.format_report(report)
+        self.assertIn("work", text)
+        self.assertIn("FALSE-NOISE suspects", text)
+        self.assertIn("] 0", text)  # zero-count buckets render without error
+
+    def test_false_keep_kept_when_only_reason_is_recordish(self):
+        # PROMO fires from the blob (which includes reason); the REC-exclusion check
+        # looks only at subject+summary, so a record-ish *reason* must NOT suppress it.
+        recs = [_rec(False, subject="newsletter digest", summary="weekly digest",
+                     reason="contains an invoice mention")]
+        self.assertEqual(len(calibration.false_keep(recs)), 1)
+
+    def test_blob_tolerates_none_fields(self):
+        recs = [{"sender": None, "subject": None, "is_noise": True,
+                 "confidence": 1.0, "summary": None, "reason": "your invoice is ready"}]
+        # reason is record-ish -> false_noise should catch it without a TypeError.
+        self.assertEqual(len(calibration.false_noise(recs)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,7 +30,9 @@ PROMO = re.compile(
 
 
 def _blob(rec: Record) -> str:
-    return f"{rec.get('subject', '')} {rec.get('reason', '')} {rec.get('summary', '')}"
+    return (f"{rec.get('subject') or ''} "
+            f"{rec.get('reason') or ''} "
+            f"{rec.get('summary') or ''}")
 
 
 def noise_rate(results: List[Record]) -> float:
@@ -82,6 +84,10 @@ def format_report(report: CalibrationReport) -> str:
         f"[FALSE-NOISE suspects: record-ish but flagged noise] {len(report.false_noise)}",
     ]
     lines += [_line(r, "reason") for r in report.false_noise[:16]]
+    if len(report.false_noise) > 16:
+        lines.append(f"  ... ({len(report.false_noise) - 16} more not shown)")
     lines += ["", f"[FALSE-KEEP suspects: promo-ish but kept] {len(report.false_keep)}"]
     lines += [_line(r, "summary") for r in report.false_keep[:16]]
+    if len(report.false_keep) > 16:
+        lines.append(f"  ... ({len(report.false_keep) - 16} more not shown)")
     return "\n".join(lines)
