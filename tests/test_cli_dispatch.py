@@ -35,6 +35,20 @@ class TestCliDispatch(unittest.TestCase):
                 rc = cli.main(["build", "--profile", fp, "--limit", "1"])
         self.assertEqual(rc, 0)
         self.assertTrue(bs.run.called)
+        self.assertIs(bs.run.call_args.kwargs["embed_summary"], False)
+
+    def test_build_embed_summary_flows_flag_and_threshold(self):
+        from src import cli
+        with tempfile.TemporaryDirectory() as d:
+            fp = self._profile_file(d)
+            with mock.patch("src.cli.build_stage") as bs, \
+                 mock.patch("src.cli.BgeM3Embedder"):
+                bs.run.return_value = mock.Mock(chunks=5, collection="c")
+                rc = cli.main(["build", "--profile", fp, "--embed-summary",
+                               "--noise-confidence", "0.8"])
+        self.assertEqual(rc, 0)
+        self.assertIs(bs.run.call_args.kwargs["embed_summary"], True)
+        self.assertEqual(bs.run.call_args.kwargs["noise_min_confidence"], 0.8)
 
 
     def test_calibrate_verb_records_calibration(self):

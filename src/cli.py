@@ -36,7 +36,9 @@ def _cmd_pass1(args):
 def _cmd_build(args):
     prof = CorpusProfile.load(args.profile)
     res = build_stage.run(prof, embedder=BgeM3Embedder(device="mps", use_fp16=True),
-                          recreate=args.recreate, limit=args.limit)
+                          recreate=args.recreate, limit=args.limit,
+                          embed_summary=args.embed_summary,
+                          noise_min_confidence=args.noise_confidence)
     prof.save(args.profile)
     print(f"DONE: {res.chunks} chunks -> '{res.collection}'")
     return 0
@@ -155,6 +157,10 @@ def build_parser():
     _add_profile_arg(sb)
     sb.add_argument("--recreate", action="store_true")
     sb.add_argument("--limit", type=int, default=None)
+    sb.add_argument("--embed-summary", action="store_true",
+                    help="consume the Pass-2 cache: drop confident noise and embed summaries")
+    sb.add_argument("--noise-confidence", type=float, default=0.7,
+                    help="with --embed-summary, drop pass2 noise at/above this confidence")
     sb.set_defaults(func=_cmd_build)
 
     spr = sub.add_parser("profile", help="measure corpus and suggest chunk_size")

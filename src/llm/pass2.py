@@ -145,6 +145,39 @@ def sample_files(paths: Iterable[str], n: Optional[int], seed: int = 0) -> List[
     return random.Random(seed).sample(items, n)
 
 
+def apply_pass2(emails, cache: Pass2Cache, min_confidence: float = 0.7):
+    """Apply cached Pass-2 judgments to *emails* before indexing.
+
+    Drops emails judged noise at/above *min_confidence* (the confident-noise
+    prune that saves DB space) and injects the cached summary onto each kept,
+    non-noise email. Emails with no cache row — or noise below the threshold —
+    are KEPT untouched, so a partial/resumable cache never silently loses mail
+    (zero-loss stays the default; only confident noise is removed). The raw
+    ``.eml`` files remain on disk, so a drop is reversible by rebuilding.
+
+    Returns ``(kept_emails, dropped_count)``. ``source_id`` is the file path.
+    """
+    kept = []
+    dropped = 0
+    for email in emails:
+        mid, chash = email_identity(
+            sender=getattr(email, "sender", "") or "",
+            subject=getattr(email, "subject", "") or "",
+            date=getattr(email, "date", None),
+            body=getattr(email, "body", "") or "",
+            message_id=getattr(email, "message_id", "") or "",
+        )
+        row = cache.get_resilient(file_sha256(email.source_id),
+                                  message_id=mid, content_sha256=chash)
+        if row is not None and row["is_noise"] and row["confidence"] >= min_confidence:
+            dropped += 1
+            continue
+        if row is not None and not row["is_noise"] and row["summary"]:
+            email.summary = row["summary"]
+        kept.append(email)
+    return kept, dropped
+
+
 def inject_summaries(emails, cache: Pass2Cache) -> int:
     """Set ``.summary`` on each email whose source file has a kept (non-noise)
     cached summary. Returns how many were set. ``source_id`` is the file path."""
