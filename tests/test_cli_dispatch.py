@@ -119,5 +119,26 @@ class TestCliDispatch(unittest.TestCase):
         self.assertFalse(ps.run.called)
 
 
+    def test_calibrate_then_pass2_roundtrip_unlocks_gate(self):
+        # The dict _cmd_calibrate WRITES must be ACCEPTED by the _cmd_pass2 gate
+        # (no hand-built calibration dict here — calibrate writes it, pass2 reads it).
+        from src import cli
+        from src.llm.calibration import CalibrationReport
+        with tempfile.TemporaryDirectory() as d:
+            fp = self._profile_file(d)  # profile.rubric defaults to "personal"
+            report = CalibrationReport(rubric="personal", sample=5, noise_rate=0.6,
+                                       false_noise=[], false_keep=[])
+            with mock.patch("src.cli.calibrate_stage") as cs:
+                cs.run.return_value = report
+                rc_cal = cli.main(["calibrate", "--profile", fp, "--model", "gemma"])
+            self.assertEqual(rc_cal, 0)
+            # Now pass2 on the SAME profile file should pass the gate (no --force).
+            with mock.patch("src.cli.pass2_stage") as ps:
+                ps.run.return_value = {"done": 1, "cached": 0, "error": 0}
+                rc_p2 = cli.main(["pass2", "--profile", fp, "--model", "gemma"])
+            self.assertEqual(rc_p2, 0)
+            self.assertTrue(ps.run.called)
+
+
 if __name__ == "__main__":
     unittest.main()
