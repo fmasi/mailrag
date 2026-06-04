@@ -18,6 +18,8 @@ from src.llm import summary, rubrics, calibration
 
 
 def _make_load_email(body_chars: int) -> Callable[[str], Dict[str, Any]]:
+    # body_chars is accepted for signature parity with the pass2 loader; the body
+    # is actually truncated later in rubrics.build_prompt, not at load time.
     from src.data.loaders.mail_archive_x import MailArchiveXLoader
 
     def load_email(path: str) -> Dict[str, Any]:
@@ -44,10 +46,13 @@ def judge_sample(paths: List[str], load_email: Callable[[str], Dict[str, Any]],
         e = load_email(path)
         j = judge(e)
         return {"sender": e.get("sender", ""), "subject": e.get("subject", ""),
+                # is_noise is guaranteed by summary.parse_response (raises if absent); a
+                # missing key here is a real error and is counted as a skip by the caller.
                 "is_noise": bool(j["is_noise"]), "confidence": j.get("confidence", 0.0),
                 "summary": j.get("summary", ""), "reason": j.get("reason", "")}
 
     records: List[Dict[str, Any]] = []
+    skipped = 0
     bar = None
     if progress:
         try:
@@ -68,17 +73,19 @@ def judge_sample(paths: List[str], load_email: Callable[[str], Dict[str, Any]],
                 try:
                     records.append(f.result())
                 except Exception:  # skip unparseable/erroring emails in the sample
-                    pass
+                    skipped += 1
                 _tick()
     else:
         for p in paths:
             try:
                 records.append(_one(p))
             except Exception:
-                pass
+                skipped += 1
             _tick()
     if bar is not None:
         bar.close()
+    if skipped:
+        print(f"  calibrate: skipped {skipped}/{len(paths)} emails (load/judge errors)")
     return records
 
 

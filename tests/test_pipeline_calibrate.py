@@ -25,6 +25,21 @@ class TestJudgeSample(unittest.TestCase):
         self.assertEqual(subjects, ["a", "b"])
         self.assertTrue(any(r["is_noise"] for r in recs))
 
+    def test_threaded_collects_and_skips_errors(self):
+        from src.pipeline import calibrate
+        paths = ["a", "b", "boom", "c"]
+
+        def load_email(p):
+            if p == "boom":
+                raise ValueError("bad parse")
+            return {"sender": "s", "subject": p, "date": "d", "body": "x"}
+
+        def judge(email):
+            return {"is_noise": False, "confidence": 1.0, "summary": "s", "reason": "r"}
+
+        recs = calibrate.judge_sample(paths, load_email, judge, workers=2)
+        self.assertEqual(sorted(r["subject"] for r in recs), ["a", "b", "c"])
+
 
 class TestCalibrateRun(unittest.TestCase):
     def test_run_returns_report_for_profile_rubric(self):
