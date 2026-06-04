@@ -235,3 +235,6 @@ eval/out/
 docs/AGENT_USAGE.md
 docs/msgvault-eval-proof.md
 docs/ecosystem-port-feasibility.md
+
+# Local-only rubric overrides (corpus-specific; never published)
+rubrics/local/
