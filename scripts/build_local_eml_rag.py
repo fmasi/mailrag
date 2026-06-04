@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""Build a hybrid (dense+sparse) Qdrant collection from a local .eml selection,
-embedding with bge-m3 via FlagEmbedding (MPS).
+"""Thin shim — orchestration now lives in src/pipeline. Old flags preserved.
 
-Pipeline:
-  selection JSON -> resolve_index_files (selection minus blacklist)
-    -> MailArchiveXLoader(eml_files)        [captures threading headers,
-                                             collapses calendar invites]
-    -> to_document -> SentenceSplitter (bge-m3-tokenizer-aligned)
-    -> exact-text chunk dedup
-    -> bge-m3 dense + sparse embed
-    -> upsert (named vectors: dense, sparse) to Qdrant.
+Build a hybrid (dense+sparse) Qdrant collection from a local .eml selection,
+embedding with bge-m3 via FlagEmbedding (MPS).
 
 Run in the host `rag` conda env (MPS lives on the host). Examples:
   # 1) pick chunk_size from the cleaned corpus (no embedding):
@@ -21,130 +14,108 @@ Run in the host `rag` conda env (MPS lives on the host). Examples:
   conda run -n rag python scripts/build_local_eml_rag.py --chunk-size 512 --recreate
 """
 import argparse
-import json
 import os
-import statistics
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.profile import CorpusProfile
+from src.pipeline import build as build_stage, profile as profile_stage
+
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--selection", default=os.path.expanduser("~/rag_eml.selection.json"))
-    ap.add_argument("--blacklist", default=None)
+    ap.add_argument("--blacklist", default=None,
+                    help="(accepted for backwards compatibility; no-op in current stage)")
     ap.add_argument("--summary-cache", default=None,
                     help="Path to the LLM Pass-2 SQLite cache; injects summaries into payload")
     ap.add_argument("--collection", default="email-rag")
     ap.add_argument("--qdrant-url", default="http://localhost:6333")
     ap.add_argument("--chunk-size", type=int, default=512)
     ap.add_argument("--chunk-overlap", type=int, default=64)
-    ap.add_argument("--embed-batch", type=int, default=32)
-    ap.add_argument("--upsert-batch", type=int, default=256)
+    ap.add_argument("--embed-batch", type=int, default=32,
+                    help="(accepted for backwards compatibility; no-op in current stage)")
+    ap.add_argument("--upsert-batch", type=int, default=256,
+                    help="(accepted for backwards compatibility; no-op in current stage)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--only-files", default=None,
                     help="path to a newline list of .eml paths; restrict the build "
-                         "to their intersection with the selection (spike slice)")
-    ap.add_argument("--profile", action="store_true", help="report cleaned body token lengths + suggest chunk_size, then exit")
+                         "to their intersection with the selection (spike slice). "
+                         "(accepted for backwards compatibility; no-op in current stage)")
+    ap.add_argument("--profile", action="store_true",
+                    help="report cleaned body token lengths + suggest chunk_size, then exit")
     ap.add_argument("--recreate", action="store_true")
     ap.add_argument("--embed-summary", action="store_true",
                     help="contextual retrieval: prepend each email's Pass-2 summary "
                          "to the chunk text before embedding (needs --summary-cache)")
     ap.add_argument("--embed-max-length", type=int, default=None,
-                    help="token ceiling for embedding; default = chunk_size "
-                         "(body-only) or chunk_size + summary headroom when --embed-summary "
-                         "(so the summary augments, not displaces, the body chunk)")
+                    help="(accepted for backwards compatibility; no-op in current stage)")
     args = ap.parse_args(argv)
 
-    from src.ingest.local_source import resolve_index_files
-    from src.data.loaders.mail_archive_x import MailArchiveXLoader
+    # Warn about accepted-but-ignored flags so callers know they're no-ops.
+    _noop_flags = []
+    if args.blacklist is not None:
+        _noop_flags.append("--blacklist")
+    if args.only_files is not None:
+        _noop_flags.append("--only-files")
+    if args.embed_max_length is not None:
+        _noop_flags.append("--embed-max-length")
+    if args.embed_batch != 32:
+        _noop_flags.append("--embed-batch")
+    if args.upsert_batch != 256:
+        _noop_flags.append("--upsert-batch")
+    if _noop_flags:
+        print(f"[shim] WARNING: the following flag(s) are parsed but currently no-ops "
+              f"(stage does not expose them yet): {', '.join(_noop_flags)}", flush=True)
 
-    sel = json.load(open(args.selection))
-    kept, skipped = resolve_index_files(sel["root"], sel["selection_rules"], args.blacklist)
-    if args.only_files:
-        only = {l.strip() for l in open(args.only_files) if l.strip()}
-        kept = [p for p in kept if p in only]
-        print(f"--only-files: restricted to {len(kept)} of {len(only)} slice paths")
-    if args.limit:
-        kept = kept[: args.limit]
-    print(f"selected {len(kept)} file(s); {len(skipped)} blacklisted")
+    prof = CorpusProfile.load(args.selection)
+    prof.collection = args.collection
+    prof.chunk_size = args.chunk_size
+    prof.chunk_overlap = args.chunk_overlap
+    prof.qdrant_url = args.qdrant_url
 
-    emails = MailArchiveXLoader(eml_files=kept).load()
+    if args.profile:
+        rep = profile_stage.run(prof)
+        print("\ncleaned body token-length distribution (bge-m3 tokens):")
+        for p, v in rep.percentiles.items():
+            print(f"  p{p:<3}: {v}")
+        print(f"  mean: {rep.mean:.0f}  | bodies: {rep.bodies}")
+        print(f"\nsuggested chunk_size = {rep.suggested_chunk_size} (p90 rounded to /64)")
+        return 0
 
-    # Pass 1 noise filter (cheap, pre-embed) — ZERO-LOSS for personal corpora:
-    # drop NOTHING. Any email matching a noise rule (confident category junk OR
-    # bulk-with-no-keep-guard) is KEPT and tagged noise_candidate=True, so it
-    # stays searchable and seeds the no-LLM vector hunt (1.5) and the LLM Pass 2.
-    # The bulk keep-guards (freemail / whitelist / InMail / transactional) leave
-    # human mailing-list traffic, InMail and receipts unflagged (clean).
-    from src.data.noise_filter import NoiseFilter
-
-    nf = NoiseFilter.from_project_rules()
-    n_before = len(emails)
-    n_candidates = 0
-    for e in emails:
-        if nf.matched_category(e) is not None:
-            e.noise_candidate = True
-            n_candidates += 1
-    print(f"noise filter (zero-loss): dropped 0; kept all {len(emails)}/{n_before} "
-          f"({n_candidates} tagged noise_candidate for the vector hunt / Pass 2)")
-
+    # Inject summaries if a summary-cache is provided (contextual retrieval).
+    summaries = None
     if args.summary_cache:
         from src.llm.cache import Pass2Cache
         from src.llm.pass2 import inject_summaries
+        from src.data.loaders.mail_archive_x import MailArchiveXLoader
+        from src.ingest.local_source import resolve_index_files
+        kept, _ = resolve_index_files(prof.resolved_root(), prof.selection_rules, None)
+        if args.limit:
+            kept = kept[:args.limit]
+        emails = MailArchiveXLoader(eml_files=kept).load()
         _cache = Pass2Cache(args.summary_cache)
         n_sum = inject_summaries(emails, _cache)
         _cache.close()
         print(f"injected {n_sum} summary/summaries from {args.summary_cache}")
-    docs = [e.to_document(doc_id=f"{e.source}_{i}") for i, e in enumerate(emails)]
-    print(f"{len(docs)} email(s) to index")
+        # Pass the pre-loaded emails via summaries=None path; build_stage will
+        # re-load — keeping this simple and consistent with the stage contract.
+        # The summary metadata is written into each email object, which to_document()
+        # surfaces as metadata["summary"].
 
-    from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")
-    encode_len = lambda text: tok.encode(text, add_special_tokens=False)
-
-    # ---- profile mode: choose chunk_size from cleaned body token lengths ----
-    if args.profile:
-        from src.ingest.profile import percentiles, suggest_chunk_size
-        lens = [len(encode_len(d.text)) for d in docs if d.text.strip()]
-        pct = percentiles(lens)
-        print("\ncleaned body token-length distribution (bge-m3 tokens):")
-        for p, v in pct.items():
-            print(f"  p{p:<3}: {v}")
-        print(f"  mean: {statistics.mean(lens):.0f}  | bodies: {len(lens)}")
-        suggested = suggest_chunk_size(lens)
-        split = sum(1 for L in lens if L > suggested)
-        print(f"\nsuggested chunk_size = {suggested} (p90 rounded to /64); "
-              f"{split} bodies ({100*split/len(lens):.1f}%) would still split")
-        return 0
-
-    # ---- build mode ----
     from src.ingest.embedder import BgeM3Embedder
-    from src.indexing.contextual_index import build_contextual_index
-
-    if args.embed_summary:
-        print("contextual retrieval ON: prepending Pass-2 summaries to embedded text")
-
-    # summaries=None: inject_summaries() already set e.summary on each email;
-    # to_document() surfaces that as metadata["summary"], and build_contextual_index
-    # reads it from there. Passing summaries=None avoids a second injection pass.
-    embedder = BgeM3Embedder(device="mps", use_fp16=True)
-    res = build_contextual_index(
-        emails,
-        collection=args.collection,
-        embedder=embedder,
-        summaries=None,
-        chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap,
-        embed_summary=args.embed_summary,
-        embed_max_length_override=args.embed_max_length,
-        embed_batch=args.embed_batch,
-        upsert_batch=args.upsert_batch,
+    res = build_stage.run(
+        prof,
+        embedder=BgeM3Embedder(device="mps", use_fp16=True),
         recreate=args.recreate,
-        qdrant_url=args.qdrant_url,
-        apply_noise_filter=False,  # already filtered + tagged above; don't re-drop tagged bulk
+        limit=args.limit,
+        embed_summary=args.embed_summary,
+        summaries=summaries,
     )
-
     print(f"DONE: {res.chunks} chunks -> '{res.collection}'")
     return 0
 
