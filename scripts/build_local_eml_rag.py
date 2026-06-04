@@ -71,15 +71,23 @@ def main(argv=None):
 
     emails = MailArchiveXLoader(eml_files=kept).load()
 
-    # Pass 1 noise filter (cheap, pre-embed): drop obvious junk (LinkedIn,
-    # newsletters, ...) by the project's noise_rules.yaml before embedding.
+    # Pass 1 noise filter (cheap, pre-embed) — ZERO-LOSS for personal corpora:
+    # drop NOTHING. Any email matching a noise rule (confident category junk OR
+    # bulk-with-no-keep-guard) is KEPT and tagged noise_candidate=True, so it
+    # stays searchable and seeds the no-LLM vector hunt (1.5) and the LLM Pass 2.
+    # The bulk keep-guards (freemail / whitelist / InMail / transactional) leave
+    # human mailing-list traffic, InMail and receipts unflagged (clean).
     from src.data.noise_filter import NoiseFilter
 
     nf = NoiseFilter.from_project_rules()
     n_before = len(emails)
-    emails = [e for e in emails if not nf.is_noise(e)]
-    print(f"noise filter: kept {len(emails)}/{n_before} "
-          f"(dropped {n_before - len(emails)}; categories: {nf.category_names()})")
+    n_candidates = 0
+    for e in emails:
+        if nf.matched_category(e) is not None:
+            e.noise_candidate = True
+            n_candidates += 1
+    print(f"noise filter (zero-loss): dropped 0; kept all {len(emails)}/{n_before} "
+          f"({n_candidates} tagged noise_candidate for the vector hunt / Pass 2)")
 
     if args.summary_cache:
         from src.llm.cache import Pass2Cache
@@ -134,6 +142,7 @@ def main(argv=None):
         upsert_batch=args.upsert_batch,
         recreate=args.recreate,
         qdrant_url=args.qdrant_url,
+        apply_noise_filter=False,  # already filtered + tagged above; don't re-drop tagged bulk
     )
 
     print(f"DONE: {res.chunks} chunks -> '{res.collection}'")

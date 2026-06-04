@@ -78,21 +78,38 @@ class TestBuildContextualIndex(unittest.TestCase):
         embedded_text = fake_embedder.encode.call_args[0][0][0]
         self.assertIn("SUM about the plan", embedded_text)
 
-    def test_noise_filtered_emails_dropped(self):
-        # Noise filter is domain-based; must use a sender from a known noise domain.
-        noise = NormalizedEmail(
-            sender="notifications@linkedin.com",
-            subject="You have 5 new notifications",
-            date=None,
-            body="Unsubscribe | LinkedIn notifications digest",
-            source="enron",
-            source_id="<n@x>",
-            message_id="<n@x>",
+    def _noise_filter_flagging(self, domain):
+        """A hermetic NoiseFilter that flags one sender domain (independent of
+        the gitignored project rules), patched in for deterministic tests."""
+        from src.data.noise_filter import NoiseFilter, _CategoryRule
+        return NoiseFilter(
+            [_CategoryRule(name="x", description="", sender_domains=[domain])]
         )
+
+    def _build_one(self, email, **kwargs):
         fake_embedder = mock.Mock()
         fake_embedder.encode.return_value = ([], [])
         with mock.patch("src.indexing.contextual_index.hq.get_client"), \
              mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"), \
-             mock.patch("src.indexing.contextual_index.hq.upsert"):
-            res = build_contextual_index([noise], collection="t", embedder=fake_embedder)
+             mock.patch("src.indexing.contextual_index.hq.upsert"), \
+             mock.patch(
+                 "src.indexing.contextual_index.NoiseFilter.from_project_rules",
+                 return_value=self._noise_filter_flagging("spammy.example"),
+             ):
+            return build_contextual_index(
+                [email], collection="t", embedder=fake_embedder, **kwargs
+            )
+
+    def test_noise_filtered_emails_dropped(self):
+        noise = _email("Unsubscribe digest", mid="<n@x>")
+        noise.sender = "notifications@spammy.example"
+        res = self._build_one(noise)
         self.assertEqual(res.kept_emails, 0)
+
+    def test_apply_noise_filter_false_keeps_noise(self):
+        # Callers that pre-filter + tag (e.g. the local build) opt out of the
+        # redundant internal filter so tagged bulk is not silently re-dropped.
+        noise = _email("Unsubscribe digest", mid="<n@x>")
+        noise.sender = "notifications@spammy.example"
+        res = self._build_one(noise, apply_noise_filter=False)
+        self.assertEqual(res.kept_emails, 1)

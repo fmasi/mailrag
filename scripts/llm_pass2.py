@@ -75,7 +75,8 @@ def cmd_run(args):
     print(f"sweeping {len(kept)} file(s) with {model} "
           f"({cache.stats()['total']} already cached)", flush=True)
     counts = pass2.run_pass(kept, cache, load_email, summarize, model,
-                            limit=args.limit, progress=not args.no_progress)
+                            limit=args.limit, progress=not args.no_progress,
+                            workers=args.workers)
     print(f"run: {counts}; cache now {cache.stats()}")
     cache.close()
 
@@ -177,6 +178,8 @@ def main(argv=None):
     pr.add_argument("--seed", type=int, default=0, help="random seed for --sample")
     pr.add_argument("--no-progress", action="store_true",
                     help="disable the tqdm progress bar")
+    pr.add_argument("--workers", type=int, default=1,
+                    help="parallel in-flight LLM requests (cache writes stay serial)")
     pr.set_defaults(func=cmd_run)
 
     rp = sub.add_parser("report", help="Dry-run report from the cache")

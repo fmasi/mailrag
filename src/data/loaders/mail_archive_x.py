@@ -282,6 +282,15 @@ class MailArchiveXLoader(EmailLoader):
         in_reply_to = " ".join(str(msg.get("In-Reply-To") or "").split())
         references = " ".join(str(msg.get("References") or "").split())
 
+        # Bulk-mail markers (RFC 2369 List-Unsubscribe, RFC 2076 Precedence):
+        # marketing / newsletter mail carries these, human mail essentially
+        # never does. Surfaced so the conservative Pass-1 noise filter can act.
+        precedence = str(msg.get("Precedence") or "").strip().lower()
+        is_bulk = (
+            msg.get("List-Unsubscribe") is not None
+            or precedence in ("bulk", "list")
+        )
+
         # Parse date to datetime if possible.
         date_obj = None
         if date_str:
@@ -310,6 +319,7 @@ class MailArchiveXLoader(EmailLoader):
             "message_id": message_id,
             "in_reply_to": in_reply_to,
             "references": references,
+            "is_bulk": is_bulk,
             "body": body,
             "error": None,
         }
@@ -524,4 +534,5 @@ class MailArchiveXLoader(EmailLoader):
             message_id=parsed_data.get("message_id"),
             in_reply_to=parsed_data.get("in_reply_to"),
             references=parsed_data.get("references"),
+            is_bulk=parsed_data.get("is_bulk", False),
         )

@@ -57,6 +57,29 @@ class TestRunPass(unittest.TestCase):
         self.assertEqual(c, {"cached": 0, "done": 2, "error": 0})
         self.assertEqual(self.cache.stats()["total"], 2)
 
+    def test_workers_process_all_then_skip_cached(self):
+        c1 = pass2.run_pass([self.f1, self.f2], self.cache, self._load,
+                            self._summarize, model="m", workers=4)
+        self.assertEqual(c1, {"cached": 0, "done": 2, "error": 0})
+        self.assertEqual(self.cache.stats()["total"], 2)
+        c2 = pass2.run_pass([self.f1, self.f2], self.cache, self._load,
+                            self._summarize, model="m", workers=4)
+        self.assertEqual(c2, {"cached": 2, "done": 0, "error": 0})
+
+    def test_workers_error_leaves_uncached(self):
+        def boom(email):
+            raise RuntimeError("llm down")
+        c = pass2.run_pass([self.f1, self.f2], self.cache, self._load, boom,
+                           model="m", workers=4)
+        self.assertEqual(c["error"], 2)
+        self.assertEqual(self.cache.stats()["total"], 0)
+
+    def test_workers_respect_limit(self):
+        c = pass2.run_pass([self.f1, self.f2], self.cache, self._load,
+                           self._summarize, model="m", workers=4, limit=1)
+        self.assertEqual(c["done"], 1)
+        self.assertEqual(self.cache.stats()["total"], 1)
+
     def test_process_file_stores_resilient_identity(self):
         from src.data.blacklist import file_sha256
 
