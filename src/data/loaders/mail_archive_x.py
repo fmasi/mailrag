@@ -121,6 +121,7 @@ class MailArchiveXLoader(EmailLoader):
         self,
         backup_dir: Optional[str] = None,
         eml_files: Optional[List[str]] = None,
+        verbose: bool = True,
     ):
         """
         Initialize the Mail Archive X loader.
@@ -129,11 +130,17 @@ class MailArchiveXLoader(EmailLoader):
             backup_dir: path to a backup root directory to walk for .eml files, OR
             eml_files:  an explicit list of .eml paths to parse (used by the local
                         guided-selection flow so only chosen files are loaded).
+
+        verbose: when True (default) ``load()`` prints batch progress to stdout.
+            Set False for the per-email hot path (Pass-2/calibrate load one file at
+            a time, often across worker threads) so the loader stays silent without
+            callers having to hijack the process-global ``sys.stdout``.
         """
         if eml_files is None and backup_dir is None:
             raise ValueError("Provide either backup_dir or eml_files")
         self.backup_dir = backup_dir
         self.eml_files = list(eml_files) if eml_files is not None else None
+        self.verbose = verbose
         if self.eml_files is None and not os.path.isdir(backup_dir):
             raise ValueError(f"Backup directory not found: {backup_dir}")
 
@@ -153,11 +160,13 @@ class MailArchiveXLoader(EmailLoader):
             if self.eml_files is None
             else f"{len(self.eml_files)} selected file(s)"
         )
-        print(f"Loading Mail Archive X from {source_desc}...")
+        if self.verbose:
+            print(f"Loading Mail Archive X from {source_desc}...")
 
         # Discover all .eml files recursively
         eml_files = self._discover_eml_files()
-        print(f"  Found {len(eml_files)} .eml files")
+        if self.verbose:
+            print(f"  Found {len(eml_files)} .eml files")
 
         # Limit samples if specified.
         if num_samples:
@@ -165,7 +174,7 @@ class MailArchiveXLoader(EmailLoader):
 
         emails: List[NormalizedEmail] = []
         for i, eml_path in enumerate(eml_files):
-            if (i + 1) % 100 == 0:
+            if self.verbose and (i + 1) % 100 == 0:
                 print(f"  Processed {i + 1}/{len(eml_files)} emails...")
 
             try:
@@ -174,10 +183,12 @@ class MailArchiveXLoader(EmailLoader):
                     normalized = self._normalize_mail_archive_x_file(parsed, eml_path)
                     emails.append(normalized)
             except Exception as e:
-                print(f"    ⚠ Error processing {eml_path}: {e}")
+                if self.verbose:
+                    print(f"    ⚠ Error processing {eml_path}: {e}")
                 continue
 
-        print(f"Loaded {len(emails)} emails from Mail Archive X")
+        if self.verbose:
+            print(f"Loaded {len(emails)} emails from Mail Archive X")
         return emails
 
     def get_source_info(self) -> Dict[str, Any]:

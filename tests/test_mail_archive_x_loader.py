@@ -80,5 +80,43 @@ class TestBulkHeaderDetection(unittest.TestCase):
         self.assertFalse(self._load_one(raw).is_bulk)
 
 
+class TestLoaderVerbosity(unittest.TestCase):
+    """The loader is chatty by default (progress for batch loads) but can be
+    silenced for the per-email hot path, so the threaded Pass-2/calibrate loaders
+    don't need to hijack the process-global ``sys.stdout`` (which is not
+    thread-safe and corrupts later prints under ``--workers > 1``)."""
+
+    def _eml(self) -> str:
+        f = tempfile.NamedTemporaryFile("w", suffix=".eml", delete=False, encoding="utf-8")
+        f.write("From: a@example.com\r\nSubject: Hi\r\n\r\nHello body.\r\n")
+        f.close()
+        return f.name
+
+    def test_quiet_loader_prints_nothing(self):
+        import io
+        from contextlib import redirect_stdout
+        path = self._eml()
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                emails = MailArchiveXLoader(eml_files=[path], verbose=False).load()
+            self.assertEqual(len(emails), 1)
+            self.assertEqual(buf.getvalue(), "")
+        finally:
+            os.unlink(path)
+
+    def test_verbose_default_still_prints(self):
+        import io
+        from contextlib import redirect_stdout
+        path = self._eml()
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                MailArchiveXLoader(eml_files=[path]).load()
+            self.assertIn("Loaded 1 emails", buf.getvalue())
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()

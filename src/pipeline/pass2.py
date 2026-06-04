@@ -1,6 +1,5 @@
 """Pass-2 stage: resumable LLM summarize+judge sweep over the profile's selection."""
 from __future__ import annotations
-import contextlib, io
 from src.ingest.local_source import resolve_index_files
 from src.llm.pass2 import run_pass
 from src.llm.cache import Pass2Cache
@@ -12,8 +11,7 @@ def _make_load_email(body_chars):
     from src.data.loaders.mail_archive_x import MailArchiveXLoader
 
     def load_email(path):
-        with contextlib.redirect_stdout(io.StringIO()):
-            emails = list(MailArchiveXLoader(eml_files=[path]).load())
+        emails = list(MailArchiveXLoader(eml_files=[path], verbose=False).load())
         if not emails:
             raise ValueError("no email parsed")
         e = emails[0]

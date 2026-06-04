@@ -7,8 +7,6 @@ real Pass-2 cache (it is a throwaway look, not a sweep).
 """
 from __future__ import annotations
 
-import contextlib
-import io
 from typing import Any, Callable, Dict, List
 
 from src.ingest.local_source import resolve_index_files
@@ -23,8 +21,7 @@ def _make_load_email(body_chars: int) -> Callable[[str], Dict[str, Any]]:
     from src.data.loaders.mail_archive_x import MailArchiveXLoader
 
     def load_email(path: str) -> Dict[str, Any]:
-        with contextlib.redirect_stdout(io.StringIO()):
-            emails = list(MailArchiveXLoader(eml_files=[path]).load())
+        emails = list(MailArchiveXLoader(eml_files=[path], verbose=False).load())
         if not emails:
             raise ValueError("no email parsed")
         e = emails[0]
