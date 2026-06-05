@@ -47,7 +47,8 @@ def _recording_handlers(calls):
             return f"{verb}-report"
         return handler
     return {v: make(v) for v in
-            ("scope", "measure", "tag", "scan", "calibrate", "summarize", "index")}
+            ("scope", "measure", "tag", "scan", "calibrate", "summarize", "index",
+             "judge", "prune")}
 
 
 class TestWizard(unittest.TestCase):
@@ -68,7 +69,7 @@ class TestWizard(unittest.TestCase):
         with bh, load, rec:
             rc = run_wizard("p.json", questionary=q, console=FakeConsole())
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, ["scope", "measure", "scan", "tag", "index"])
+        self.assertEqual(calls, ["scope", "measure", "scan", "tag", "prune", "index"])
         prof.save.assert_called_once_with("p.json")
 
     def test_llm_all_calibrate_gate_proceed(self):
@@ -80,7 +81,8 @@ class TestWizard(unittest.TestCase):
              mock.patch("src.llm.calibration.format_report", return_value="BUCKETS"):
             rc = run_wizard("p.json", questionary=q, console=FakeConsole())
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, ["scope", "measure", "calibrate", "summarize", "index"])
+        self.assertEqual(calls, ["scope", "measure", "calibrate", "summarize",
+                                 "prune", "index"])
 
     def test_calibrate_gate_abort_stops_before_summarize(self):
         calls = []
@@ -120,14 +122,35 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertNotIn("summarize", calls)
 
-    def test_llm_verify_not_runnable_message(self):
-        # llm-verify needs `judge`, which build_handlers (real) does not provide.
-        prof = SimpleNamespace(rubric="personal", save=mock.Mock())
-        q = FakeQ(selects=["llm-verify"], texts=["m"])
-        with mock.patch("src.persona.wizard.CorpusProfile.load", return_value=prof), \
-             mock.patch("src.persona.wizard._read_recommendation", return_value=None):
+    def test_llm_verify_runs_judge_and_prune(self):
+        calls = []
+        bh, load, rec, prof = self._patch(calls)
+        # llm-verify: scope, measure, scan, calibrate, judge, prune, summarize, index
+        q = FakeQ(selects=["llm-verify", "proceed to the LLM pass"],
+                  texts=["mymodel"], confirms=[True])
+        with bh, load, rec, \
+             mock.patch("src.llm.calibration.format_report", return_value="B"):
             rc = run_wizard("p.json", questionary=q, console=FakeConsole())
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, ["scope", "measure", "scan", "calibrate",
+                                 "judge", "prune", "summarize", "index"])
+
+    def test_passes_prune_confirm_to_build_handlers(self):
+        calls = []
+        prof = SimpleNamespace(rubric="personal", save=mock.Mock())
+        captured = {}
+
+        def fake_build_handlers(**kwargs):
+            captured.update(kwargs)
+            return _recording_handlers(calls)
+
+        q = FakeQ(selects=["llm-none"])
+        with mock.patch("src.persona.wizard.build_handlers",
+                        side_effect=fake_build_handlers), \
+             mock.patch("src.persona.wizard.CorpusProfile.load", return_value=prof), \
+             mock.patch("src.persona.wizard._read_recommendation", return_value=None):
+            run_wizard("p.json", questionary=q, console=FakeConsole())
+        self.assertTrue(callable(captured.get("prune_confirm")))
 
 
 if __name__ == "__main__":

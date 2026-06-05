@@ -97,7 +97,14 @@ def run_wizard(profile_path: str, *, questionary: Any = None, registry: Any = No
             console.print("no model given; aborting")
             return 2
 
-    handlers = build_handlers(profile_path=profile_path, model=model)
+    def _prune_confirm(preview):
+        console.print("about to blacklist (sample):")
+        for line in preview:
+            console.print(f"    {line}")
+        return q.confirm("Blacklist these as noise?").ask()
+
+    handlers = build_handlers(profile_path=profile_path, model=model,
+                              prune_confirm=_prune_confirm)
     missing = missing_handlers(persona, handlers)
     if missing:
         console.print(f"persona '{persona.name}' needs verb(s) not yet implemented: "
