@@ -17,7 +17,9 @@ _TEMPLATE_RULES_PATH = (
 )
 
 
-def _make_email(sender: str = "", subject: str = "") -> NormalizedEmail:
+def _make_email(
+    sender: str = "", subject: str = "", is_bulk: bool = False
+) -> NormalizedEmail:
     return NormalizedEmail(
         sender=sender,
         subject=subject,
@@ -25,6 +27,7 @@ def _make_email(sender: str = "", subject: str = "") -> NormalizedEmail:
         body="body text",
         source="test",
         source_id="test_0",
+        is_bulk=is_bulk,
     )
 
 
@@ -361,6 +364,172 @@ class TestEmptyFilter(unittest.TestCase):
     def test_empty_filter_category_names_is_empty_list(self):
         nf = NoiseFilter([])
         self.assertEqual(nf.category_names(), [])
+
+
+# ---------------------------------------------------------------------------
+# bulk_filter — header-driven (List-Unsubscribe / Precedence:bulk) filtering
+#
+# Design: Pass-1 is conservative. A bulk-mail header marks a message as a
+# *candidate* for dropping, but three guards keep it if it is likely wanted:
+#   - sender is a freemail/personal domain  (human mailing-list traffic)
+#   - sender domain is explicitly whitelisted (e.g. courses we want to keep)
+#   - subject looks transactional            (receipts / shipping / bookings)
+# ---------------------------------------------------------------------------
+
+class TestBulkHeaderFiltering(unittest.TestCase):
+
+    def setUp(self):
+        self.nf = _filter_from_yaml(
+            "categories:\n"
+            "  known_spam:\n"
+            "    description: explicit spam domain\n"
+            "    sender_domains: [spammer.com]\n"
+            "bulk_filter:\n"
+            "  description: Drop bulk mail unless a guard keeps it\n"
+            "  keep_freemail_domains: [gmail.com, googlemail.com, yahoo.com]\n"
+            "  keep_domains: [edx.org]\n"
+            "  keep_sender_patterns:\n"
+            "    - 'inmail-hit-reply@linkedin\\.com'\n"
+            "  keep_subject_patterns:\n"
+            "    - '\\b(order|booking|reservation|payment|delivery|shipment|parcel|package)\\b.{0,40}\\b(confirm\\w*|cancel\\w*|ship\\w*|dispatch\\w*|deliver\\w*|receiv\\w*|refund\\w*)\\b'\n"
+            "    - '\\b(confirm\\w*|cancel\\w*|ship\\w*|dispatch\\w*|deliver\\w*)\\b.{0,40}\\b(order|booking|reservation|payment|delivery|shipment|parcel|package)\\b'\n"
+            "    - '\\b(receipt|invoice|e-?ticket|boarding pass|itinerary)\\b'\n"
+            "    - '\\b(fatura|factura|facture|rechnung|recibo|re[\\u00e7c]u|nota fiscal)\\b'\n"
+        )
+
+    def test_bulk_marketing_email_is_noise(self):
+        email = _make_email(sender="YouTube <noreply@youtube.com>", is_bulk=True)
+        self.assertTrue(self.nf.is_noise(email))
+        self.assertEqual(self.nf.matched_category(email), "bulk_unsubscribe")
+
+    def test_same_sender_without_bulk_header_is_kept(self):
+        email = _make_email(sender="YouTube <noreply@youtube.com>", is_bulk=False)
+        self.assertFalse(self.nf.is_noise(email))
+
+    def test_bulk_email_from_freemail_domain_is_kept(self):
+        # Human mailing-list traffic (Google Groups injects List-Unsubscribe).
+        email = _make_email(
+            sender="Augusto <augusto.cezar@gmail.com>",
+            subject="Re: [Ubuntu-PE] Gutsy Release",
+            is_bulk=True,
+        )
+        self.assertFalse(self.nf.is_noise(email))
+
+    def test_bulk_email_from_whitelisted_domain_is_kept(self):
+        email = _make_email(sender="edX <noreply@edx.org>", is_bulk=True)
+        self.assertFalse(self.nf.is_noise(email))
+
+    def test_bulk_email_from_exempt_sender_pattern_is_kept(self):
+        # LinkedIn InMail carries List-Unsubscribe but is real human outreach.
+        email = _make_email(
+            sender="Recruiter <inmail-hit-reply@linkedin.com>", is_bulk=True
+        )
+        self.assertFalse(self.nf.is_noise(email))
+
+    def test_bulk_email_with_transactional_subject_is_kept(self):
+        email = _make_email(
+            sender="Shop <noreply@shop.example>",
+            subject="Your order 48587276 has been shipped out",
+            is_bulk=True,
+        )
+        self.assertFalse(self.nf.is_noise(email))
+
+    def test_bulk_email_with_receipt_subject_is_kept(self):
+        email = _make_email(
+            sender="Store <noreply@store.example>",
+            subject="Your receipt from Acme",
+            is_bulk=True,
+        )
+        self.assertFalse(self.nf.is_noise(email))
+
+    def test_bulk_email_with_multilingual_invoice_subject_is_kept(self):
+        # A real utility bill in Portuguese — "Fatura" must be recognised too.
+        email = _make_email(
+            sender="Iberdrola <clientes@clientesiberdrola.pt>",
+            subject="Iberdrola: Fatura Eletrónica",
+            is_bulk=True,
+        )
+        self.assertFalse(self.nf.is_noise(email))
+
+    def test_bulk_email_with_marketing_booking_subject_is_still_noise(self):
+        # "Finish booking" is an abandoned-cart nudge, not a real booking notice.
+        email = _make_email(
+            sender="Tripadvisor <updates@mp1.tripadvisor.com>",
+            subject="Finish booking: Porto Mare Hotel",
+            is_bulk=True,
+        )
+        self.assertTrue(self.nf.is_noise(email))
+
+    def test_explicit_category_still_wins_for_bulk_email(self):
+        email = _make_email(sender="x@spammer.com", is_bulk=True)
+        self.assertTrue(self.nf.is_noise(email))
+        self.assertEqual(self.nf.matched_category(email), "known_spam")
+
+    def test_match_payload_honours_is_bulk_true(self):
+        matched, cat = self.nf.match_payload(
+            {"sender": "noreply@youtube.com", "subject": "new video", "is_bulk": True}
+        )
+        self.assertTrue(matched)
+        self.assertEqual(cat, "bulk_unsubscribe")
+
+    def test_match_payload_without_is_bulk_does_not_bulk_filter(self):
+        matched, _ = self.nf.match_payload(
+            {"sender": "noreply@youtube.com", "subject": "new video"}
+        )
+        self.assertFalse(matched)
+
+
+class TestNoBulkFilterSection(unittest.TestCase):
+
+    def test_bulk_email_kept_when_no_bulk_filter_configured(self):
+        nf = _filter_from_yaml("""
+            categories:
+              linkedin:
+                description: LinkedIn
+                sender_domains: [linkedin.com]
+        """)
+        email = _make_email(sender="news@some-newsletter.example", is_bulk=True)
+        self.assertFalse(nf.is_noise(email))
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn rule narrowed: drop automated notifications, keep genuine InMail
+# ---------------------------------------------------------------------------
+
+class TestLinkedInNarrowing(unittest.TestCase):
+
+    def setUp(self):
+        self.nf = _filter_from_yaml(
+            "categories:\n"
+            "  linkedin_notifications:\n"
+            "    description: LinkedIn automated notifications (not InMail)\n"
+            "    sender_patterns:\n"
+            "      - '-noreply@linkedin\\.com'\n"
+            "      - '@e\\.linkedin\\.com'\n"
+        )
+
+    def test_job_alert_noreply_is_noise(self):
+        email = _make_email(
+            sender="LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>"
+        )
+        self.assertTrue(self.nf.is_noise(email))
+
+    def test_newsletter_noreply_is_noise(self):
+        email = _make_email(
+            sender="Notion via LinkedIn <newsletters-noreply@linkedin.com>"
+        )
+        self.assertTrue(self.nf.is_noise(email))
+
+    def test_marketing_subdomain_is_noise(self):
+        email = _make_email(sender="LinkedIn <updates@e.linkedin.com>")
+        self.assertTrue(self.nf.is_noise(email))
+
+    def test_inmail_is_kept(self):
+        # Real human outreach relayed via LinkedIn InMail — must NOT be filtered.
+        email = _make_email(
+            sender="Vanshika Bajaj <inmail-hit-reply@linkedin.com>"
+        )
+        self.assertFalse(self.nf.is_noise(email))
 
 
 if __name__ == "__main__":

@@ -24,5 +24,25 @@ class TestSummaryMetadata(unittest.TestCase):
         self.assertNotIn("summary", doc.metadata)
 
 
+class TestBulkMetadata(unittest.TestCase):
+    """is_bulk (raw header marker) and noise_candidate (would-be-dropped bulk)
+    ride in the payload for query-time filtering and the no-LLM vector hunt, but
+    are excluded from the embedded text."""
+
+    def test_flags_present_in_payload_and_embed_excluded(self):
+        doc = _email(is_bulk=True, noise_candidate=True).to_document(doc_id="local_0")
+        self.assertTrue(doc.metadata["is_bulk"])
+        self.assertTrue(doc.metadata["noise_candidate"])
+        self.assertIn("is_bulk", doc.excluded_embed_metadata_keys)
+        self.assertIn("noise_candidate", doc.excluded_embed_metadata_keys)
+        self.assertIn("is_bulk", doc.excluded_llm_metadata_keys)
+        self.assertIn("noise_candidate", doc.excluded_llm_metadata_keys)
+
+    def test_flags_default_false_in_payload(self):
+        doc = _email().to_document(doc_id="local_0")
+        self.assertFalse(doc.metadata["is_bulk"])
+        self.assertFalse(doc.metadata["noise_candidate"])
+
+
 if __name__ == "__main__":
     unittest.main()

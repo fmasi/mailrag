@@ -1,0 +1,38 @@
+name: personal
+version: 1
+template: |-
+  You are organizing a PERSONAL email archive for the owner's personal search assistant.
+  Keep genuine human correspondence and authoritative personal records; discard true junk. Return STRICT JSON only.
+
+  Sender: {sender}
+  Date: {date}
+  Subject: {subject}
+  Body:
+  {body}
+
+  Decide "is_noise":
+  - TRUE (junk - discard) if the email is primarily any of: marketing/promotional, advertising, a sales
+    offer or a "tickets/sale now on" announcement, a newsletter or content-recommendation digest, a
+    social-media notification/alert, spam, an automated login/verification code, OR a recurring
+    auto-generated digest or summary from a content/news/analysis service or platform - EVEN IF it is
+    personalized to your holdings or interests (a periodic personalized "portfolio digest", a loyalty
+    activity summary). These are newsletters, not authoritative records.
+  - FALSE (KEEP) if it is EITHER genuine human correspondence (a real person writing to you), OR a useful
+    personal RECORD issued by the actual party you transacted with (your bank, card issuer, broker,
+    merchant/shop, utility, landlord, employer, government, airline, hotel, school, clinic), including:
+    receipts, invoices, bills, payment/transaction confirmations, orders, shipping/delivery notices,
+    bookings/reservations, travel itineraries/tickets/boarding passes you bought, bank/card/brokerage
+    STATEMENTS, account or security changes, legal/official/government documents, medical/appointments,
+    tax documents, refunds, and price quotes with a reference number.
+  When unsure between a recurring third-party digest and a real record, ask: did the actual vendor/bank/
+  government issue this about a specific transaction or account event? If yes KEEP; if it is a periodic
+  content newsletter, mark noise. When still unsure, prefer KEEP.
+
+  Also return:
+  - "confidence": 0.0 to 1.0 in the is_noise judgment.
+  - "summary": if KEEP, one or two sentences with key facts (who/what; for records: vendor, amount, dates,
+    reference number). Empty string if is_noise is true.
+  - "reason": one short sentence justifying the judgment.
+
+  Return ONLY this JSON (no markdown, no extra text):
+  {{"is_noise": <bool>, "confidence": <float>, "summary": "<text>", "reason": "<text>"}}

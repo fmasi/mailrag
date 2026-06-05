@@ -736,6 +736,68 @@ and re-embedding a whole thread every time it grows.
 
 ---
 
+## 14. A second corpus — the LLM rubric is *not* portable (#30, 2026-06-05)
+
+[§4](#4-portability--a-shared-starter-blocklist) showed that about a third of the *regex*
+blocklist carries across corpora for free. The LLM **rubric** — what the model is told to
+treat as noise versus a record worth keeping — does not. I pointed the same pipeline at my
+own ~25,000-email personal archive, and the cost of assuming the rubric would carry over
+showed up fast.
+
+| corpus | judged | Pass-2 noise rate | kept |
+|---|---|---|---|
+| work ([§1](#1-the-cleanup-funnel--measured-savings)) | 31,969 | 37.9% | 19,859 |
+| personal (rubric calibrated *for this corpus*) | 24,979 | **61.5%** | 9,620 |
+
+The portability test is the part that matters. Re-running Pass-2 over the personal archive
+with the *corporate* rubric flagged **87.6%** of it as noise. The rubric calibrated for the
+personal corpus flagged **61.5%** (the two runs covered near-identical sets, 24,527 vs
+24,979 judged, so compare rates, not raw counts). That 26-point gap isn't borderline churn.
+It's genuine personal mail — receipts, bank statements, actual correspondence — that the
+corporate rubric's idea of a "record" doesn't recognize. Shipped blind, the wrong rubric
+would have deleted about **one in four real personal emails**.
+
+**Why it doesn't port.** What counts as noise depends on what the corpus is for. In a work
+mailbox a vendor invoice or a calendar invite is operational record; in a personal mailbox
+those same forms mean something else, and the long tail (family logistics, medical, bank
+statements) has no corporate equivalent. The rubric encodes those judgments, so it has to be
+re-fit per corpus. That's the opposite of the shared regex blocklist.
+
+**What caught it,** before burning the ~6 h run, was the calibrate gate from pipeline
+increment 1b:
+
+- a **rubric registry**: shipped generic templates, plus local corpus-specific overrides
+  resolved local-first;
+- a **calibration pass** over a ~200-email sample that sorts the model's calls into
+  *false-noise* (real mail it would drop) and *false-keep* (noise it would keep), and makes
+  a human actually read both buckets;
+- a **gate**: `mailrag pass2` won't run until the active rubric has been calibrated
+  (`--force` overrides).
+
+Calibration takes minutes; the full sweep took about 6 h on a local model (~2,500 emails/hr,
+GPU-bound). The gate is there to make you spend the minutes before the hours.
+
+**Verifying the dropped pile.** Calibration only tells you the rubric looks reasonable. It
+doesn't prove the 15,359 drops were right, so I spot-checked. A random 20 of the dropped
+emails were all genuine noise. A targeted sweep of the drop pile for record-like keywords
+turned up about 8% suspects, and every one was a correct drop on inspection (the keyword
+matched a promo or a notification, not an actual record). Nothing real surfaced in the sample.
+
+**Where it's still shaky (→ [#30](https://github.com/fmasi/mailrag/issues/30)).** One band
+resists a single-pass call: borderline promo-versus-record emails from a recurring sender,
+where product pitches sit right next to statement-like messages. The model dropped the
+pitches and kept the records, which is defensible, but it wasn't consistent across
+near-identical cases. The problem isn't a wrong call, it's an unstable one. That's what #30
+is for: a second-opinion verifier on the borderline band, a different model casting an
+independent vote.
+
+**Cost.** Pass-2 is cached, so every later decision off this corpus (drop threshold, chunk
+size, a possible sender carve-out) rebuilds in about 8 min for $0. Only the one-time ~6 h
+sweep is expensive. All of it ran on a local Gemma on Apple Silicon: no cloud spend, and no
+mail left the machine.
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research

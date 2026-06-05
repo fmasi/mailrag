@@ -57,27 +57,27 @@ def _make_load_email(body_chars):
 
 
 def cmd_run(args):
-    from src.ingest.local_source import resolve_index_files
-    sel = _load_selection(args.selection)
-    kept, _ = resolve_index_files(sel["root"], sel["selection_rules"], args.blacklist)
-    kept = pass2.sample_files(kept, args.sample, args.seed)
-    cache = Pass2Cache(args.cache)
-    cl = llm_client.make_client()
+    """Thin shim: delegates to src.pipeline.pass2.run."""
+    from src.profile import CorpusProfile
+    from src.pipeline import pass2 as pass2_stage
+
     model = args.model or llm_client.default_model()
     if not model:
         print("Error: set --model or RAG_LLM_MODEL"); sys.exit(1)
-    load_email = _make_load_email(args.body_chars)
 
-    def summarize(email):
-        return summary.parse_response(
-            llm_client.chat(cl, model, summary.build_prompt(email, args.body_chars)))
+    prof = CorpusProfile.load(args.selection)
+    prof.pass2_cache = args.cache
 
-    print(f"sweeping {len(kept)} file(s) with {model} "
-          f"({cache.stats()['total']} already cached)", flush=True)
-    counts = pass2.run_pass(kept, cache, load_email, summarize, model,
-                            limit=args.limit, progress=not args.no_progress)
-    print(f"run: {counts}; cache now {cache.stats()}")
-    cache.close()
+    counts = pass2_stage.run(
+        prof,
+        model=model,
+        workers=args.workers,
+        body_chars=args.body_chars,
+        limit=args.limit,
+        sample=args.sample,
+        progress=not args.no_progress,
+    )
+    print(f"run: {counts}")
 
 
 def cmd_report(args):
@@ -177,6 +177,8 @@ def main(argv=None):
     pr.add_argument("--seed", type=int, default=0, help="random seed for --sample")
     pr.add_argument("--no-progress", action="store_true",
                     help="disable the tqdm progress bar")
+    pr.add_argument("--workers", type=int, default=1,
+                    help="parallel in-flight LLM requests (cache writes stay serial)")
     pr.set_defaults(func=cmd_run)
 
     rp = sub.add_parser("report", help="Dry-run report from the cache")

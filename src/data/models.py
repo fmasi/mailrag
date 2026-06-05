@@ -35,6 +35,8 @@ class NormalizedEmail:
     in_reply_to: Optional[str] = None
     references: Optional[str] = None
     summary: Optional[str] = None  # LLM Pass-2 enrichment; payload-only
+    is_bulk: bool = False  # bulk-mail header marker (List-Unsubscribe / Precedence:bulk)
+    noise_candidate: bool = False  # bulk rule would drop it; kept for the no-LLM vector hunt
 
     # Example usage:
     # email = NormalizedEmail(
@@ -90,6 +92,12 @@ class NormalizedEmail:
         if self.summary:
             metadata["summary"] = _truncate(self.summary, _MAX_SUMMARY_LEN)
 
+        # Bulk markers — payload-only filters. is_bulk is the raw header signal;
+        # noise_candidate flags mail the conservative Pass-1 bulk rule would have
+        # dropped but we kept, so the no-LLM vector hunt can inspect it first.
+        metadata["is_bulk"] = self.is_bulk
+        metadata["noise_candidate"] = self.noise_candidate
+
         # Keep full recipient headers and thread ids in metadata for
         # filtering/debugging, but exclude them from chunking/embedding context
         # so they don't bloat node size or change the vectors.
@@ -108,6 +116,8 @@ class NormalizedEmail:
             "in_reply_to",
             "references",
             "summary",
+            "is_bulk",
+            "noise_candidate",
         ]
         return Document(
             text=self.body,

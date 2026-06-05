@@ -44,12 +44,16 @@ def process_file(path: str, cache: Pass2Cache, load_email: Callable[[str], Dict]
 def run_pass(paths: Iterable[str], cache: Pass2Cache,
              load_email: Callable[[str], Dict], summarize: Callable[[Dict], Dict],
              model: str, limit: Optional[int] = None,
-             progress: bool = False) -> Dict[str, int]:
+             progress: bool = False, workers: int = 1) -> Dict[str, int]:
     """Sweep *paths*, summarizing uncached files. Returns outcome counts.
 
     When *progress* is true, show a tqdm bar over the whole corpus (rate + ETA)
     with a running done/cached/err breakdown. Already-cached files advance the
     bar quickly, so a resumed run shows true overall position.
+
+    When *workers* > 1, load+summarize (network-bound LLM calls) run in a thread
+    pool with that many in-flight requests; all SQLite cache reads/writes stay on
+    the calling thread so the single connection is never touched concurrently.
     """
     counts = {"cached": 0, "done": 0, "error": 0}
     paths = list(paths)
@@ -64,12 +68,52 @@ def run_pass(paths: Iterable[str], cache: Pass2Cache,
         except ImportError:  # bar is optional; fall back to silent sweep
             bar = None
 
-    for path in paths:
-        counts[process_file(path, cache, load_email, summarize, model)] += 1
+    def _tick():
         if bar is not None:
             bar.update(1)
             bar.set_postfix(done=counts["done"], cached=counts["cached"],
                             err=counts["error"], refresh=False)
+
+    if workers and workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Split cached vs. todo on this thread (serial cache.has), then fan the
+        # LLM work out; cache.put happens here as each future lands.
+        todo = []
+        for path in paths:
+            sha = file_sha256(path)
+            if cache.has(sha):
+                counts["cached"] += 1
+                _tick()
+            else:
+                todo.append((path, sha))
+
+        def _work(item):
+            path, sha = item
+            email = load_email(path)
+            record = summarize(email)
+            mid, chash = _identity_from(email)
+            return path, sha, record, mid, chash
+
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(_work, item): item for item in todo}
+            for fut in as_completed(futures):
+                try:
+                    path, sha, record, mid, chash = fut.result()
+                    cache.put(sha, record, model=model,
+                              message_id=mid, content_sha256=chash)
+                    counts["done"] += 1
+                except Exception as exc:  # leave uncached so a rerun retries it
+                    print(f"  pass2 error on {futures[fut][0]}: {exc}")
+                    counts["error"] += 1
+                _tick()
+        if bar is not None:
+            bar.close()
+        return counts
+
+    for path in paths:
+        counts[process_file(path, cache, load_email, summarize, model)] += 1
+        _tick()
     if bar is not None:
         bar.close()
     return counts
@@ -99,6 +143,39 @@ def sample_files(paths: Iterable[str], n: Optional[int], seed: int = 0) -> List[
     if n is None or n >= len(items):
         return items
     return random.Random(seed).sample(items, n)
+
+
+def apply_pass2(emails, cache: Pass2Cache, min_confidence: float = 0.7):
+    """Apply cached Pass-2 judgments to *emails* before indexing.
+
+    Drops emails judged noise at/above *min_confidence* (the confident-noise
+    prune that saves DB space) and injects the cached summary onto each kept,
+    non-noise email. Emails with no cache row — or noise below the threshold —
+    are KEPT untouched, so a partial/resumable cache never silently loses mail
+    (zero-loss stays the default; only confident noise is removed). The raw
+    ``.eml`` files remain on disk, so a drop is reversible by rebuilding.
+
+    Returns ``(kept_emails, dropped_count)``. ``source_id`` is the file path.
+    """
+    kept = []
+    dropped = 0
+    for email in emails:
+        mid, chash = email_identity(
+            sender=getattr(email, "sender", "") or "",
+            subject=getattr(email, "subject", "") or "",
+            date=getattr(email, "date", None),
+            body=getattr(email, "body", "") or "",
+            message_id=getattr(email, "message_id", "") or "",
+        )
+        row = cache.get_resilient(file_sha256(email.source_id),
+                                  message_id=mid, content_sha256=chash)
+        if row is not None and row["is_noise"] and row["confidence"] >= min_confidence:
+            dropped += 1
+            continue
+        if row is not None and not row["is_noise"] and row["summary"]:
+            email.summary = row["summary"]
+        kept.append(email)
+    return kept, dropped
 
 
 def inject_summaries(emails, cache: Pass2Cache) -> int:

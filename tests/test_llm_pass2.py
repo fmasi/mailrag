@@ -57,6 +57,29 @@ class TestRunPass(unittest.TestCase):
         self.assertEqual(c, {"cached": 0, "done": 2, "error": 0})
         self.assertEqual(self.cache.stats()["total"], 2)
 
+    def test_workers_process_all_then_skip_cached(self):
+        c1 = pass2.run_pass([self.f1, self.f2], self.cache, self._load,
+                            self._summarize, model="m", workers=4)
+        self.assertEqual(c1, {"cached": 0, "done": 2, "error": 0})
+        self.assertEqual(self.cache.stats()["total"], 2)
+        c2 = pass2.run_pass([self.f1, self.f2], self.cache, self._load,
+                            self._summarize, model="m", workers=4)
+        self.assertEqual(c2, {"cached": 2, "done": 0, "error": 0})
+
+    def test_workers_error_leaves_uncached(self):
+        def boom(email):
+            raise RuntimeError("llm down")
+        c = pass2.run_pass([self.f1, self.f2], self.cache, self._load, boom,
+                           model="m", workers=4)
+        self.assertEqual(c["error"], 2)
+        self.assertEqual(self.cache.stats()["total"], 0)
+
+    def test_workers_respect_limit(self):
+        c = pass2.run_pass([self.f1, self.f2], self.cache, self._load,
+                           self._summarize, model="m", workers=4, limit=1)
+        self.assertEqual(c["done"], 1)
+        self.assertEqual(self.cache.stats()["total"], 1)
+
     def test_process_file_stores_resilient_identity(self):
         from src.data.blacklist import file_sha256
 
@@ -91,6 +114,41 @@ class TestInjectSummariesResilient(unittest.TestCase):
             n = pass2.inject_summaries([email], cache)
             self.assertEqual(n, 1)
             self.assertEqual(email.summary, "hi")
+            cache.close()
+
+
+class TestApplyPass2(unittest.TestCase):
+    def test_drops_confident_noise_injects_summaries_keeps_unjudged(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = Pass2Cache(os.path.join(d, "c.db"))
+            fk = os.path.join(d, "keep.eml"); _write(fk, b"keep bytes")
+            fn = os.path.join(d, "noise.eml"); _write(fn, b"noise bytes")
+            fu = os.path.join(d, "unjudged.eml"); _write(fu, b"unjudged bytes")
+            cache.put("HK", {"is_noise": False, "confidence": 0.9,
+                             "summary": "kept summary", "reason": ""}, message_id="K@x")
+            cache.put("HN", {"is_noise": True, "confidence": 0.9,
+                             "summary": "", "reason": "spam"}, message_id="N@x")
+            keep = _FakeEmail(fk, "<K@x>")
+            noise = _FakeEmail(fn, "<N@x>")
+            unjudged = _FakeEmail(fu, "<U@x>")  # no cache row
+            kept, dropped = pass2.apply_pass2([keep, noise, unjudged], cache,
+                                              min_confidence=0.7)
+            self.assertEqual(dropped, 1)
+            self.assertEqual([e.message_id for e in kept], ["<K@x>", "<U@x>"])
+            self.assertEqual(keep.summary, "kept summary")
+            self.assertIsNone(unjudged.summary)
+            cache.close()
+
+    def test_low_confidence_noise_is_kept(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache = Pass2Cache(os.path.join(d, "c.db"))
+            f = os.path.join(d, "x.eml"); _write(f, b"x")
+            cache.put("H", {"is_noise": True, "confidence": 0.4,
+                            "summary": "", "reason": "maybe"}, message_id="M@x")
+            kept, dropped = pass2.apply_pass2([_FakeEmail(f, "<M@x>")], cache,
+                                              min_confidence=0.7)
+            self.assertEqual(dropped, 0)
+            self.assertEqual(len(kept), 1)  # below threshold -> kept (zero-loss)
             cache.close()
 
 

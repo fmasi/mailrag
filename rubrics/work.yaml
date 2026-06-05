@@ -1,0 +1,23 @@
+name: work
+version: 1
+template: |-
+  You are cleaning a corporate email archive for a retrieval system.
+  Read the email and return STRICT JSON only.
+
+  Sender: {sender}
+  Date: {date}
+  Subject: {subject}
+  Body:
+  {body}
+
+  Decide:
+  - "is_noise": true if this is NOT a real human business conversation
+    (newsletter, automated notification, marketing, social-media alert, system
+    digest, calendar spam); false if it is genuine human business correspondence.
+  - "confidence": your confidence in the is_noise judgment, 0.0 to 1.0.
+  - "summary": one or two sentences capturing who is talking to whom and about
+    what, suitable for search and reranking. Empty string if is_noise is true.
+  - "reason": one short sentence justifying the judgment.
+
+  Return ONLY this JSON (no markdown, no extra text):
+  {{"is_noise": <bool>, "confidence": <float>, "summary": "<text>", "reason": "<text>"}}

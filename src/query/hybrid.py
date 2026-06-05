@@ -26,17 +26,22 @@ SPARSE_VECTOR_NAME = "sparse"
 DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
-def _qdrant_client():
-    """Construct a Qdrant client from environment variables (collection passed separately).
+def _qdrant_client(qdrant_url=None):
+    """Construct a Qdrant client (collection passed separately).
+
+    ``qdrant_url`` is an explicit override (e.g. from a corpus profile) and takes
+    precedence over the environment. It exists so the host CLI can target
+    ``localhost`` without inheriting a container-oriented ``QDRANT_URL`` from
+    ``.env`` (see issue #29). When unset, falls back to ``os.environ``.
 
     Reads ``os.environ`` directly rather than importing ``src.config.settings``: that
     module eagerly imports heavy cloud llama-index integrations (OpenAI/Perplexity) which
     the lightweight local ``rag`` query env does not (and should not, per the offline goal)
-    have. ``QDRANT_URL`` is required; api-key/grpc are optional with local-friendly defaults.
+    have. A URL is required; api-key/grpc are optional with local-friendly defaults.
     """
     from qdrant_client import QdrantClient
 
-    url = (os.environ.get("QDRANT_URL") or "").strip()
+    url = (qdrant_url or os.environ.get("QDRANT_URL") or "").strip()
     if not url:
         raise ValueError("QDRANT_URL environment variable is not set")
     api_key = (os.environ.get("QDRANT_API_KEY") or "").strip() or None
@@ -81,6 +86,7 @@ def build_hybrid_searcher(
     collection: str,
     *,
     client=None,
+    qdrant_url=None,
     embedder=None,
     mode: str = "hybrid",
     rerank: bool = False,
@@ -97,9 +103,11 @@ def build_hybrid_searcher(
     rerank_with_summary=True scores the cross-encoder on summary+body (takes precedence over rerank).
     fusion_fn overrides the hybrid fusion callback (default RRF; see make_rank_fusion).
     `client`/`embedder` are injectable for testing; built lazily otherwise.
+    `qdrant_url` overrides where the lazily-built client connects (profile-driven,
+    defaults to the environment); ignored when `client` is injected.
     """
     if client is None:
-        client = _qdrant_client()
+        client = _qdrant_client(qdrant_url)
     if embedder is None:
         from src.ingest.embedder import BgeM3Embedder
 

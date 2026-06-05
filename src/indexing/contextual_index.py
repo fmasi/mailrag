@@ -42,6 +42,7 @@ def build_contextual_index(
     upsert_batch: int = 256,
     recreate: bool = True,
     qdrant_url: str = "http://localhost:6333",
+    apply_noise_filter: bool = True,
 ) -> BuildResult:
     """Clean -> (inject summaries) -> split -> dedup -> bge-m3 hybrid embed -> upsert.
 
@@ -85,9 +86,12 @@ def build_contextual_index(
         Collection name, number of emails that survived noise-filtering, and
         total chunks upserted.
     """
-    # 1. Noise filter
-    nf = NoiseFilter.from_project_rules()
-    emails = [e for e in emails if not nf.is_noise(e)]
+    # 1. Noise filter. Callers that already pre-filter (and tag kept bulk via
+    # noise_candidate) pass apply_noise_filter=False so this redundant pass does
+    # not silently re-drop the bulk mail they deliberately kept.
+    if apply_noise_filter:
+        nf = NoiseFilter.from_project_rules()
+        emails = [e for e in emails if not nf.is_noise(e)]
 
     # 2. Inject summaries into .summary field (surfaced by to_document())
     if summaries:
