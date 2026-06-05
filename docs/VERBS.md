@@ -52,17 +52,20 @@ recommend one.
 
 | Persona | What you get | Recipe |
 |---------|--------------|--------|
-| **`llm-none`** | Fast, **no LLM at all**. Body-only embeddings; obvious bulk tagged. Cheapest, noisiest. | `scope → measure → [scan] → tag → index` |
-| **`llm-verify`** | **Safe budget.** LLM summaries on what you keep; a cheap `judge` confirms drops only on the `scan`-flagged suspects. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → summarize(rest) → index` |
-| **`llm-all`** | **Max quality.** One combined LLM call per email (summary + verdict); `index` then drops the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → index` |
+| **`llm-none`** | Fast, **no LLM at all**. Body-only embeddings; `prune` drops the regex-tagged bulk. Cheapest, noisiest. | `scope → measure → [scan] → tag → prune(tag) → index` |
+| **`llm-verify`** | **Safe budget.** A cheap `judge` confirms drops only on the `scan`-flagged suspects; `prune` blacklists them *before* the summary pass; summaries on what's kept. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → prune(judge) → summarize(rest) → index` |
+| **`llm-all`** | **Max quality.** One combined LLM call per email (summary + verdict); `prune` then drops the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → prune(summarize) → index` |
 
-Run a persona end-to-end with `mailrag run --persona <name> --profile <p> [--model <m>]`.
+Run a persona end-to-end with `mailrag run --persona <name> --profile <p> [--model <m>]`,
+or interactively with `mailrag wizard`.
 
-> **Status:** `llm-none` and `llm-all` run today (the noise drop is performed by
-> `index --embed-summary`). `llm-verify` needs the cheap `judge` verb and the
-> standalone `prune` step (applying drops *before* the LLM pass, for budget savings) —
-> the **persona-engine** pieces still to land; until then `mailrag run --persona
-> llm-verify` reports them as not-yet-implemented.
+> **An honest note on the budget.** Each LLM call is dominated by reading the email
+> *body*, so `judge` is not dramatically cheaper *per call* than `summarize`.
+> `llm-verify`'s saving over `llm-all` is mainly the **summary output it avoids on the
+> bulk it drops** (and not summarizing obvious junk), plus the safety of LLM-confirmed
+> drops — not a big reduction in body processing. If your corpus has little obvious
+> noise, `llm-all` is simpler and barely more expensive; `scan` tells you which case
+> you're in.
 
 **How to choose:**
 

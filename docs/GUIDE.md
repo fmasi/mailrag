@@ -44,8 +44,11 @@ tradeoff. You don't wire verbs by hand; you pick a persona and mailrag walks it.
 | **`llm-verify`** | You want great quality *and* your corpus has a lot of **obvious** noise to skip cheaply.¹ | medium | high, safe |
 | **`llm-all`** | You want the cleanest result and the LLM to look at every email. | high | best |
 
-¹ `llm-verify` needs the cheap `judge` verb — a persona-engine piece still landing; for
-now use `llm-none` or `llm-all`.
+¹ `llm-verify` is most worth it when `scan` shows a lot of *obvious* noise. Because each
+LLM call is dominated by reading the email body, its saving over `llm-all` is mainly the
+summaries it skips on the dropped bulk (plus the safety of LLM-confirmed drops), not a big
+body-processing cut — so if there's little obvious noise, `llm-all` is simpler. Before any
+drop, `prune` shows a sample of what it will blacklist and asks.
 
 **Don't know which?** Run `scan` first — it's free (no LLM) and it *tells you*:
 
