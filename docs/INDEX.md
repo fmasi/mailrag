@@ -19,7 +19,8 @@ matches how deep you want to go.
    - **[`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md)** — the retrieval stack end-to-end: dense vs
      learned-sparse, hybrid + RRF, reranking, and **thread-aware retrieval** (small→big expansion).
    - **[`EXPERIMENTS.md`](EXPERIMENTS.md)** — the measured findings: the cleanup funnel, the
-     labeled-eval ladder (§9–§13), confound controls, and the negative results. Its
+     labeled-eval ladder (§9–§13), the corpus-portability result (§14), confound controls,
+     and the negative results. Its
      **[terminology box](EXPERIMENTS.md#terminology-read-this-first)** defines the `C`/`C′`
      collection labels and the two senses of "thread-aware".
 
