@@ -22,6 +22,8 @@ from src.pipeline import pass1, build as build_stage, profile as profile_stage
 from src.pipeline import pass2 as pass2_stage, select as select_stage
 from src.pipeline import calibrate as calibrate_stage
 from src.pipeline import explore as explore_stage
+from src.pipeline import judge as judge_stage
+from src.pipeline import prune as prune_stage
 from src.persona import registry as persona_registry
 from src.persona import executor as persona_executor
 from src.persona import runner as persona_runner
@@ -75,6 +77,50 @@ def _cmd_summarize(args):
         return 2
     counts = pass2_stage.run(prof, model=args.model, workers=args.workers)
     print(f"summarize: {counts}")
+    return 0
+
+
+def _cmd_judge(args):
+    prof = CorpusProfile.load(args.profile)
+    if not prof.rubric:
+        raise ValueError("profile has no rubric set")
+    cal = prof.calibration
+    calibrated = bool(cal) and cal.get("rubric") == prof.rubric and cal.get("passed")
+    if not args.force and not calibrated:
+        print(f"error: rubric '{prof.rubric}' is not calibrated; run "
+              f"`mailrag calibrate --profile {args.profile} --model {args.model}` "
+              f"first (or pass --force)", file=sys.stderr)
+        return 2
+    scan_json = args.scan_json or (args.profile.rsplit(".", 1)[0] + ".scan.json")
+    try:
+        counts = judge_stage.run(prof, model=args.model, scan_json=scan_json,
+                                 min_score=args.min_score, workers=args.workers)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"judge: {counts}")
+    return 0
+
+
+def _cmd_prune(args):
+    prof = CorpusProfile.load(args.profile)
+    if not prof.blacklist:
+        prof.blacklist = args.profile.rsplit(".", 1)[0] + ".blacklist.txt"
+    hashes, preview = prune_stage.collect(prof, source=args.source,
+                                          min_confidence=args.min_confidence)
+    if not hashes:
+        print("prune: nothing to blacklist")
+        return 0
+    print(f"prune: {len(hashes)} files would be blacklisted (source={args.source}); sample:")
+    for line in preview:
+        print(f"  {line}")
+    if not args.yes:
+        print(f"dry run — re-run with --yes to write {prof.blacklist}")
+        return 0
+    n = prune_stage.run(prof, source=args.source, min_confidence=args.min_confidence,
+                        confirm=lambda p: True)
+    prof.save(args.profile)
+    print(f"prune: blacklisted {n} -> {prof.blacklist}")
     return 0
 
 
@@ -276,6 +322,28 @@ def _configure_wizard(p):
                    help="LLM model for the LLM steps (else you're prompted)")
 
 
+def _configure_judge(p):
+    _add_profile_arg(p)
+    p.add_argument("--model", required=True)
+    p.add_argument("--scan-json", default=None,
+                   help="scan artifact to read suspects from (default: <profile-stem>.scan.json)")
+    p.add_argument("--min-score", type=float, default=0.6,
+                   help="judge threads in clusters scoring at/above this")
+    p.add_argument("--workers", type=int, default=1)
+    p.add_argument("--force", action="store_true",
+                   help="run even if the rubric is not calibrated")
+
+
+def _configure_prune(p):
+    _add_profile_arg(p)
+    p.add_argument("--from", dest="source", required=True,
+                   choices=["tag", "judge", "summarize"],
+                   help="drop source: tag (regex), or the judge/summarize verdict cache")
+    p.add_argument("--min-confidence", type=float, default=0.7)
+    p.add_argument("--yes", action="store_true",
+                   help="write the blacklist (without it, dry-run preview only)")
+
+
 def _add_verb(sub, name, configure, func, *, help, aliases=()):
     """Register a verb plus hidden aliases (old names) sharing one handler."""
     p = sub.add_parser(name, help=help)
@@ -308,8 +376,12 @@ def build_parser():
               help="cluster embeddings to surface noise pockets (no LLM)")
     _add_verb(sub, "calibrate", _configure_calibrate, _cmd_calibrate,
               help="judge a sample with the rubric and bucket mistakes")
+    _add_verb(sub, "judge", _configure_judge, _cmd_judge,
+              help="cheap LLM verdict-only on scan suspects (no summary)")
     _add_verb(sub, "summarize", _configure_summarize, _cmd_summarize, aliases=["pass2"],
               help="LLM summary + noise judgement over a corpus")
+    _add_verb(sub, "prune", _configure_prune, _cmd_prune,
+              help="blacklist confident noise before the LLM/index pass")
     _add_verb(sub, "index", _configure_index, _cmd_index, aliases=["build"],
               help="embed and index a corpus from a profile")
     _add_verb(sub, "run", _configure_run, _cmd_run,

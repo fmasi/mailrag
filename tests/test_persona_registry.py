@@ -15,10 +15,12 @@ class TestPersonaRegistry(unittest.TestCase):
         self.assertEqual(p.label, "Full (LLM on everything)")
         verbs = [s.verb for s in p.steps]
         self.assertEqual(verbs, ["scope", "measure", "calibrate",
-                                 "summarize", "index"])
+                                 "summarize", "prune", "index"])
         # params parsed from {verb: {..}} steps
         summarize = next(s for s in p.steps if s.verb == "summarize")
         self.assertEqual(summarize.params, {"target": "all"})
+        prune = next(s for s in p.steps if s.verb == "prune")
+        self.assertEqual(prune.params, {"from": "summarize"})
 
     def test_string_and_dict_steps_both_parse(self):
         reg = load_registry()

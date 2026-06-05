@@ -19,20 +19,15 @@ verbs:
   index:     {does: "embed (BGE-M3) + store in Qdrant",          cost: gpu}
 
 personas:
-# NOTE: in the current pipeline the noise drop is performed by `index`
-# (`--embed-summary` drops confident noise). The standalone `prune` verb — applying
-# drops BEFORE the LLM pass to save budget — and the cheap `judge` verb are the
-# persona-engine pieces still to land; until then `llm-verify` (which needs `judge`)
-# is reported as not-yet-runnable.
-
   llm-none:
     label: "Body-only (no LLM)"
-    advisor_hint: "fast, no LLM at all; body-only index (noise tagging only)"
+    advisor_hint: "fast, no LLM at all; drops obvious bulk by regex tags"
     steps:
       - scope
       - measure
       - {scan: {optional: true}}
       - tag
+      - {prune: {from: tag}}
       - {index: {embed: body}}
 
   llm-verify:
@@ -43,16 +38,18 @@ personas:
       - measure
       - scan
       - calibrate
-      - {judge: {target: suspects}}
+      - {judge: {min_score: 0.6}}
+      - {prune: {from: judge}}
       - {summarize: {target: keepers}}
       - {index: {embed: summary}}
 
   llm-all:
     label: "Full (LLM on everything)"
-    advisor_hint: "max quality; one LLM call per email, then index drops the noise"
+    advisor_hint: "max quality; one LLM call per email, then prune the confident noise"
     steps:
       - scope
       - measure
       - calibrate
       - {summarize: {target: all}}
+      - {prune: {from: summarize}}
       - {index: {embed: summary}}

@@ -16,18 +16,31 @@ from typing import Any, Callable, Dict, Optional
 
 
 def build_handlers(*, profile_path: str, model: Optional[str] = None,
-                   workers: int = 1, embedder: Any = None) -> Dict[str, Callable]:
+                   workers: int = 1, embedder: Any = None,
+                   prune_confirm: Optional[Callable] = None) -> Dict[str, Callable]:
     """Return ``{verb: handler(profile, **params)}`` for the implemented verbs.
 
     Heavy imports/objects (loaders, the BGE-M3 embedder) are created lazily inside
-    the handlers, so constructing the map is cheap and side-effect-free."""
+    the handlers, so constructing the map is cheap and side-effect-free.
+    ``prune_confirm`` (preview -> bool) gates prune's blacklist write; defaults to
+    auto-yes (headless). The wizard passes an interactive confirm."""
     from src.pipeline import select as select_stage
     from src.pipeline import profile as profile_stage
     from src.pipeline import calibrate as calibrate_stage
     from src.pipeline import pass2 as pass2_stage
     from src.pipeline import build as build_stage
     from src.pipeline import explore as explore_stage
+    from src.pipeline import judge as judge_stage
+    from src.pipeline import prune as prune_stage
     from src.pipeline import pass1
+
+    _confirm = prune_confirm or (lambda preview: True)
+    _scan_json = profile_path.rsplit(".", 1)[0] + ".scan.json"
+
+    def _default_blacklist(prof):
+        if not getattr(prof, "blacklist", None):
+            prof.blacklist = profile_path.rsplit(".", 1)[0] + ".blacklist.txt"
+        return prof.blacklist
 
     def _scope(prof, **_):
         return select_stage.run(prof)
@@ -66,7 +79,17 @@ def build_handlers(*, profile_path: str, model: Optional[str] = None,
         emb = embedder or BgeM3Embedder(device="mps", use_fp16=True)
         return build_stage.run(prof, embedder=emb, embed_summary=(embed == "summary"))
 
+    def _judge(prof, min_score=0.6, **_):
+        return judge_stage.run(prof, model=model, scan_json=_scan_json,
+                               min_score=min_score, workers=workers)
+
+    def _prune(prof, **params):
+        _default_blacklist(prof)
+        source = params.get("from", "judge")
+        return prune_stage.run(prof, source=source, confirm=_confirm)
+
     return {
         "scope": _scope, "measure": _measure, "tag": _tag, "scan": _scan,
         "calibrate": _calibrate, "summarize": _summarize, "index": _index,
+        "judge": _judge, "prune": _prune,
     }
