@@ -27,9 +27,9 @@ class TestCollect(unittest.TestCase):
 
     def test_from_tag(self):
         prof = SimpleNamespace(resolved_root=lambda: "/r", selection_rules=[])
-        e1 = SimpleNamespace(source="/r/a.eml", noise_candidate=True,
+        e1 = SimpleNamespace(source_id="/r/a.eml", noise_candidate=True,
                              is_bulk=False, sender="x@bulk.com", subject="Sale")
-        e2 = SimpleNamespace(source="/r/b.eml", noise_candidate=False,
+        e2 = SimpleNamespace(source_id="/r/b.eml", noise_candidate=False,
                              is_bulk=False, sender="y@work.com", subject="Re: plan")
         with mock.patch("src.pipeline.prune.resolve_index_files",
                         return_value=(["/r/a.eml", "/r/b.eml"], [])), \

@@ -71,7 +71,9 @@ def aggregate_threads(emails) -> Tuple[List[ThreadMeta], Dict[str, List[int]]]:
             n_senders=len(sender_counts),
             tag_fraction=round(sum(_is_tagged(m) for m in members) / len(members), 4),
             sample_subjects=subjects or ["(no subject)"],
-            paths=[getattr(m, "source", "") or "" for m in members],
+            # source_id is the .eml file path (source is just the loader type);
+            # downstream judge/prune hash these paths, so they must be real files.
+            paths=[getattr(m, "source_id", "") or "" for m in members],
         ))
     return metas, dict(tid_to_idx)
 

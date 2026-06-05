@@ -15,7 +15,8 @@ def _email(message_id, subject, sender, tagged, in_reply_to="", references=""):
     return SimpleNamespace(
         message_id=message_id, subject=subject, sender=sender,
         in_reply_to=in_reply_to, references=references, body="b",
-        source=f"{message_id}.eml", noise_candidate=tagged, is_bulk=False)
+        source="mail_archive_x", source_id=f"{message_id}.eml",
+        noise_candidate=tagged, is_bulk=False)
 
 
 def _emails_three():
@@ -42,6 +43,8 @@ class TestAggregateThreads(unittest.TestCase):
         self.assertEqual(convo.tag_fraction, 0.0)
         self.assertEqual(convo.n_senders, 2)
         self.assertEqual(convo.top_sender_share, 0.5)
+        # members carry the .eml file paths (source_id), not the loader type
+        self.assertEqual(set(convo.paths), {"<a@x>.eml", "<b@x>.eml"})
         # the index map points back to the right rows
         self.assertEqual(sorted(len(v) for v in tid_to_idx.values()), [1, 2])
 

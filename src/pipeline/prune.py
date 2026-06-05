@@ -37,7 +37,7 @@ def _from_tag(profile) -> Tuple[List[str], List[str]]:
     hashes, preview = [], []
     for e in emails:
         if getattr(e, "noise_candidate", False) or getattr(e, "is_bulk", False):
-            src = getattr(e, "source", "") or ""
+            src = getattr(e, "source_id", "") or ""   # the .eml file path
             if src:
                 hashes.append(file_sha256(src))
                 if len(preview) < 10:
