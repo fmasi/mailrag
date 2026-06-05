@@ -23,6 +23,10 @@ from sklearn.cluster import MiniBatchKMeans
 
 _EPS = 1e-9
 _K_CAP = 50
+# A cluster scoring at/above this is treated as an "obvious" noise pocket for the
+# persona advisor; corpora with a large obvious fraction are worth trimming.
+_OBVIOUS_SCORE = 0.6
+_OBVIOUS_FRACTION_FOR_TRIM = 0.25
 
 
 @dataclass
@@ -64,8 +68,17 @@ class ClusterReport:
     clusters: List[ClusterInfo]
     vector_source: str = "fresh"
 
+    @property
+    def obvious_noise_fraction(self) -> float:
+        """Share of threads sitting in 'obvious' noise pockets (score >= cutoff)."""
+        if not self.n_threads:
+            return 0.0
+        obvious = sum(c.size for c in self.clusters if c.score >= _OBVIOUS_SCORE)
+        return round(obvious / self.n_threads, 4)
+
     def to_json_dict(self, *, profile: str, collection: str,
                      vector_source: str) -> dict:
+        persona, reason = recommend_persona(self)
         return {
             "profile": profile,
             "collection": collection,
@@ -75,6 +88,9 @@ class ClusterReport:
             "n_threads": self.n_threads,
             "n_emails": self.n_emails,
             "corpus_baseline_tag_rate": self.corpus_baseline_tag_rate,
+            "obvious_noise_fraction": self.obvious_noise_fraction,
+            "recommended_persona": persona,
+            "recommendation_reason": reason,
             "clusters": [
                 {
                     "id": c.id,
@@ -95,6 +111,23 @@ class ClusterReport:
                 for c in self.clusters
             ],
         }
+
+
+def recommend_persona(report: "ClusterReport") -> Tuple[str, str]:
+    """Recommend a persona from the obvious-noise fraction.
+
+    A large obvious-noise fraction means there is a lot to drop cheaply, so the
+    verified-trim persona pays off; otherwise there is little to trim and judging
+    everything (``llm-all``) is the simpler call. (``llm-none`` is the no-LLM
+    choice — a budget preference rather than a noise-driven recommendation.)"""
+    f = report.obvious_noise_fraction
+    if f >= _OBVIOUS_FRACTION_FOR_TRIM:
+        return ("llm-verify",
+                f"{f:.0%} of threads sit in obvious noise pockets — trim them with a "
+                f"cheap LLM check (llm-verify), or skip the LLM entirely (llm-none)")
+    return ("llm-all",
+            f"only {f:.0%} obvious noise — little to trim safely, so judge everything "
+            f"for max quality (llm-all)")
 
 
 def default_k(n_threads: int, requested: int | None = None) -> int:
@@ -185,8 +218,10 @@ def format_report(report: ClusterReport, *, top: int = 15) -> str:
     buf = StringIO()
     console = Console(file=buf, width=140)
     console.print(
-        f"explore: {report.n_threads} threads / {report.n_emails} emails, "
+        f"scan: {report.n_threads} threads / {report.n_emails} emails, "
         f"k={report.k}, seed={report.seed}, "
         f"baseline tag rate={report.corpus_baseline_tag_rate:.3f}")
     console.print(table)
+    persona, reason = recommend_persona(report)
+    console.print(f"recommended persona: [bold]{persona}[/bold] — {reason}")
     return buf.getvalue()

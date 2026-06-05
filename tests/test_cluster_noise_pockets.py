@@ -86,6 +86,37 @@ class TestNoisePockets(unittest.TestCase):
         self.assertIn("no-reply@bulk.com", text)   # the noisy cluster's top sender
         self.assertIn("score", text.lower())
 
+    def test_obvious_noise_fraction_and_recommendation_high(self):
+        from src.cluster.noise_pockets import recommend_persona
+        vecs, metas = _noisy_and_clean()
+        report = cluster_threads(vecs, metas, k=2, seed=11)
+        # ~half the threads are in the obvious (tagged, tight, single-sender) pocket
+        self.assertGreater(report.obvious_noise_fraction, 0.3)
+        persona, reason = recommend_persona(report)
+        self.assertEqual(persona, "llm-verify")
+        self.assertIn("%", reason)
+
+    def test_recommendation_low_noise_picks_llm_all(self):
+        from src.cluster.noise_pockets import recommend_persona
+        rng = np.random.RandomState(1)
+        vecs, metas = [], []
+        for i in range(20):
+            v = rng.normal(scale=1.0, size=8)
+            vecs.append(v)
+            metas.append(_meta(f"real{i}", 2, f"p{i}@x.com", 0.5, 2, 0.0,
+                               ["Re: chat"], [f"r{i}.eml"]))
+        report = cluster_threads(np.array(vecs, dtype=float), metas, k=2, seed=11)
+        self.assertLess(report.obvious_noise_fraction, 0.25)
+        persona, _ = recommend_persona(report)
+        self.assertEqual(persona, "llm-all")
+
+    def test_recommendation_in_json(self):
+        vecs, metas = _noisy_and_clean()
+        report = cluster_threads(vecs, metas, k=2, seed=11)
+        d = report.to_json_dict(profile="p", collection="c", vector_source="fresh")
+        self.assertIn("obvious_noise_fraction", d)
+        self.assertIn("recommended_persona", d)
+
 
 if __name__ == "__main__":
     unittest.main()
