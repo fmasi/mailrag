@@ -23,7 +23,8 @@ def _make_load_email(body_chars):
 
 def run(profile, *, model, workers=1, body_chars=4000, limit=None, sample=None,
         progress=True):
-    kept, _ = resolve_index_files(profile.resolved_root(), profile.selection_rules, None)
+    kept, _ = resolve_index_files(profile.resolved_root(), profile.selection_rules,
+                                  getattr(profile, "blacklist", None))
     cache = Pass2Cache(profile.pass2_cache)
     cl = llm_client.make_client()
     load_email = _make_load_email(body_chars)
