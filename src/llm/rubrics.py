@@ -28,6 +28,7 @@ class Rubric:
     name: str
     template: str
     version: int = 1
+    judge_template: str = ""   # optional verdict-only prompt for the `judge` verb
 
 
 def _find(name: str) -> Path:
@@ -57,8 +58,10 @@ def load_rubric(name: str) -> Rubric:
     if not isinstance(template, str) or not template.strip():
         raise ValueError(f"rubric {name!r} ({path}) has no 'template' string")
     _validate(name, template)
+    judge_template = data.get("judge_template") or ""
     return Rubric(name=str(data.get("name", name)), template=template,
-                  version=int(data.get("version", 1)))
+                  version=int(data.get("version", 1)),
+                  judge_template=str(judge_template))
 
 
 def build_prompt(name: str, email: Dict[str, Any], body_chars: int = _BODY_CHARS) -> str:
@@ -68,6 +71,34 @@ def build_prompt(name: str, email: Dict[str, Any], body_chars: int = _BODY_CHARS
     ``work`` rubric is byte-identical to the legacy path.
     """
     template = load_rubric(name).template
+    body = (email.get("body") or "").strip()
+    if len(body) > body_chars:
+        body = body[:body_chars] + " […truncated]"
+    return template.format(
+        sender=(email.get("sender") or "")[:200],
+        date=email.get("date") or "unknown",
+        subject=(email.get("subject") or "")[:300],
+        body=body,
+    )
+
+
+def build_judge_prompt(name: str, email: Dict[str, Any],
+                       body_chars: int = _BODY_CHARS) -> str:
+    """Format the rubric's verdict-only `judge_template` for *email*.
+
+    The judge prompt asks only for ``is_noise``/``confidence``/``reason`` (no
+    summary), so its output stays short and cheap. If the rubric has no
+    ``judge_template``, fall back to the full summarize template (correct verdicts,
+    but no token saving) and warn once."""
+    rubric = load_rubric(name)
+    template = rubric.judge_template
+    if not template:
+        import warnings
+        warnings.warn(
+            f"rubric {name!r} has no judge_template; judge will use the full "
+            f"summarize template (no token saving). Add a judge_template to save cost.",
+            stacklevel=2)
+        template = rubric.template
     body = (email.get("body") or "").strip()
     if len(body) > body_chars:
         body = body[:body_chars] + " […truncated]"
