@@ -16,6 +16,7 @@ from src.data.noise_filter import NoiseFilter
 from src.pipeline import pass1, build as build_stage, profile as profile_stage
 from src.pipeline import pass2 as pass2_stage, select as select_stage
 from src.pipeline import calibrate as calibrate_stage
+from src.pipeline import explore as explore_stage
 from src.llm import calibration as calibration_lib
 from src.ingest.embedder import BgeM3Embedder  # module-level so tests patch src.cli.BgeM3Embedder
 
@@ -98,6 +99,23 @@ def _cmd_select(args):
     select_stage.run(prof)
     prof.save(args.profile)
     print(f"selected {len(prof.selection_rules)} rule(s) -> {args.profile}")
+    return 0
+
+
+def _cmd_explore(args):
+    prof = CorpusProfile.load(args.profile)
+    default_json = args.profile.rsplit(".", 1)[0] + ".explore.json"
+    out = args.json or default_json
+    try:
+        report = explore_stage.run(
+            prof, json_path=out, clusters=args.clusters, seed=args.seed,
+            limit=args.limit, force_fresh=args.fresh, qdrant_url=args.qdrant_url,
+            top=args.top, profile_path=args.profile)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(explore_stage.format_report(report, top=args.top))
+    print(f"wrote {out}")
     return 0
 
 
@@ -198,6 +216,21 @@ def build_parser():
     ss = sub.add_parser("select", help="interactively build selection rules for a corpus")
     _add_profile_arg(ss)
     ss.set_defaults(func=_cmd_select)
+
+    se = sub.add_parser("explore",
+                        help="cluster embeddings to surface noise pockets (no LLM)")
+    _add_profile_arg(se)
+    se.add_argument("--clusters", type=int, default=None,
+                    help="number of clusters (default: heuristic from corpus size)")
+    se.add_argument("--seed", type=int, default=11)
+    se.add_argument("--limit", type=int, default=None)
+    se.add_argument("--fresh", action="store_true",
+                    help="force fresh BGE-M3 embed, skip reusing the Qdrant collection")
+    se.add_argument("--qdrant-url", default=None)
+    se.add_argument("--json", default=None,
+                    help="output path (default: <profile-stem>.explore.json)")
+    se.add_argument("--top", type=int, default=15, help="rows printed")
+    se.set_defaults(func=_cmd_explore)
 
     return p
 
