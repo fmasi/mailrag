@@ -1,0 +1,55 @@
+# Persona registry — the single source of truth for the mailrag pipeline recipes.
+#
+# A persona is a named, ordered recipe of verbs (with optional per-step settings).
+# The TUI runs it, `mailrag run --persona <name>` executes it headlessly, and the
+# docs render from it. Add an entry here (or in a gitignored personas.local.yaml)
+# to define a custom persona.
+#
+# See docs/VERBS.md for the cost model. Only `index` deletes anything.
+
+verbs:
+  scope:     {does: "choose which folders/accounts are in play", cost: free}
+  measure:   {does: "measure corpus, suggest chunk size",        cost: free}
+  tag:       {does: "regex/header flag of obvious bulk",         cost: free}
+  scan:      {does: "no-LLM embedding clusters + persona advisor", cost: cheap}
+  judge:     {does: "cheap LLM verdict-only on drop-suspects",   cost: small-llm}
+  calibrate: {does: "sample-gate the rubric before any full run", cost: small-llm}
+  summarize: {does: "LLM summary + noise verdict on keepers",    cost: big-llm}
+  prune:     {does: "apply drops before the LLM pass",           cost: free}
+  index:     {does: "embed (BGE-M3) + store in Qdrant",          cost: gpu}
+
+personas:
+  llm-none:
+    label: "Body-only (no LLM)"
+    advisor_hint: "fast, no LLM at all; noise dropped by regex/cluster signals"
+    steps:
+      - scope
+      - measure
+      - {scan: {optional: true}}
+      - tag
+      - prune
+      - {index: {embed: body}}
+
+  llm-verify:
+    label: "Verified trim"
+    advisor_hint: "great quality; a cheap LLM confirms drops only on the obvious pockets"
+    steps:
+      - scope
+      - measure
+      - scan
+      - calibrate
+      - {judge: {target: suspects}}
+      - prune
+      - {summarize: {target: keepers}}
+      - {index: {embed: summary}}
+
+  llm-all:
+    label: "Full (LLM on everything)"
+    advisor_hint: "max quality; one LLM call per email, then prune the confident noise"
+    steps:
+      - scope
+      - measure
+      - calibrate
+      - {summarize: {target: all}}
+      - prune
+      - {index: {embed: summary}}
