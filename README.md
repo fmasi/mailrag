@@ -84,6 +84,13 @@ Pass-1 only *tags* by default, so nothing is lost before the LLM sees it; the co
 drop happens at Pass-2. Where you drop is a deliberate budget-vs-quality knob — drop at
 Pass-1 to skip the LLM cost, or at Pass-2 for the cleaner result.
 
+Between the two there's an optional, **no-LLM** triage: `mailrag explore` clusters the
+corpus embeddings at thread level and ranks the densest "noise pockets" (bulk and
+automated mail) by pass-1-tag enrichment, sender concentration, and tightness. It spends
+no LLM budget — it reuses the already-embedded vectors when a collection exists, else
+embeds once — and writes a JSON artifact (thread → `.eml` paths) so you can see where the
+noise concentrates before deciding how much Pass-2 to run.
+
 ## Case study: what the cleanup & retrieval choices actually bought
 
 > Most numbers below come from running `mailrag` on a real ~32,000-email corporate mailbox
