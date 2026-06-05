@@ -1,0 +1,72 @@
+"""Build the verb->handler map that executes a persona recipe in-process.
+
+Both the headless ``run`` verb and the interactive TUI call :func:`build_handlers`
+and hand the result to :func:`src.persona.executor.run_persona`, so the wiring
+from recipe steps to the existing pipeline stages lives in one place.
+
+Only the implemented verbs are returned. ``judge`` and ``prune`` (the
+drop-before-LLM savings path) are intentionally absent until the engine ships, so
+:func:`src.persona.executor.missing_handlers` reports them and personas that need
+them (``llm-verify``) fail friendly rather than half-running. See docs/VERBS.md.
+"""
+from __future__ import annotations
+
+import datetime
+from typing import Any, Callable, Dict, Optional
+
+
+def build_handlers(*, profile_path: str, model: Optional[str] = None,
+                   workers: int = 1, embedder: Any = None) -> Dict[str, Callable]:
+    """Return ``{verb: handler(profile, **params)}`` for the implemented verbs.
+
+    Heavy imports/objects (loaders, the BGE-M3 embedder) are created lazily inside
+    the handlers, so constructing the map is cheap and side-effect-free."""
+    from src.pipeline import select as select_stage
+    from src.pipeline import profile as profile_stage
+    from src.pipeline import calibrate as calibrate_stage
+    from src.pipeline import pass2 as pass2_stage
+    from src.pipeline import build as build_stage
+    from src.pipeline import explore as explore_stage
+    from src.pipeline import pass1
+
+    def _scope(prof, **_):
+        return select_stage.run(prof)
+
+    def _measure(prof, **_):
+        return profile_stage.run(prof, set_profile=True)
+
+    def _tag(prof, **_):
+        from src.ingest.local_source import resolve_index_files
+        from src.data.loaders.mail_archive_x import MailArchiveXLoader
+        from src.data.noise_filter import NoiseFilter
+        kept, _drop = resolve_index_files(prof.resolved_root(), prof.selection_rules, None)
+        emails = MailArchiveXLoader(eml_files=kept).load()
+        _, stats = pass1.run(emails, NoiseFilter.from_project_rules())
+        return stats
+
+    def _scan(prof, **_):
+        out = profile_path.rsplit(".", 1)[0] + ".scan.json"
+        return explore_stage.run(prof, json_path=out, profile_path=profile_path)
+
+    def _calibrate(prof, **_):
+        report = calibrate_stage.run(prof, model=model, workers=workers, progress=True)
+        prof.calibration = {
+            "rubric": report.rubric, "passed": True, "noise_rate": report.noise_rate,
+            "sample": report.sample, "false_noise": len(report.false_noise),
+            "false_keep": len(report.false_keep),
+            "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        return report
+
+    def _summarize(prof, target="all", **_):
+        return pass2_stage.run(prof, model=model, workers=workers)
+
+    def _index(prof, embed="summary", **_):
+        from src.ingest.embedder import BgeM3Embedder
+        emb = embedder or BgeM3Embedder(device="mps", use_fp16=True)
+        return build_stage.run(prof, embedder=emb, embed_summary=(embed == "summary"))
+
+    return {
+        "scope": _scope, "measure": _measure, "tag": _tag, "scan": _scan,
+        "calibrate": _calibrate, "summarize": _summarize, "index": _index,
+    }

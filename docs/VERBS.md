@@ -52,9 +52,17 @@ recommend one.
 
 | Persona | What you get | Recipe |
 |---------|--------------|--------|
-| **`llm-none`** | Fast, **no LLM at all**. Body-only embeddings; noise dropped by regex/cluster signals. Cheapest, noisiest. | `scope → measure → [scan] → tag → prune → index` |
-| **`llm-verify`** | **Safe budget.** LLM summaries on what you keep; a cheap `judge` confirms drops only on the `scan`-flagged suspects. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → prune → summarize(rest) → index` |
-| **`llm-all`** | **Max quality.** One combined LLM call per email (summary + verdict), then prune the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → prune → index` |
+| **`llm-none`** | Fast, **no LLM at all**. Body-only embeddings; obvious bulk tagged. Cheapest, noisiest. | `scope → measure → [scan] → tag → index` |
+| **`llm-verify`** | **Safe budget.** LLM summaries on what you keep; a cheap `judge` confirms drops only on the `scan`-flagged suspects. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → summarize(rest) → index` |
+| **`llm-all`** | **Max quality.** One combined LLM call per email (summary + verdict); `index` then drops the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → index` |
+
+Run a persona end-to-end with `mailrag run --persona <name> --profile <p> [--model <m>]`.
+
+> **Status:** `llm-none` and `llm-all` run today (the noise drop is performed by
+> `index --embed-summary`). `llm-verify` needs the cheap `judge` verb and the
+> standalone `prune` step (applying drops *before* the LLM pass, for budget savings) —
+> the **persona-engine** pieces still to land; until then `mailrag run --persona
+> llm-verify` reports them as not-yet-implemented.
 
 **How to choose:**
 

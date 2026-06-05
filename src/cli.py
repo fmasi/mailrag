@@ -22,6 +22,9 @@ from src.pipeline import pass1, build as build_stage, profile as profile_stage
 from src.pipeline import pass2 as pass2_stage, select as select_stage
 from src.pipeline import calibrate as calibrate_stage
 from src.pipeline import explore as explore_stage
+from src.persona import registry as persona_registry
+from src.persona import executor as persona_executor
+from src.persona import runner as persona_runner
 from src.llm import calibration as calibration_lib
 from src.ingest.embedder import BgeM3Embedder  # module-level so tests patch src.cli.BgeM3Embedder
 
@@ -124,6 +127,40 @@ def _cmd_scan(args):
     return 0
 
 
+_LLM_STEPS = {"calibrate", "summarize", "judge"}
+
+
+def _cmd_run(args):
+    reg = persona_registry.load_registry()
+    try:
+        persona = reg.get(args.persona)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    needs_model = any(s.verb in _LLM_STEPS for s in persona.steps)
+    if needs_model and not args.model:
+        print(f"error: persona '{persona.name}' has LLM steps; pass --model",
+              file=sys.stderr)
+        return 2
+    handlers = persona_runner.build_handlers(
+        profile_path=args.profile, model=args.model, workers=args.workers)
+    missing = persona_executor.missing_handlers(persona, handlers)
+    if missing:
+        print(f"error: persona '{persona.name}' needs verb(s) not yet implemented: "
+              f"{', '.join(missing)} (coming in the persona engine). "
+              f"Try 'llm-none' or 'llm-all'.", file=sys.stderr)
+        return 2
+    prof = CorpusProfile.load(args.profile)
+    print(f"running persona '{persona.name}' ({persona.label})")
+    persona_executor.run_persona(
+        prof, persona, handlers,
+        on_step=lambda s: print(f"  ▶ {s.verb}"),
+        on_skip=lambda s: print(f"  – skip {s.verb} (optional)"))
+    prof.save(args.profile)
+    print(f"persona '{persona.name}' complete -> {args.profile}")
+    return 0
+
+
 def _cmd_onboard(args):
     from src.onboard import run_onboard
     report = run_onboard(
@@ -219,6 +256,15 @@ def _configure_scan(p):
     p.add_argument("--top", type=int, default=15, help="rows printed")
 
 
+def _configure_run(p):
+    _add_profile_arg(p)
+    p.add_argument("--persona", required=True,
+                   help="persona name (see personas.yaml / docs/VERBS.md)")
+    p.add_argument("--model", default=None,
+                   help="LLM model for calibrate/summarize steps")
+    p.add_argument("--workers", type=int, default=1)
+
+
 def _add_verb(sub, name, configure, func, *, help, aliases=()):
     """Register a verb plus hidden aliases (old names) sharing one handler."""
     p = sub.add_parser(name, help=help)
@@ -255,6 +301,8 @@ def build_parser():
               help="LLM summary + noise judgement over a corpus")
     _add_verb(sub, "index", _configure_index, _cmd_index, aliases=["build"],
               help="embed and index a corpus from a profile")
+    _add_verb(sub, "run", _configure_run, _cmd_run,
+              help="run a persona recipe end-to-end")
     return p
 
 
