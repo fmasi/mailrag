@@ -41,6 +41,14 @@ class TestRunVerb(unittest.TestCase):
         self.assertNotIn("judge", recorded["handler_keys"])
 
 
+class TestWizardVerb(unittest.TestCase):
+    def test_wizard_routes_to_run_wizard(self):
+        with mock.patch("src.cli.persona_wizard.run_wizard", return_value=0) as rw:
+            rc = cli.main(["wizard", "--profile", "p.json", "--model", "m"])
+        self.assertEqual(rc, 0)
+        rw.assert_called_once_with("p.json", model="m")
+
+
 class TestBuildHandlers(unittest.TestCase):
     def test_exposes_implemented_verbs_only(self):
         from src.persona.runner import build_handlers

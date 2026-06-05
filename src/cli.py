@@ -25,6 +25,7 @@ from src.pipeline import explore as explore_stage
 from src.persona import registry as persona_registry
 from src.persona import executor as persona_executor
 from src.persona import runner as persona_runner
+from src.persona import wizard as persona_wizard
 from src.llm import calibration as calibration_lib
 from src.ingest.embedder import BgeM3Embedder  # module-level so tests patch src.cli.BgeM3Embedder
 
@@ -161,6 +162,10 @@ def _cmd_run(args):
     return 0
 
 
+def _cmd_wizard(args):
+    return persona_wizard.run_wizard(args.profile, model=args.model)
+
+
 def _cmd_onboard(args):
     from src.onboard import run_onboard
     report = run_onboard(
@@ -265,6 +270,12 @@ def _configure_run(p):
     p.add_argument("--workers", type=int, default=1)
 
 
+def _configure_wizard(p):
+    _add_profile_arg(p)
+    p.add_argument("--model", default=None,
+                   help="LLM model for the LLM steps (else you're prompted)")
+
+
 def _add_verb(sub, name, configure, func, *, help, aliases=()):
     """Register a verb plus hidden aliases (old names) sharing one handler."""
     p = sub.add_parser(name, help=help)
@@ -303,6 +314,8 @@ def build_parser():
               help="embed and index a corpus from a profile")
     _add_verb(sub, "run", _configure_run, _cmd_run,
               help="run a persona recipe end-to-end")
+    _add_verb(sub, "wizard", _configure_wizard, _cmd_wizard,
+              help="interactive guided pipeline (pick a persona, walk the steps)")
     return p
 
 
