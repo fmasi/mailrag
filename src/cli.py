@@ -1,7 +1,12 @@
-"""`mailrag` command-line entry: `onboard`, `query`, and pipeline subcommands.
+"""`mailrag` command-line entry: `onboard`, `ask`, and pipeline subcommands.
 
 Run as `python -m src.cli ...` (the repo-root `mailrag` shim wraps this). Poetry
 stays package-mode=false, so no console_scripts are installed.
+
+Verbs form a cost-ordered ladder (see docs/VERBS.md):
+    scope · measure · tag · scan · judge · calibrate · summarize · prune · index · ask
+Older names (select/profile/pass1/explore/pass2/build/query) remain as hidden
+aliases for one release.
 """
 import argparse
 import datetime
@@ -25,16 +30,16 @@ def _add_profile_arg(p):
     p.add_argument("--profile", required=True, help="path to the corpus profile JSON")
 
 
-def _cmd_pass1(args):
+def _cmd_tag(args):
     prof = CorpusProfile.load(args.profile)
     kept, _ = resolve_index_files(prof.resolved_root(), prof.selection_rules, None)
     emails = MailArchiveXLoader(eml_files=kept).load()
     _, stats = pass1.run(emails, NoiseFilter.from_project_rules())
-    print(f"pass1: dropped {stats.dropped}; kept {stats.kept}; tagged {stats.tagged}")
+    print(f"tag: dropped {stats.dropped}; kept {stats.kept}; tagged {stats.tagged}")
     return 0
 
 
-def _cmd_build(args):
+def _cmd_index(args):
     prof = CorpusProfile.load(args.profile)
     res = build_stage.run(prof, embedder=BgeM3Embedder(device="mps", use_fp16=True),
                           recreate=args.recreate, limit=args.limit,
@@ -45,7 +50,7 @@ def _cmd_build(args):
     return 0
 
 
-def _cmd_profile(args):
+def _cmd_measure(args):
     prof = CorpusProfile.load(args.profile)
     rep = profile_stage.run(prof, set_profile=True)
     prof.save(args.profile)
@@ -53,7 +58,7 @@ def _cmd_profile(args):
     return 0
 
 
-def _cmd_pass2(args):
+def _cmd_summarize(args):
     prof = CorpusProfile.load(args.profile)
     if not prof.rubric:
         raise ValueError("profile has no rubric set")
@@ -65,7 +70,7 @@ def _cmd_pass2(args):
               f"first (or pass --force)", file=sys.stderr)
         return 2
     counts = pass2_stage.run(prof, model=args.model, workers=args.workers)
-    print(f"pass2: {counts}")
+    print(f"summarize: {counts}")
     return 0
 
 
@@ -94,7 +99,7 @@ def _cmd_calibrate(args):
     return 0
 
 
-def _cmd_select(args):
+def _cmd_scope(args):
     prof = CorpusProfile.load(args.profile)
     select_stage.run(prof)
     prof.save(args.profile)
@@ -102,9 +107,9 @@ def _cmd_select(args):
     return 0
 
 
-def _cmd_explore(args):
+def _cmd_scan(args):
     prof = CorpusProfile.load(args.profile)
-    default_json = args.profile.rsplit(".", 1)[0] + ".explore.json"
+    default_json = args.profile.rsplit(".", 1)[0] + ".scan.json"
     out = args.json or default_json
     try:
         report = explore_stage.run(
@@ -130,7 +135,7 @@ def _cmd_onboard(args):
     return 0
 
 
-def _cmd_query(args):
+def _cmd_ask(args):
     from src.onboard import latest_manifest_collection
     prof = CorpusProfile.load(args.profile) if args.profile else None
     collection = (args.collection or (prof.collection if prof else None)
@@ -152,86 +157,104 @@ def _cmd_query(args):
     return 0
 
 
+def _configure_onboard(p):
+    p.add_argument("source")
+    p.add_argument("--collection", default=None)
+    p.add_argument("--chunk-size", type=int, default=None)
+    p.add_argument("--queries", default=None)
+    p.add_argument("--no-validate", action="store_true")
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--noise-confidence", type=float, default=0.7)
+    p.add_argument("--model", default=None)
+    p.add_argument("--qdrant-url", default="http://localhost:6333")
+
+
+def _configure_ask(p):
+    p.add_argument("text")
+    p.add_argument("--collection", default=None)
+    p.add_argument("--profile", default=None,
+                   help="corpus profile JSON; supplies collection + qdrant_url")
+    p.add_argument("--qdrant-url", default=None,
+                   help="override Qdrant URL (default: profile, else http://localhost:6333)")
+    p.add_argument("--k", type=int, default=3)
+
+
+def _configure_index(p):
+    _add_profile_arg(p)
+    p.add_argument("--recreate", action="store_true")
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--embed-summary", action="store_true",
+                   help="consume the summarize cache: drop confident noise and embed summaries")
+    p.add_argument("--noise-confidence", type=float, default=0.7,
+                   help="with --embed-summary, drop noise at/above this confidence")
+
+
+def _configure_summarize(p):
+    _add_profile_arg(p)
+    p.add_argument("--model", required=True)
+    p.add_argument("--workers", type=int, default=1)
+    p.add_argument("--force", action="store_true",
+                   help="run even if the rubric is not calibrated")
+
+
+def _configure_calibrate(p):
+    _add_profile_arg(p)
+    p.add_argument("--model", required=True)
+    p.add_argument("--sample", type=int, default=200)
+    p.add_argument("--seed", type=int, default=11)
+    p.add_argument("--workers", type=int, default=4)
+
+
+def _configure_scan(p):
+    _add_profile_arg(p)
+    p.add_argument("--clusters", type=int, default=None,
+                   help="number of clusters (default: heuristic from corpus size)")
+    p.add_argument("--seed", type=int, default=11)
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--fresh", action="store_true",
+                   help="force fresh BGE-M3 embed, skip reusing the Qdrant collection")
+    p.add_argument("--qdrant-url", default=None)
+    p.add_argument("--json", default=None,
+                   help="output path (default: <profile-stem>.scan.json)")
+    p.add_argument("--top", type=int, default=15, help="rows printed")
+
+
+def _add_verb(sub, name, configure, func, *, help, aliases=()):
+    """Register a verb plus hidden aliases (old names) sharing one handler."""
+    p = sub.add_parser(name, help=help)
+    configure(p)
+    p.set_defaults(func=func)
+    for alias in aliases:
+        # No help kwarg -> argparse adds the alias to `choices` (so it still works)
+        # but not to the help listing; the subparsers metavar keeps it out of usage.
+        ap = sub.add_parser(alias)
+        configure(ap)
+        ap.set_defaults(func=func)
+    return p
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="mailrag")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="<verb>")
 
-    ob = sub.add_parser("onboard", help="build a validated assistant from an .eml dir")
-    ob.add_argument("source")
-    ob.add_argument("--collection", default=None)
-    ob.add_argument("--chunk-size", type=int, default=None)
-    ob.add_argument("--queries", default=None)
-    ob.add_argument("--no-validate", action="store_true")
-    ob.add_argument("--limit", type=int, default=None)
-    ob.add_argument("--noise-confidence", type=float, default=0.7)
-    ob.add_argument("--model", default=None)
-    ob.add_argument("--qdrant-url", default="http://localhost:6333")
-    ob.set_defaults(func=_cmd_onboard)
-
-    q = sub.add_parser("query", help="ask a question against an onboarded collection")
-    q.add_argument("text")
-    q.add_argument("--collection", default=None)
-    q.add_argument("--profile", default=None,
-                   help="corpus profile JSON; supplies collection + qdrant_url")
-    q.add_argument("--qdrant-url", default=None,
-                   help="override Qdrant URL (default: profile, else http://localhost:6333)")
-    q.add_argument("--k", type=int, default=3)
-    q.set_defaults(func=_cmd_query)
-
-    sp = sub.add_parser("pass1", help="preview noise partition from a corpus profile")
-    _add_profile_arg(sp)
-    sp.set_defaults(func=_cmd_pass1)
-
-    sb = sub.add_parser("build", help="embed and index a corpus from a profile")
-    _add_profile_arg(sb)
-    sb.add_argument("--recreate", action="store_true")
-    sb.add_argument("--limit", type=int, default=None)
-    sb.add_argument("--embed-summary", action="store_true",
-                    help="consume the Pass-2 cache: drop confident noise and embed summaries")
-    sb.add_argument("--noise-confidence", type=float, default=0.7,
-                    help="with --embed-summary, drop pass2 noise at/above this confidence")
-    sb.set_defaults(func=_cmd_build)
-
-    spr = sub.add_parser("profile", help="measure corpus and suggest chunk_size")
-    _add_profile_arg(spr)
-    spr.set_defaults(func=_cmd_profile)
-
-    sp2 = sub.add_parser("pass2", help="run LLM noise classification over a corpus")
-    _add_profile_arg(sp2)
-    sp2.add_argument("--model", required=True)
-    sp2.add_argument("--workers", type=int, default=1)
-    sp2.add_argument("--force", action="store_true",
-                     help="run even if the rubric is not calibrated")
-    sp2.set_defaults(func=_cmd_pass2)
-
-    sc = sub.add_parser("calibrate",
-                        help="judge a sample with the profile's rubric and bucket mistakes")
-    _add_profile_arg(sc)
-    sc.add_argument("--model", required=True)
-    sc.add_argument("--sample", type=int, default=200)
-    sc.add_argument("--seed", type=int, default=11)
-    sc.add_argument("--workers", type=int, default=4)
-    sc.set_defaults(func=_cmd_calibrate)
-
-    ss = sub.add_parser("select", help="interactively build selection rules for a corpus")
-    _add_profile_arg(ss)
-    ss.set_defaults(func=_cmd_select)
-
-    se = sub.add_parser("explore",
-                        help="cluster embeddings to surface noise pockets (no LLM)")
-    _add_profile_arg(se)
-    se.add_argument("--clusters", type=int, default=None,
-                    help="number of clusters (default: heuristic from corpus size)")
-    se.add_argument("--seed", type=int, default=11)
-    se.add_argument("--limit", type=int, default=None)
-    se.add_argument("--fresh", action="store_true",
-                    help="force fresh BGE-M3 embed, skip reusing the Qdrant collection")
-    se.add_argument("--qdrant-url", default=None)
-    se.add_argument("--json", default=None,
-                    help="output path (default: <profile-stem>.explore.json)")
-    se.add_argument("--top", type=int, default=15, help="rows printed")
-    se.set_defaults(func=_cmd_explore)
-
+    _add_verb(sub, "onboard", _configure_onboard, _cmd_onboard,
+              help="build a validated assistant from an .eml dir")
+    _add_verb(sub, "ask", _configure_ask, _cmd_ask, aliases=["query"],
+              help="ask a question against an indexed collection")
+    _add_verb(sub, "scope", _add_profile_arg, _cmd_scope, aliases=["select"],
+              help="choose which folders/accounts are in play")
+    _add_verb(sub, "measure", _add_profile_arg, _cmd_measure, aliases=["profile"],
+              help="measure corpus and suggest chunk_size")
+    _add_verb(sub, "tag", _add_profile_arg, _cmd_tag, aliases=["pass1"],
+              help="regex/header tag of obvious bulk noise (no LLM)")
+    _add_verb(sub, "scan", _configure_scan, _cmd_scan, aliases=["explore"],
+              help="cluster embeddings to surface noise pockets (no LLM)")
+    _add_verb(sub, "calibrate", _configure_calibrate, _cmd_calibrate,
+              help="judge a sample with the rubric and bucket mistakes")
+    _add_verb(sub, "summarize", _configure_summarize, _cmd_summarize, aliases=["pass2"],
+              help="LLM summary + noise judgement over a corpus")
+    _add_verb(sub, "index", _configure_index, _cmd_index, aliases=["build"],
+              help="embed and index a corpus from a profile")
     return p
 
 
