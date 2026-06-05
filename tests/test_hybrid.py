@@ -1,4 +1,5 @@
 """Tests for build_hybrid_searcher wiring + opt-in rerank."""
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -109,6 +110,31 @@ class TestBuildHybridSearcher(unittest.TestCase):
             hybrid.build_hybrid_searcher("work-rag", mode="hybrid")
             QC.assert_called_once()
             EMB.assert_called_once()
+
+    def test_threads_explicit_qdrant_url_to_client(self):
+        with patch("src.query.hybrid.QdrantVectorStore"), \
+             patch("src.query.hybrid.VectorStoreIndex"), \
+             patch("src.query.hybrid._make_reranker"), \
+             patch("src.query.hybrid._qdrant_client") as QC, \
+             patch("src.ingest.embedder.BgeM3Embedder"):
+            hybrid.build_hybrid_searcher(
+                "work-rag", mode="hybrid", qdrant_url="http://localhost:6333")
+            QC.assert_called_once_with("http://localhost:6333")
+
+
+class TestQdrantClient(unittest.TestCase):
+    def test_explicit_url_overrides_env(self):
+        with patch("qdrant_client.QdrantClient") as QClient, \
+             patch.dict(os.environ,
+                        {"QDRANT_URL": "http://host.docker.internal:6333"}):
+            hybrid._qdrant_client("http://localhost:6333")
+            self.assertEqual(QClient.call_args.kwargs["url"], "http://localhost:6333")
+
+    def test_falls_back_to_env_when_no_arg(self):
+        with patch("qdrant_client.QdrantClient") as QClient, \
+             patch.dict(os.environ, {"QDRANT_URL": "http://env-host:6333"}):
+            hybrid._qdrant_client()
+            self.assertEqual(QClient.call_args.kwargs["url"], "http://env-host:6333")
 
 
 class TestHybridSearcherSearch(unittest.TestCase):

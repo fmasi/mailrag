@@ -114,14 +114,21 @@ def _cmd_onboard(args):
 
 def _cmd_query(args):
     from src.onboard import latest_manifest_collection
-    collection = args.collection or latest_manifest_collection()
+    prof = CorpusProfile.load(args.profile) if args.profile else None
+    collection = (args.collection or (prof.collection if prof else None)
+                  or latest_manifest_collection())
     if not collection:
         print("no collection given and no manifest found; run `mailrag onboard` first",
               file=sys.stderr)
         return 2
+    # Resolve the Qdrant URL explicitly rather than letting the query path read
+    # QDRANT_URL from .env: that var targets the container (host.docker.internal)
+    # and is unresolvable on the host (#29). Precedence: flag > profile > localhost.
+    qdrant_url = (args.qdrant_url or (prof.qdrant_url if prof else None)
+                  or "http://localhost:6333")
     from src.query.hybrid import build_hybrid_searcher
     from src.llm.answer import answer_from_threads
-    searcher = build_hybrid_searcher(collection, mode="hybrid")
+    searcher = build_hybrid_searcher(collection, mode="hybrid", qdrant_url=qdrant_url)
     contexts = searcher.search_threads(args.text)
     print(answer_from_threads(args.text, contexts, k=args.k))
     return 0
@@ -146,6 +153,10 @@ def build_parser():
     q = sub.add_parser("query", help="ask a question against an onboarded collection")
     q.add_argument("text")
     q.add_argument("--collection", default=None)
+    q.add_argument("--profile", default=None,
+                   help="corpus profile JSON; supplies collection + qdrant_url")
+    q.add_argument("--qdrant-url", default=None,
+                   help="override Qdrant URL (default: profile, else http://localhost:6333)")
     q.add_argument("--k", type=int, default=3)
     q.set_defaults(func=_cmd_query)
 

@@ -41,6 +41,44 @@ class TestCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         ans.assert_called_once_with("hello?", ["CTX"], k=2)
 
+    def test_query_defaults_qdrant_url_to_localhost(self):
+        """The #29 fix: query must not inherit the container QDRANT_URL from .env."""
+        searcher = mock.Mock()
+        searcher.search_threads.return_value = ["CTX"]
+        with mock.patch("src.onboard.latest_manifest_collection", return_value="c"), \
+             mock.patch("src.query.hybrid.build_hybrid_searcher",
+                        return_value=searcher) as bhs, \
+             mock.patch("src.llm.answer.answer_from_threads", return_value="A"):
+            rc = cli.main(["query", "hello?"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(bhs.call_args.kwargs["qdrant_url"], "http://localhost:6333")
+
+    def test_query_uses_profile_collection_and_qdrant_url(self):
+        searcher = mock.Mock()
+        searcher.search_threads.return_value = ["CTX"]
+        prof = mock.Mock(collection="pc", qdrant_url="http://prof-host:6333")
+        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
+             mock.patch("src.query.hybrid.build_hybrid_searcher",
+                        return_value=searcher) as bhs, \
+             mock.patch("src.llm.answer.answer_from_threads", return_value="A"):
+            rc = cli.main(["query", "hello?", "--profile", "/p.json"])
+        self.assertEqual(rc, 0)
+        bhs.assert_called_once_with("pc", mode="hybrid",
+                                    qdrant_url="http://prof-host:6333")
+
+    def test_query_qdrant_url_flag_overrides_profile(self):
+        searcher = mock.Mock()
+        searcher.search_threads.return_value = ["CTX"]
+        prof = mock.Mock(collection="pc", qdrant_url="http://prof-host:6333")
+        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
+             mock.patch("src.query.hybrid.build_hybrid_searcher",
+                        return_value=searcher) as bhs, \
+             mock.patch("src.llm.answer.answer_from_threads", return_value="A"):
+            rc = cli.main(["query", "hello?", "--profile", "/p.json",
+                           "--qdrant-url", "http://flag-host:6333"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(bhs.call_args.kwargs["qdrant_url"], "http://flag-host:6333")
+
     def test_main_loads_dotenv_before_dispatch(self):
         with mock.patch("src.cli.load_dotenv") as ld, \
              mock.patch("src.onboard.run_onboard", return_value=_report()):
