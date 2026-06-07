@@ -371,7 +371,7 @@ def _cmd_attachments_list(args):
     finally:
         store.close()
     for m in metas:
-        print(f"{m.sha256[:12]}  {m.size:>9}  {m.mime:<28}  {m.filename}")
+        print(f"{m.sha256}  {m.size:>9}  {m.mime:<28}  {m.filename}")
     print(f"({len(metas)} attachment(s))")
     return 0
 

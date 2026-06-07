@@ -1,3 +1,6 @@
+import contextlib
+import io
+import types
 import unittest
 from unittest import mock
 
@@ -37,6 +40,31 @@ class TestAttachmentsCli(unittest.TestCase):
             rc = cli.main(["attachments", "list", "--thread-id", "t1", "--store", "/tmp/st"])
         self.assertEqual(rc, 0)
         store.list_for.assert_called_once_with(thread_id="t1", message_id=None)
+
+    def test_list_prints_full_sha256(self):
+        """list must print the full 64-char sha256 so it can be piped into `get`."""
+        full_sha = "a" * 64
+        meta = types.SimpleNamespace(
+            sha256=full_sha,
+            size=1024,
+            mime="application/pdf",
+            filename="report.pdf",
+        )
+        store = mock.Mock()
+        store.list_for.return_value = [meta]
+        buf = io.StringIO()
+        with mock.patch("src.cli.AttachmentStore", return_value=store), \
+             contextlib.redirect_stdout(buf):
+            rc = cli.main(["attachments", "list", "--thread-id", "t1", "--store", "/tmp/st"])
+        self.assertEqual(rc, 0)
+        output = buf.getvalue()
+        # Full sha must be present
+        self.assertIn(full_sha, output)
+        # The old 12-char truncation must NOT be the entire token shown
+        # (i.e. the line must contain more than just the first 12 chars)
+        first_line = output.splitlines()[0]
+        self.assertTrue(first_line.startswith(full_sha),
+                        f"line should start with full sha256, got: {first_line!r}")
 
 
 if __name__ == "__main__":
