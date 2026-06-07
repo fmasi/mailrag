@@ -67,6 +67,17 @@ or interactively with `mailrag wizard`.
 > noise, `llm-all` is simpler and barely more expensive; `scan` tells you which case
 > you're in.
 
+> **Why does `llm-all` still `calibrate` if it summarizes every email anyway?**
+> `calibrate` doesn't change what `summarize` does — it's a cheap (~200-email) dry-run
+> that checks the *rubric* before the full pass. In `llm-all` the noise verdict that
+> drives `prune` is a **by-product of each `summarize` call**, so the rubric decides
+> what gets dropped across the whole corpus. A mis-tuned rubric mis-drops everywhere,
+> and you'd only discover it *after* paying for ~all the calls (the corpus-portability
+> case: a wrong rubric flagged ~88% as noise). Calibrate lets a human read the
+> false-noise / false-keep buckets and trust the verdicts first. It de-risks the *drop
+> decision*, not the summary work — ~200 calls of insurance before tens of thousands of
+> spend. `llm-none` skips it because it never runs the LLM (no rubric to trust).
+
 **How to choose:**
 
 - Want speed and don't need summary context? → **`llm-none`**.
