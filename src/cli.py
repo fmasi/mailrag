@@ -30,6 +30,8 @@ from src.persona import runner as persona_runner
 from src.persona import wizard as persona_wizard
 from src.llm import calibration as calibration_lib
 from src.ingest.embedder import BgeM3Embedder  # module-level so tests patch src.cli.BgeM3Embedder
+from src.attachments.store import AttachmentStore
+from src.attachments.ingest_eml import ingest_eml
 
 
 def _add_profile_arg(p):
@@ -344,6 +346,55 @@ def _configure_prune(p):
                    help="write the blacklist (without it, dry-run preview only)")
 
 
+_DEFAULT_ATTACH_STORE = "~/.mailrag/attachments"
+
+
+def _cmd_attachments_build(args):
+    prof = CorpusProfile.load(args.profile)
+    kept, _ = resolve_index_files(prof.resolved_root(), prof.selection_rules,
+                                  getattr(prof, "blacklist", None))
+    if args.limit:
+        kept = kept[:args.limit]
+    store = AttachmentStore(args.store)
+    try:
+        counts = ingest_eml(kept, store, progress=True)
+    finally:
+        store.close()
+    print(f"attachments: {counts}")
+    return 0
+
+
+def _cmd_attachments_list(args):
+    store = AttachmentStore(args.store)
+    try:
+        metas = store.list_for(thread_id=args.thread_id, message_id=args.message_id)
+    finally:
+        store.close()
+    for m in metas:
+        print(f"{m.sha256[:12]}  {m.size:>9}  {m.mime:<28}  {m.filename}")
+    print(f"({len(metas)} attachment(s))")
+    return 0
+
+
+def _cmd_attachments_get(args):
+    store = AttachmentStore(args.store)
+    try:
+        f = store.fetch(args.sha256)
+        if args.out:
+            with open(args.out, "wb") as fh:
+                fh.write(store.get_bytes(args.sha256))
+            print(f"wrote {f['size']} bytes -> {args.out}")
+        elif args.text:
+            print(f"[{f['text_status']}] {f['filename']} ({f['mime']})")
+            print(f["text"])
+        else:
+            print(f"{f['filename']} ({f['mime']}, {f['size']} bytes) "
+                  f"text_status={f['text_status']} path={f['path']}")
+    finally:
+        store.close()
+    return 0
+
+
 def _add_verb(sub, name, configure, func, *, help, aliases=()):
     """Register a verb plus hidden aliases (old names) sharing one handler."""
     p = sub.add_parser(name, help=help)
@@ -388,6 +439,29 @@ def build_parser():
               help="run a persona recipe end-to-end")
     _add_verb(sub, "wizard", _configure_wizard, _cmd_wizard,
               help="interactive guided pipeline (pick a persona, walk the steps)")
+
+    at = sub.add_parser("attachments", help="ingest / list / fetch email attachments")
+    at_sub = at.add_subparsers(dest="action", required=True, metavar="<action>")
+
+    atb = at_sub.add_parser("build", help="ingest the profile's attachments into the store")
+    _add_profile_arg(atb)
+    atb.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
+    atb.add_argument("--limit", type=int, default=None)
+    atb.set_defaults(func=_cmd_attachments_build)
+
+    atl = at_sub.add_parser("list", help="list a thread's / message's attachments")
+    atl.add_argument("--thread-id", default=None)
+    atl.add_argument("--message-id", default=None)
+    atl.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
+    atl.set_defaults(func=_cmd_attachments_list)
+
+    atg = at_sub.add_parser("get", help="fetch an attachment by sha256")
+    atg.add_argument("sha256")
+    atg.add_argument("--text", action="store_true", help="print extracted text")
+    atg.add_argument("--out", default=None, help="write raw bytes to this path")
+    atg.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
+    atg.set_defaults(func=_cmd_attachments_get)
+
     return p
 
 
