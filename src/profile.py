@@ -16,6 +16,7 @@ class CorpusProfile:
     collection: str = "email-rag"
     qdrant_url: str = "http://localhost:6333"
     pass2_cache: Optional[str] = None
+    blacklist: Optional[str] = None     # content-addressed drop set (written by prune)
     calibration: Optional[dict] = None  # written by 1b's calibrate gate
     updated_at: Optional[str] = None
 

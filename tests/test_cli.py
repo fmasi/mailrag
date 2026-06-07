@@ -86,6 +86,31 @@ class TestCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         ld.assert_called_once()
 
+    def test_explore_routes_and_prints(self):
+        from src.cluster.noise_pockets import ClusterReport
+        report = ClusterReport(k=2, seed=11, n_threads=4, n_emails=6,
+                               corpus_baseline_tag_rate=0.5, clusters=[],
+                               vector_source="fresh")
+        prof = mock.Mock(collection="c", qdrant_url="http://localhost:6333")
+        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
+             mock.patch("src.pipeline.explore.run", return_value=report) as run, \
+             mock.patch("src.cli.explore_stage.format_report", return_value="TABLE"):
+            rc = cli.main(["explore", "--profile", "p.json", "--clusters", "2",
+                           "--json", "/tmp/e.json", "--fresh"])
+        self.assertEqual(rc, 0)
+        kw = run.call_args.kwargs
+        self.assertEqual(kw["clusters"], 2)
+        self.assertEqual(kw["json_path"], "/tmp/e.json")
+        self.assertEqual(kw["force_fresh"], True)
+
+    def test_explore_value_error_exits_2(self):
+        prof = mock.Mock(collection="c", qdrant_url="http://localhost:6333")
+        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
+             mock.patch("src.pipeline.explore.run",
+                        side_effect=ValueError("no files selected")):
+            rc = cli.main(["explore", "--profile", "p.json"])
+        self.assertEqual(rc, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

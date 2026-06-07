@@ -84,6 +84,13 @@ Pass-1 only *tags* by default, so nothing is lost before the LLM sees it; the co
 drop happens at Pass-2. Where you drop is a deliberate budget-vs-quality knob — drop at
 Pass-1 to skip the LLM cost, or at Pass-2 for the cleaner result.
 
+Between the two there's an optional, **no-LLM** triage: `mailrag explore` clusters the
+corpus embeddings at thread level and ranks the densest "noise pockets" (bulk and
+automated mail) by pass-1-tag enrichment, sender concentration, and tightness. It spends
+no LLM budget — it reuses the already-embedded vectors when a collection exists, else
+embeds once — and writes a JSON artifact (thread → `.eml` paths) so you can see where the
+noise concentrates before deciding how much Pass-2 to run.
+
 ## Case study: what the cleanup & retrieval choices actually bought
 
 > Most numbers below come from running `mailrag` on a real ~32,000-email corporate mailbox
@@ -210,9 +217,11 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
 **this page → quickstart → setup → deep dives**:
 
 1. **You are here** (`README.md`) — overview, quickstart, and the case study.
-2. [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — 5-minute setup and copy-paste usage patterns.
-3. [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests.
-4. Deep dives:
+2. [`docs/GUIDE.md`](docs/GUIDE.md) — the friendly walkthrough: the cleanup funnel diagram, how to pick a **persona** (budget vs quality), and what the `wizard` looks like when you run it.
+3. [`docs/QUICKSTART.md`](docs/QUICKSTART.md) — 5-minute setup and copy-paste usage patterns.
+4. [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests.
+5. Deep dives:
+   - [`docs/VERBS.md`](docs/VERBS.md) — the verb ladder (cost of each step) and the persona recipes; the source of truth for the CLI.
    - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
    - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
    - [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware *retrieval* (small→big expansion).

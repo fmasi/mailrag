@@ -12,7 +12,8 @@ from src.llm.pass2 import apply_pass2
 
 def run(profile, *, embedder, recreate=True, embed_summary=False,
         summaries=None, limit=None, noise_min_confidence=0.7):
-    kept, _ = resolve_index_files(profile.resolved_root(), profile.selection_rules, None)
+    kept, _ = resolve_index_files(profile.resolved_root(), profile.selection_rules,
+                                  getattr(profile, "blacklist", None))
     if limit:
         kept = kept[:limit]
     emails = MailArchiveXLoader(eml_files=kept).load()
