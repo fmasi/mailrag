@@ -1,4 +1,5 @@
 import os, shutil, tempfile, unittest
+from unittest import mock
 from src.attachments.store import AttachmentStore, AttachmentMeta
 
 
@@ -39,6 +40,26 @@ class TestAttachmentStore(unittest.TestCase):
     def test_path_for_unknown_raises(self):
         with self.assertRaises(KeyError):
             self.store.get_bytes("deadbeef")
+
+    def test_get_text_extracts_and_caches(self):
+        sha = self._put(data=b"hello cache", name="a.txt", mime="text/plain")
+        from src.attachments import store as store_mod
+        with mock.patch.object(store_mod, "extract_text",
+                               wraps=store_mod.extract_text) as spy:
+            r1 = self.store.get_text(sha)
+            r2 = self.store.get_text(sha)
+        self.assertEqual(r1.status, "extracted")
+        self.assertIn("hello cache", r1.text)
+        self.assertEqual(r2.text, r1.text)
+        spy.assert_called_once()                 # second call hit the cache
+
+    def test_fetch_always_returns_path_even_when_binary(self):
+        sha = self._put(data=b"\x00\x01", name="x.bin", mime="application/x-thing")
+        f = self.store.fetch(sha)
+        self.assertEqual(f["text_status"], "binary")
+        self.assertEqual(f["text"], "")
+        self.assertTrue(os.path.exists(f["path"]))
+        self.assertEqual(f["filename"], "x.bin")
 
 
 if __name__ == "__main__":

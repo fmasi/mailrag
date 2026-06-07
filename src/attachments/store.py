@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from src.attachments.extract import extract_text, ExtractResult
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS attachments (
     sha256 TEXT, message_id TEXT, thread_id TEXT, filename TEXT, mime TEXT,
@@ -102,3 +104,37 @@ class AttachmentStore:
             raise KeyError(f"no attachment blob for {sha256}")
         with open(blob, "rb") as fh:
             return fh.read()
+
+    def _meta_row(self, sha256: str):
+        return self._conn.execute(
+            "SELECT * FROM attachments WHERE sha256=? LIMIT 1", (sha256,)).fetchone()
+
+    def get_text(self, sha256: str) -> ExtractResult:
+        cached = self._conn.execute(
+            "SELECT text, extractor, status FROM text_cache WHERE sha256=?",
+            (sha256,)).fetchone()
+        if cached is not None:
+            return ExtractResult(text=cached["text"], status=cached["status"],
+                                 extractor=cached["extractor"])
+        row = self._meta_row(sha256)
+        if row is None:
+            raise KeyError(f"unknown attachment {sha256}")
+        result = extract_text(self.get_bytes(sha256), row["mime"], row["filename"])
+        self._conn.execute(
+            """INSERT OR REPLACE INTO text_cache (sha256, text, extractor, status, created_at)
+               VALUES (?,?,?,?,?)""",
+            (sha256, result.text, result.extractor, result.status,
+             datetime.now(timezone.utc).isoformat()))
+        self._conn.commit()
+        return result
+
+    def fetch(self, sha256: str) -> dict:
+        row = self._meta_row(sha256)
+        if row is None:
+            raise KeyError(f"unknown attachment {sha256}")
+        result = self.get_text(sha256)
+        return {
+            "sha256": sha256, "filename": row["filename"], "mime": row["mime"],
+            "size": row["size"], "text": result.text, "text_status": result.status,
+            "path": self.path_for(sha256),
+        }
