@@ -1,10 +1,11 @@
-import os, tempfile, unittest
+import os, shutil, tempfile, unittest
 from src.attachments.store import AttachmentStore, AttachmentMeta
 
 
 class TestAttachmentStore(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, True)
         self.store = AttachmentStore(self.d)
 
     def tearDown(self):
