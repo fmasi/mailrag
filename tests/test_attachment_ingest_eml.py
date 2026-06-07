@@ -1,8 +1,9 @@
-import os, tempfile, unittest
+import os, shutil, tempfile, unittest
 from email.message import EmailMessage
 
 from src.attachments.store import AttachmentStore
 from src.attachments.ingest_eml import ingest_eml
+from src.data.loaders.mail_archive_x import MailArchiveXLoader
 
 
 def _write_eml(path):
@@ -22,12 +23,14 @@ def _write_eml(path):
 class TestIngestEml(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
         self.eml = os.path.join(self.d, "msg.eml")
         _write_eml(self.eml)
         self.store = AttachmentStore(os.path.join(self.d, "store"))
+        self.addCleanup(self.store.close)
 
     def tearDown(self):
-        self.store.close()
+        pass
 
     def test_ingests_attachments_with_metadata(self):
         counts = ingest_eml([self.eml], self.store)
@@ -47,6 +50,35 @@ class TestIngestEml(unittest.TestCase):
         ingest_eml([self.eml], self.store)
         ingest_eml([self.eml], self.store)
         self.assertEqual(len(self.store.list_for(message_id="<m1@work>")), 2)
+
+    def test_thread_id_matches_indexer_with_mbox_preamble(self):
+        """Regression: Mail Archive X .eml carry an mbox 'From ' preamble. The loader
+        strips it (so the indexer gets the real Message-ID); ingest must too, or the
+        attachment->thread join breaks. ingest's thread_id must equal the indexer's."""
+        m = EmailMessage()
+        m["From"] = "alice@work.com"
+        m["To"] = "bob@work.com"
+        m["Subject"] = "Q3 numbers"
+        m["Message-ID"] = "<real-mid@work>"
+        m.set_content("see attached")
+        m.add_attachment(b"%PDF-1.4 fake", maintype="application", subtype="pdf",
+                         filename="q3.pdf")
+        # Real Mail Archive X preamble: an mbox 'From ' line AND an extra numeric
+        # field, which breaks naive header parsing (Message-ID is lost).
+        path = os.path.join(self.d, "with_preamble.eml")
+        with open(path, "wb") as fh:
+            fh.write(b"From <alice@work.com> Fri Oct  9 12:24:48 2025\n"
+                     b"188035    \n" + bytes(m))
+
+        # the indexer's thread_id for this exact file (via the loader -> to_document)
+        e = MailArchiveXLoader(eml_files=[path], verbose=False).load()[0]
+        indexer_tid = e.to_document(doc_id="x").metadata["thread_id"]
+
+        ingest_eml([path], self.store)
+        # joined by the REAL message-id (empty/wrong if the preamble broke the parse)
+        metas = self.store.list_for(message_id="<real-mid@work>")
+        self.assertTrue(metas, "attachment not found by its real Message-ID")
+        self.assertEqual(metas[0].thread_id, indexer_tid)
 
 
 if __name__ == "__main__":
