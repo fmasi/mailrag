@@ -2,7 +2,14 @@
 
 The first ingester for the source-agnostic store; IMAP/AppleScript ingesters will
 feed the same store later. Walks MIME parts that are attachments/inline or carry a
-filename; computes message_id/thread_id so retrieved threads can join their files.
+filename, and tags each with the email's ``message_id``/``thread_id`` so retrieved
+threads can join their files.
+
+Identity (message_id, thread_id) is taken from ``MailArchiveXLoader`` — the *same*
+parse the indexer uses — so the ``thread_id`` matches the value stored in the Qdrant
+payload. (These exports prepend an mbox ``From `` line + a numeric field that breaks
+a naive ``email`` parse, dropping the Message-ID; the loader strips that preamble.
+Parsing raw here instead silently broke the attachment->thread join. See issue #32.)
 """
 from __future__ import annotations
 
@@ -10,10 +17,7 @@ from email import message_from_bytes, policy
 from typing import Dict, Iterable
 
 from src.data.threading import compute_thread_id
-
-
-def _header(msg, name: str) -> str:
-    return " ".join(str(msg.get(name) or "").split())
+from src.data.loaders.mail_archive_x import MailArchiveXLoader
 
 
 def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[str, int]:
@@ -27,19 +31,32 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
         except ImportError:
             bar = None
     for path in paths:
+        # Identity from the loader (preamble-stripped, decoded) so thread_id matches
+        # the indexer's exactly.
         try:
-            with open(path, "rb") as fh:
-                msg = message_from_bytes(fh.read(), policy=policy.compat32)
+            loaded = MailArchiveXLoader(eml_files=[path], verbose=False).load()
         except Exception:
+            loaded = []
+        if not loaded:
             counts["skipped"] += 1
             if bar:
                 bar.update(1)
             continue
+        e = loaded[0]
+        message_id = e.message_id or ""
+        thread_id = compute_thread_id(message_id, e.in_reply_to or "",
+                                      e.references or "", subject=e.subject or "")
         counts["emails"] += 1
-        message_id = _header(msg, "Message-ID")
-        thread_id = compute_thread_id(message_id, _header(msg, "In-Reply-To"),
-                                      _header(msg, "References"),
-                                      subject=_header(msg, "Subject"))
+
+        # Parts from the same preamble-stripped bytes the loader parsed.
+        try:
+            with open(path, "rb") as fh:
+                raw = MailArchiveXLoader._strip_mbox_preamble(fh.read())
+            msg = message_from_bytes(raw, policy=policy.compat32)
+        except Exception:
+            if bar:
+                bar.update(1)
+            continue
         for part in msg.walk():
             if part.is_multipart():
                 continue
