@@ -17,13 +17,16 @@ from typing import Any, Callable, Dict, Optional
 
 def build_handlers(*, profile_path: str, model: Optional[str] = None,
                    workers: int = 1, embedder: Any = None,
-                   prune_confirm: Optional[Callable] = None) -> Dict[str, Callable]:
+                   prune_confirm: Optional[Callable] = None,
+                   limit: Optional[int] = None) -> Dict[str, Callable]:
     """Return ``{verb: handler(profile, **params)}`` for the implemented verbs.
 
     Heavy imports/objects (loaders, the BGE-M3 embedder) are created lazily inside
     the handlers, so constructing the map is cheap and side-effect-free.
     ``prune_confirm`` (preview -> bool) gates prune's blacklist write; defaults to
-    auto-yes (headless). The wizard passes an interactive confirm."""
+    auto-yes (headless). The wizard passes an interactive confirm.
+    ``limit`` caps the corpus the scan/summarize/index steps touch, for a fast
+    end-to-end test run instead of a full (multi-hour) rebuild."""
     from src.pipeline import select as select_stage
     from src.pipeline import profile as profile_stage
     from src.pipeline import calibrate as calibrate_stage
@@ -59,7 +62,8 @@ def build_handlers(*, profile_path: str, model: Optional[str] = None,
 
     def _scan(prof, **_):
         out = profile_path.rsplit(".", 1)[0] + ".scan.json"
-        return explore_stage.run(prof, json_path=out, profile_path=profile_path)
+        return explore_stage.run(prof, json_path=out, profile_path=profile_path,
+                                 limit=limit)
 
     def _calibrate(prof, **_):
         report = calibrate_stage.run(prof, model=model, workers=workers, progress=True)
@@ -72,12 +76,13 @@ def build_handlers(*, profile_path: str, model: Optional[str] = None,
         return report
 
     def _summarize(prof, target="all", **_):
-        return pass2_stage.run(prof, model=model, workers=workers)
+        return pass2_stage.run(prof, model=model, workers=workers, limit=limit)
 
     def _index(prof, embed="summary", **_):
         from src.ingest.embedder import BgeM3Embedder
         emb = embedder or BgeM3Embedder(device="mps", use_fp16=True)
-        return build_stage.run(prof, embedder=emb, embed_summary=(embed == "summary"))
+        return build_stage.run(prof, embedder=emb, embed_summary=(embed == "summary"),
+                               limit=limit)
 
     def _judge(prof, min_score=0.6, **_):
         return judge_stage.run(prof, model=model, scan_json=_scan_json,

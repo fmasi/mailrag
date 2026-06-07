@@ -127,6 +127,8 @@ mailrag scan    --profile mybox.profile.json
 # 3. let the wizard walk the rest — or run a persona headlessly
 mailrag wizard  --profile mybox.profile.json
 mailrag run     --profile mybox.profile.json --persona llm-all --model <llm>
+#    add --limit N to wizard/run for a fast end-to-end test on a small sample
+#    (caps the scan/summarize/index steps) instead of a full multi-hour rebuild
 
 # 4. ask questions
 mailrag ask "what did Alice say about the budget?" --profile mybox.profile.json

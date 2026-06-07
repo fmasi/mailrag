@@ -192,7 +192,8 @@ def _cmd_run(args):
               file=sys.stderr)
         return 2
     handlers = persona_runner.build_handlers(
-        profile_path=args.profile, model=args.model, workers=args.workers)
+        profile_path=args.profile, model=args.model, workers=args.workers,
+        limit=args.limit)
     missing = persona_executor.missing_handlers(persona, handlers)
     if missing:
         print(f"error: persona '{persona.name}' needs verb(s) not yet implemented: "
@@ -211,7 +212,7 @@ def _cmd_run(args):
 
 
 def _cmd_wizard(args):
-    return persona_wizard.run_wizard(args.profile, model=args.model)
+    return persona_wizard.run_wizard(args.profile, model=args.model, limit=args.limit)
 
 
 def _cmd_onboard(args):
@@ -316,12 +317,16 @@ def _configure_run(p):
     p.add_argument("--model", default=None,
                    help="LLM model for calibrate/summarize steps")
     p.add_argument("--workers", type=int, default=1)
+    p.add_argument("--limit", type=int, default=None,
+                   help="cap the corpus for scan/summarize/index — fast end-to-end test")
 
 
 def _configure_wizard(p):
     _add_profile_arg(p)
     p.add_argument("--model", default=None,
                    help="LLM model for the LLM steps (else you're prompted)")
+    p.add_argument("--limit", type=int, default=None,
+                   help="cap the corpus for scan/summarize/index — fast end-to-end test")
 
 
 def _configure_judge(p):
