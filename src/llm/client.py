@@ -32,3 +32,19 @@ def chat(client, model: str, prompt: str, temperature: float = 0.0) -> str:
         temperature=temperature,
     )
     return resp.choices[0].message.content.strip()
+
+
+def chat_vision(client, model: str, prompt: str, image_bytes: bytes, mime: str,
+                temperature: float = 0.0) -> str:
+    """Single-turn multimodal prompt: text + one inline (base64) image. Returns raw text."""
+    import base64
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+        ]}],
+        temperature=temperature,
+    )
+    return resp.choices[0].message.content.strip()

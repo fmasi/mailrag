@@ -17,7 +17,7 @@ class TestAttachmentsCli(unittest.TestCase):
              mock.patch("src.cli.ingest_eml",
                         return_value={"emails": 1, "attachments": 2, "skipped": 0}) as ing:
             rc = cli.main(["attachments", "build", "--profile", "p.json",
-                           "--store", "/tmp/st"])
+                           "--store", "/tmp/st", "--extractor", "llm"])
         self.assertEqual(rc, 0)
         ing.assert_called_once()
         store_cls.assert_called_once_with("/tmp/st")
@@ -31,7 +31,7 @@ class TestAttachmentsCli(unittest.TestCase):
         with mock.patch("src.cli.AttachmentStore", return_value=store):
             rc = cli.main(["attachments", "get", "abc", "--text", "--store", "/tmp/st"])
         self.assertEqual(rc, 0)
-        store.fetch.assert_called_once_with("abc")
+        store.fetch.assert_called_once_with("abc", extractor=None, force=False)
 
     def test_list_routes(self):
         store = mock.Mock()
@@ -65,6 +65,17 @@ class TestAttachmentsCli(unittest.TestCase):
         first_line = output.splitlines()[0]
         self.assertTrue(first_line.startswith(full_sha),
                         f"line should start with full sha256, got: {first_line!r}")
+
+    def test_get_passes_extractor_and_force(self):
+        store = mock.Mock()
+        store.fetch.return_value = {"sha256": "ab", "filename": "x.png",
+                                    "mime": "image/png", "size": 3, "text": "t",
+                                    "text_status": "extracted", "path": "/p"}
+        with mock.patch("src.cli.AttachmentStore", return_value=store):
+            rc = cli.main(["attachments", "get", "abc", "--text",
+                           "--extractor", "tesseract", "--force", "--store", "/tmp/st"])
+        self.assertEqual(rc, 0)
+        store.fetch.assert_called_once_with("abc", extractor="tesseract", force=True)
 
 
 if __name__ == "__main__":

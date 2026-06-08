@@ -14,10 +14,25 @@ Parsing raw here instead silently broke the attachment->thread join. See issue #
 from __future__ import annotations
 
 from email import message_from_bytes, policy
+from email.header import decode_header, make_header
 from typing import Dict, Iterable
 
 from src.data.threading import compute_thread_id
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
+
+
+def _decode_filename(raw: str | None) -> str:
+    """Decode an RFC2047 encoded-word filename (``=?charset?B?...?=``) to text.
+
+    Python's ``email`` does not auto-decode these, so ``part.get_filename()`` returns
+    the raw header. Returns "" for a missing name. Never raises (falls back to the raw
+    string on a malformed header)."""
+    if not raw:
+        return ""
+    try:
+        return str(make_header(decode_header(raw)))
+    except Exception:
+        return raw
 
 
 def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[str, int]:
@@ -60,7 +75,7 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
         for part in msg.walk():
             if part.is_multipart():
                 continue
-            filename = part.get_filename()
+            filename = _decode_filename(part.get_filename())
             disp = (part.get_content_disposition() or "")
             if not filename and disp not in ("attachment", "inline"):
                 continue

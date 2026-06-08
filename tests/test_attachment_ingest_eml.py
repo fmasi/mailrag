@@ -2,7 +2,7 @@ import os, shutil, tempfile, unittest
 from email.message import EmailMessage
 
 from src.attachments.store import AttachmentStore
-from src.attachments.ingest_eml import ingest_eml
+from src.attachments.ingest_eml import ingest_eml, _decode_filename
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 
 
@@ -79,6 +79,17 @@ class TestIngestEml(unittest.TestCase):
         metas = self.store.list_for(message_id="<real-mid@work>")
         self.assertTrue(metas, "attachment not found by its real Message-ID")
         self.assertEqual(metas[0].thread_id, indexer_tid)
+
+
+    def test_encoded_word_filename_is_decoded(self):
+        # RFC2047 base64 (ISO-8859-15) and quoted-printable forms
+        self.assertEqual(_decode_filename("=?ISO-8859-15?B?QXRlbufjby5naWY=?="), "Atenção.gif")
+        self.assertEqual(_decode_filename("=?iso-8859-1?Q?Twins1.jpg?="), "Twins1.jpg")
+        # plain ascii passes through unchanged; None -> ""
+        self.assertEqual(_decode_filename("plain.pdf"), "plain.pdf")
+        self.assertEqual(_decode_filename(None), "")
+        # Unknown charset raises inside make_header -> except branch returns raw string unchanged
+        self.assertEqual(_decode_filename("=?not-a-charset?B?aGVsbG8=?="), "=?not-a-charset?B?aGVsbG8=?=")
 
 
 if __name__ == "__main__":

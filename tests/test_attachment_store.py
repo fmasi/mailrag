@@ -42,24 +42,61 @@ class TestAttachmentStore(unittest.TestCase):
             self.store.get_bytes("deadbeef")
 
     def test_get_text_extracts_and_caches(self):
+        from src.attachments.extract import default_extractor_name
         sha = self._put(data=b"hello cache", name="a.txt", mime="text/plain")
-        from src.attachments import store as store_mod
-        with mock.patch.object(store_mod, "extract_text",
-                               wraps=store_mod.extract_text) as spy:
-            r1 = self.store.get_text(sha)
-            r2 = self.store.get_text(sha)
+        r1 = self.store.get_text(sha)
         self.assertEqual(r1.status, "extracted")
         self.assertIn("hello cache", r1.text)
-        self.assertEqual(r2.text, r1.text)
-        spy.assert_called_once()                 # second call hit the cache
+        # Poison the cache with a sentinel to prove the second call reads from DB:
+        self.store._conn.execute(
+            "UPDATE text_cache SET text=? WHERE sha256=? AND extractor=?",
+            ("SENTINEL_CACHE", sha, default_extractor_name()))
+        self.store._conn.commit()
+        r2 = self.store.get_text(sha)
+        self.assertEqual(r2.text, "SENTINEL_CACHE",
+                         "second get_text must return the cached value, not re-extract")
+        # Confirm extractor_used is recorded on the cache row:
+        row = self.store._conn.execute(
+            "SELECT extractor_used FROM text_cache WHERE sha256=?", (sha,)).fetchone()
+        self.assertIsNotNone(row["extractor_used"])
 
-    def test_fetch_always_returns_path_even_when_binary(self):
+    def test_fetch_always_returns_path_even_when_unsupported(self):
         sha = self._put(data=b"\x00\x01", name="x.bin", mime="application/x-thing")
         f = self.store.fetch(sha)
-        self.assertEqual(f["text_status"], "binary")
+        self.assertEqual(f["text_status"], "unsupported")
         self.assertEqual(f["text"], "")
         self.assertTrue(os.path.exists(f["path"]))
         self.assertEqual(f["filename"], "x.bin")
+
+    def test_get_text_caches_per_extractor_and_records_used(self):
+        sha = self._put(data=b"plain body", name="a.txt", mime="text/plain")
+        r = self.store.get_text(sha)                 # default extractor
+        self.assertEqual(r.status, "extracted")
+        row = self.store._conn.execute(
+            "SELECT extractor, extractor_used, status FROM text_cache WHERE sha256=?",
+            (sha,)).fetchone()
+        self.assertIsNotNone(row["extractor_used"])
+
+    def test_force_bypasses_cache_and_reextracts(self):
+        from src.attachments.extract import default_extractor_name
+        sha = self._put(data=b"plain body", name="a.txt", mime="text/plain")
+        first = self.store.get_text(sha)
+        self.assertEqual(first.text.strip(), "plain body")
+        # Poison the cache with a sentinel:
+        self.store._conn.execute(
+            "UPDATE text_cache SET text=? WHERE sha256=? AND extractor=?",
+            ("SENTINEL", sha, default_extractor_name()))
+        self.store._conn.commit()
+        # Plain get_text reads the (poisoned) cache -> proves cache-hit:
+        self.assertEqual(self.store.get_text(sha).text, "SENTINEL")
+        # force=True bypasses + overwrites with a real extraction:
+        forced = self.store.get_text(sha, force=True)
+        self.assertEqual(forced.text.strip(), "plain body")
+        # and the cache row was overwritten (no longer the sentinel):
+        row = self.store._conn.execute(
+            "SELECT text FROM text_cache WHERE sha256=? AND extractor=?",
+            (sha, default_extractor_name())).fetchone()
+        self.assertEqual(row["text"].strip(), "plain body")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from src.attachments.extract import extract_text, ExtractResult
+from src.attachments.extract import build_default_extractor, ExtractResult, default_extractor_name
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS attachments (
@@ -25,7 +25,9 @@ CREATE INDEX IF NOT EXISTS idx_att_msg ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_att_thread ON attachments(thread_id);
 CREATE INDEX IF NOT EXISTS idx_att_sha ON attachments(sha256);
 CREATE TABLE IF NOT EXISTS text_cache (
-    sha256 TEXT PRIMARY KEY, text TEXT, extractor TEXT, status TEXT, created_at TEXT
+    sha256 TEXT, extractor TEXT, text TEXT, status TEXT,
+    extractor_used TEXT, created_at TEXT,
+    PRIMARY KEY (sha256, extractor)
 );
 """
 
@@ -51,6 +53,11 @@ class AttachmentStore:
         self._conn = sqlite3.connect(os.path.join(self.root, "index.db"))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        # Migrate a legacy text_cache (pre composite-key) — it is a disposable cache.
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(text_cache)")}
+        if "extractor" not in cols or "extractor_used" not in cols:
+            self._conn.execute("DROP TABLE IF EXISTS text_cache")
+            self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
     def close(self) -> None:
@@ -109,30 +116,36 @@ class AttachmentStore:
         return self._conn.execute(
             "SELECT * FROM attachments WHERE sha256=? LIMIT 1", (sha256,)).fetchone()
 
-    def get_text(self, sha256: str) -> ExtractResult:
-        cached = self._conn.execute(
-            "SELECT text, extractor, status FROM text_cache WHERE sha256=?",
-            (sha256,)).fetchone()
-        if cached is not None:
-            return ExtractResult(text=cached["text"], status=cached["status"],
-                                 extractor=cached["extractor"])
+    def get_text(self, sha256: str, *, extractor: Optional[str] = None,
+                 force: bool = False) -> ExtractResult:
+        name = extractor or default_extractor_name()
+        if not force:
+            cached = self._conn.execute(
+                "SELECT text, status FROM text_cache WHERE sha256=? AND extractor=?",
+                (sha256, name)).fetchone()
+            if cached is not None:
+                return ExtractResult(text=cached["text"], status=cached["status"],
+                                     extractor=name)
         row = self._meta_row(sha256)
         if row is None:
             raise KeyError(f"unknown attachment {sha256}")
-        result = extract_text(self.get_bytes(sha256), row["mime"], row["filename"])
+        result = build_default_extractor(name).extract(
+            self.get_bytes(sha256), row["mime"], row["filename"])
         self._conn.execute(
-            """INSERT OR REPLACE INTO text_cache (sha256, text, extractor, status, created_at)
-               VALUES (?,?,?,?,?)""",
-            (sha256, result.text, result.extractor, result.status,
+            """INSERT OR REPLACE INTO text_cache
+               (sha256, extractor, text, status, extractor_used, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (sha256, name, result.text, result.status, result.extractor,
              datetime.now(timezone.utc).isoformat()))
         self._conn.commit()
         return result
 
-    def fetch(self, sha256: str) -> dict:
+    def fetch(self, sha256: str, *, extractor: Optional[str] = None,
+              force: bool = False) -> dict:
         row = self._meta_row(sha256)
         if row is None:
             raise KeyError(f"unknown attachment {sha256}")
-        result = self.get_text(sha256)
+        result = self.get_text(sha256, extractor=extractor, force=force)
         return {
             "sha256": sha256, "filename": row["filename"], "mime": row["mime"],
             "size": row["size"], "text": result.text, "text_status": result.status,
