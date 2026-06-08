@@ -1,8 +1,10 @@
 # mailrag
 
-> A pluggable, multi-backend **Email RAG** engine built on LlamaIndex: load mail from
-> several sources, clean and chunk it, embed it with hybrid dense+sparse retrieval, and
-> query it with an LLM.
+> Private, self-hosted **Email RAG**: turn your own mail archive into a queryable knowledge
+> base that runs on your hardware, on open models, with nothing required to leave your network.
+> A faithful, private record of what you've written and received — an AI memory you actually own,
+> one half of a context stack you own. (The other half is
+> [parley](https://github.com/fmasi/parley), for calls and meetings.)
 
 [![Test Suite](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml/badge.svg)](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
@@ -15,19 +17,40 @@
 > *method*, not the exact figures. How they were measured, and the honest caveats, are in the
 > [case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
+## Why this exists
+
+The first time I pointed cloud AI at my inbox it felt like a superpower — until I thought about
+what it actually required: handing my entire email history to someone else's servers to make it
+searchable. For real correspondence — contracts, receipts, the record of who agreed to what —
+that's a non-starter.
+
+So I built the opposite. mailrag runs on your own hardware, on open models, with nothing required
+to leave your network — no mailbox upload, no vendor to trust with the whole archive.
+
+Then the real point clicked. These aren't just emails, they're **context**. A faithful, private
+record of what was said and written is exactly what an AI agent needs to be useful about *your*
+work — kept private and self-owned, so you get total recall without renting your memory to anyone.
+mailrag is one private context source, for **email**; [parley](https://github.com/fmasi/parley) is
+another, for **calls and meetings** — different domain, different machinery (on-device audio +
+diarization). They don't talk to each other; my agents know about both and reach for whatever fits.
+The point was never a single app — it's a private, open stack of context I own.
+
 ## What it does
 
-`mailrag` turns a mailbox into a queryable knowledge base:
+`mailrag` turns a mailbox into a queryable knowledge base, built on LlamaIndex:
 
 - **Pluggable loaders** — public Enron corpus (HuggingFace), local `.eml` archives,
   or Azure Blob Storage, behind one `EmailLoader` interface.
 - **Email-aware preprocessing** — reply-chain stripping, calendar-invite collapsing,
   noise/newsletter filtering, exact-text chunk dedup.
+- **Thread-aware answers** (the flagship) — match a single small unit, then answer from
+  its *entire* conversation. It roughly **doubles** answer coverage (terse replies 33% →
+  ~80%), it's the biggest single retrieval win, and it needs no LLM.
 - **Hybrid retrieval** — bge-m3 dense + sparse vectors (RRF-fused) in Qdrant (also
-  supports local persistence and Pinecone), with optional **thread-aware expansion**
-  (match a small unit, answer from its full conversation).
-- **LLM "Pass-2"** — optional local-LLM summarization and noise-judging of each email,
-  content-addressed and cached, so re-runs are free.
+  supports local persistence and Pinecone). Gets both the concept and the rare exact
+  token — acronyms, IDs, reference numbers.
+- **Local-LLM `summarize`** — optional per-email summary + noise judgement from a local
+  LLM, content-addressed and cached, so re-runs are free.
 - **A measured methodology** — a 360-query retrieval eval that prices each technique,
   controls for confounds, reports significance, and in several cases *overturned* the
   intuitive choice. The core techniques were later confirmed against a public,
@@ -228,6 +251,34 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
    - [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — the measured findings behind the case study: cleanup economics, regex-vs-LLM, the labeled-eval ladder (§9–§13), and the corpus-portability result (§14). Start with its [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first) for the `C`/`C′` labels and the two senses of "thread-aware".
 
 Reference: [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent).
+
+## Roadmap
+
+mailrag is built to be one node in a private context stack — so the next steps make it
+easier for agents to reach, and keep its memory current:
+
+- **MCP server** ([#32](https://github.com/fmasi/mailrag/issues/32)) — expose `search`/`ask`
+  and attachment fetch over the Model Context Protocol, so any agent can query your mail
+  without touching the internals.
+- **Live ingestion** — move from one-time imports to incremental ingest of incoming mail, so
+  the index stays current: a *living* context source, not a static snapshot. (The
+  `EmailLoader` interface is already source-agnostic to make this clean.)
+- **Guided TUI** ([#36](https://github.com/fmasi/mailrag/issues/36)) — a full-screen terminal
+  UI for the cleanup pipeline (pick a persona, watch the funnel, approve the calibrate gate),
+  replacing today's prompt-by-prompt flow.
+
+## Built by Frédéric Masi
+
+I build private, self-hosted context tools for AI agents — software that gives an agent (and me)
+total recall over my own work without renting my memory to a vendor. mailrag covers email;
+[parley](https://github.com/fmasi/parley) covers calls and meetings.
+
+I care about retrieval quality you can actually measure, email and information-retrieval systems,
+and engineering claims backed by numbers and honest caveats. If that's useful to you, or you're
+hiring, I'd like to hear from you.
+
+- **LinkedIn** — https://www.linkedin.com/in/fmasi/
+- **GitHub** — https://github.com/fmasi
 
 ## License
 
