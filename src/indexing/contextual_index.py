@@ -53,9 +53,11 @@ def build_contextual_index(
     collection:
         Qdrant collection name.
     embedder:
-        An object with an ``encode(texts, batch_size, max_length)`` method that
-        returns ``(dense_vecs, sparse_weight_dicts)``.  Typically a
-        ``BgeM3Embedder`` instance.
+        An :class:`~src.ingest.embedder.Embedder` — an ``encode(texts, batch_size,
+        max_length)`` method returning ``(dense_vecs, sparse_weight_dicts)``, plus a
+        ``dim`` used to size the collection (default 1024 if absent). Typically a
+        ``BgeM3Embedder``. (A dense-only embedder needs a dense-only collection;
+        that path is added with the NVIDIA-native embedder.)
     summaries:
         Optional mapping of ``message_id -> summary text``.  When supplied, each
         email's ``.summary`` field is set before chunking so that
@@ -129,9 +131,13 @@ def build_contextual_index(
     if not nodes:
         return BuildResult(collection=collection, kept_emails=kept_emails, chunks=0)
 
-    # 6. Prepare Qdrant collection
+    # 6. Prepare Qdrant collection. Size it from the embedder so a non-bge-m3
+    # embedder (e.g. a NIM at 2048-d) gets a correctly-sized collection; default
+    # to 1024 for a minimal duck-typed embedder without the metadata.
     client = hq.get_client(qdrant_url)
-    hq.ensure_hybrid_collection(client, collection, dim=1024, recreate=recreate)
+    hq.ensure_hybrid_collection(
+        client, collection, dim=getattr(embedder, "dim", 1024), recreate=recreate
+    )
 
     enc_max_len = embed_max_length(
         chunk_size, embed_summary, override=embed_max_length_override

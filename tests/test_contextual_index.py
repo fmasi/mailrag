@@ -113,3 +113,47 @@ class TestBuildContextualIndex(unittest.TestCase):
         noise.sender = "notifications@spammy.example"
         res = self._build_one(noise, apply_noise_filter=False)
         self.assertEqual(res.kept_emails, 1)
+
+    def test_collection_sized_from_embedder_dim(self):
+        """Collection vector size must follow embedder.dim, not a hardcoded 1024 —
+        so a non-1024 embedder (e.g. a NIM at 2048) gets a correctly-sized collection."""
+        email = _email("a real business email about the quarterly plan and budget")
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 2048
+        fake_embedder.encode.return_value = ([[0.0] * 2048], [{"7": 0.9}])
+        with mock.patch("src.indexing.contextual_index.hq.get_client"), \
+             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure, \
+             mock.patch("src.indexing.contextual_index.hq.upsert"):
+            build_contextual_index([email], collection="t", embedder=fake_embedder,
+                                   apply_noise_filter=False, qdrant_url="http://x")
+        self.assertEqual(ensure.call_args.kwargs.get("dim"), 2048)
+
+    def test_identical_bodies_are_deduplicated(self):
+        """Two emails with identical body collapse to a single embedded chunk."""
+        body = "the quarterly plan budget meeting notes are attached here"
+        e1, e2 = _email(body, mid="<a@x>"), _email(body, mid="<b@x>")
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 1024
+        fake_embedder.encode.return_value = ([[0.0] * 1024], [{"7": 0.9}])
+        with mock.patch("src.indexing.contextual_index.hq.get_client"), \
+             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"), \
+             mock.patch("src.indexing.contextual_index.hq.upsert"):
+            res = build_contextual_index([e1, e2], collection="t", embedder=fake_embedder,
+                                         apply_noise_filter=False, qdrant_url="http://x")
+        self.assertEqual(res.chunks, 1)
+        self.assertEqual(len(fake_embedder.encode.call_args[0][0]), 1)
+
+    def test_no_emails_returns_zero_and_skips_collection(self):
+        """Empty input returns a zero BuildResult and never touches Qdrant or the embedder."""
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 1024
+        with mock.patch("src.indexing.contextual_index.hq.get_client") as gc, \
+             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure, \
+             mock.patch("src.indexing.contextual_index.hq.upsert") as upsert:
+            res = build_contextual_index([], collection="t", embedder=fake_embedder,
+                                         apply_noise_filter=False, qdrant_url="http://x")
+        self.assertEqual((res.kept_emails, res.chunks), (0, 0))
+        gc.assert_not_called()
+        ensure.assert_not_called()
+        upsert.assert_not_called()
+        fake_embedder.encode.assert_not_called()
