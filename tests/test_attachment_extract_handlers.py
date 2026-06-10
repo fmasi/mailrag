@@ -145,5 +145,38 @@ class TestPdfImageHandlers(unittest.TestCase):
         self.assertFalse(h.can_handle("text/plain", "a.txt"))
 
 
+class TestCharsetHandling(unittest.TestCase):
+    """Declared charsets travel in the mime string (text/plain; charset=...) and the
+    text handlers must honour them instead of mojibake-ing through latin-1."""
+
+    SJIS = "こんにちは".encode("shift_jis")
+
+    def test_plaintext_uses_declared_charset(self):
+        r = PlaintextHandler().extract(self.SJIS, "text/plain; charset=shift_jis", "a.txt")
+        self.assertEqual(r.status, Status.EXTRACTED)
+        self.assertIn("こんにちは", r.text)
+
+    def test_plaintext_bad_declared_charset_falls_back(self):
+        r = PlaintextHandler().extract(b"hello", "text/plain; charset=bogus-charset", "a.txt")
+        self.assertEqual(r.status, Status.EXTRACTED)
+        self.assertIn("hello", r.text)
+
+    def test_html_uses_declared_charset(self):
+        html = "<p>こんにちは</p>".encode("shift_jis")
+        r = HtmlHandler().extract(html, "text/html; charset=shift_jis", "a.html")
+        self.assertEqual(r.status, Status.EXTRACTED)
+        self.assertIn("こんにちは", r.text)
+
+    def test_can_handle_tolerates_mime_parameters(self):
+        self.assertTrue(PlaintextHandler().can_handle("text/plain; charset=utf-8", "noext"))
+        self.assertTrue(HtmlHandler().can_handle("text/html; charset=iso-8859-1", "noext"))
+
+    def test_decode_text_is_public(self):
+        from src.attachments.extract.handlers.plaintext import decode_text
+        self.assertEqual(decode_text("café".encode("utf-8")), "café")
+        self.assertEqual(decode_text("é".encode("latin-1")), "é")
+        self.assertEqual(decode_text("é".encode("latin-1"), charset="iso-8859-1"), "é")
+
+
 if __name__ == "__main__":
     unittest.main()

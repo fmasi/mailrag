@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import io
 
+from src.attachments.extract.mime import is_pdf
 from src.attachments.extract.ocr.base import OcrResult
+from src.attachments.extract.ocr.pages import render_pdf_pages
 from src.attachments.extract.result import Status
 
 _NAME = "tesseract"
@@ -21,8 +23,7 @@ def _ok(text: str) -> OcrResult:
 
 class TesseractOcr:
     def read(self, data: bytes, mime: str, filename: str) -> OcrResult:
-        name = (filename or "").lower()
-        if mime == "application/pdf" or name.endswith(".pdf"):
+        if is_pdf(mime, filename):
             return self._pdf(data)
         return self._image(data)
 
@@ -39,13 +40,13 @@ class TesseractOcr:
 
     def _pdf(self, data: bytes) -> OcrResult:
         try:
-            import pdf2image
+            import pdf2image   # noqa: F401 — probed here so a missing lib is UNAVAILABLE, not ERROR
             import pytesseract
         except Exception:
             return OcrResult("", Status.OCR_UNAVAILABLE, _NAME)
         try:
-            images = pdf2image.convert_from_bytes(data)
-            text = "\n".join(pytesseract.image_to_string(im) for im in images)
+            text = "\n".join(pytesseract.image_to_string(im)
+                             for im in render_pdf_pages(data))
             return _ok(text)
         except Exception:
             return OcrResult("", Status.ERROR, _NAME)

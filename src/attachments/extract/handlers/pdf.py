@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 
+from src.attachments.extract.mime import is_pdf
 from src.attachments.extract.ocr.base import OcrProvider
 from src.attachments.extract.result import ExtractResult, ok
 
@@ -26,7 +27,7 @@ class PdfHandler:
         self._ocr = ocr
 
     def can_handle(self, mime: str, filename: str) -> bool:
-        return (mime or "").lower() == "application/pdf" or (filename or "").lower().endswith(".pdf")
+        return is_pdf(mime, filename)
 
     def extract(self, data: bytes, mime: str, filename: str) -> ExtractResult:
         text = _pdf_text(data)

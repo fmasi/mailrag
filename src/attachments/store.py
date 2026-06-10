@@ -116,19 +116,19 @@ class AttachmentStore:
         return self._conn.execute(
             "SELECT * FROM attachments WHERE sha256=? LIMIT 1", (sha256,)).fetchone()
 
-    def get_text(self, sha256: str, *, extractor: Optional[str] = None,
-                 force: bool = False) -> ExtractResult:
-        name = extractor or default_extractor_name()
-        if not force:
-            cached = self._conn.execute(
-                "SELECT text, status FROM text_cache WHERE sha256=? AND extractor=?",
-                (sha256, name)).fetchone()
-            if cached is not None:
-                return ExtractResult(text=cached["text"], status=cached["status"],
-                                     extractor=name)
-        row = self._meta_row(sha256)
-        if row is None:
-            raise KeyError(f"unknown attachment {sha256}")
+    def _cached_text(self, sha256: str, name: str) -> Optional[ExtractResult]:
+        """The cached result for (sha, extractor name), reporting the extractor that
+        actually produced the text (extractor_used) — same answer as the original
+        extraction. None on a cache miss."""
+        r = self._conn.execute(
+            "SELECT text, status, extractor_used FROM text_cache "
+            "WHERE sha256=? AND extractor=?", (sha256, name)).fetchone()
+        if r is None:
+            return None
+        return ExtractResult(text=r["text"], status=r["status"],
+                             extractor=r["extractor_used"] or name)
+
+    def _extract_and_cache(self, sha256: str, name: str, row) -> ExtractResult:
         result = build_default_extractor(name).extract(
             self.get_bytes(sha256), row["mime"], row["filename"])
         self._conn.execute(
@@ -140,12 +140,27 @@ class AttachmentStore:
         self._conn.commit()
         return result
 
+    def get_text(self, sha256: str, *, extractor: Optional[str] = None,
+                 force: bool = False) -> ExtractResult:
+        name = extractor or default_extractor_name()
+        if not force:
+            cached = self._cached_text(sha256, name)
+            if cached is not None:
+                return cached
+        row = self._meta_row(sha256)
+        if row is None:
+            raise KeyError(f"unknown attachment {sha256}")
+        return self._extract_and_cache(sha256, name, row)
+
     def fetch(self, sha256: str, *, extractor: Optional[str] = None,
               force: bool = False) -> dict:
         row = self._meta_row(sha256)
         if row is None:
             raise KeyError(f"unknown attachment {sha256}")
-        result = self.get_text(sha256, extractor=extractor, force=force)
+        name = extractor or default_extractor_name()
+        result = None if force else self._cached_text(sha256, name)
+        if result is None:
+            result = self._extract_and_cache(sha256, name, row)
         return {
             "sha256": sha256, "filename": row["filename"], "mime": row["mime"],
             "size": row["size"], "text": result.text, "text_status": result.status,

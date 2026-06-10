@@ -164,15 +164,16 @@ vision-LLM (gemma-4 via LM Studio)** — fully on-device, no data leaves the mac
 If the LLM is unavailable it falls back automatically to local **tesseract**. Cloud
 is opt-in and not yet implemented.
 
-The LLM returns a structured description + transcription. The number of pages sent
-to the LLM for scanned PDFs is capped by `RAG_ATTACH_LLM_MAX_PAGES` (default `10`).
+The LLM returns a structured description + transcription. Scanned-PDF pages read by
+any OCR backend (vision LLM or tesseract) are capped by `RAG_ATTACH_MAX_PAGES`
+(default `10`); pages past the cap are never rendered, and truncation is logged.
 
 ### Config
 
 | Env var | Default | Values |
 |---------|---------|--------|
 | `RAG_ATTACH_EXTRACTOR` | `llm` | `llm` · `tesseract` · `cloud` |
-| `RAG_ATTACH_LLM_MAX_PAGES` | `10` | integer — max scanned-PDF pages sent to the vision LLM |
+| `RAG_ATTACH_MAX_PAGES` | `10` | integer — max scanned-PDF pages rendered/read per attachment (any OCR backend) |
 
 Both can be overridden per-call with `--extractor <name>` on
 `mailrag attachments get` and `mailrag attachments build`. Use `--force` to

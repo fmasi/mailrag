@@ -8,9 +8,10 @@ ChainedOcr falls through to tesseract.
 from __future__ import annotations
 
 import io
-import os
 
+from src.attachments.extract.mime import is_pdf
 from src.attachments.extract.ocr.base import OcrResult
+from src.attachments.extract.ocr.pages import LOGGER, render_pdf_pages
 from src.attachments.extract.result import Status
 
 _NAME = "llm_vision"
@@ -21,13 +22,6 @@ _PROMPT = (
     "TEXT:\n"
     "<verbatim transcription of all readable text, or \"(none)\" if there is none>"
 )
-
-
-def _max_pages() -> int:
-    try:
-        return max(1, int(os.getenv("RAG_ATTACH_LLM_MAX_PAGES", "10")))
-    except ValueError:
-        return 10
 
 
 def _downscale_png(data: bytes) -> bytes:
@@ -46,14 +40,13 @@ class LlmVision:
             from src.llm.client import chat_vision as _cv
             chat_vision = _cv
         self._chat_vision = chat_vision
-        self._log = log or (lambda *_: None)
+        self._log = log or LOGGER.warning   # truncation must never be silent
 
     def read(self, data: bytes, mime: str, filename: str) -> OcrResult:
         if not self._model:
             return OcrResult("", Status.OCR_UNAVAILABLE, _NAME)
-        name = (filename or "").lower()
         try:
-            if mime == "application/pdf" or name.endswith(".pdf"):
+            if is_pdf(mime, filename):
                 pages = self._render_pdf(data)
             else:
                 pages = [_downscale_png(data)]
@@ -69,14 +62,8 @@ class LlmVision:
         return OcrResult(text, Status.EXTRACTED if text else Status.EMPTY, _NAME)
 
     def _render_pdf(self, data: bytes):
-        import pdf2image
-        images = pdf2image.convert_from_bytes(data)
-        cap = _max_pages()
-        if len(images) > cap:
-            self._log(f"llm_vision: PDF has {len(images)} pages; sending first {cap}")
-            images = images[:cap]
         out = []
-        for im in images:
+        for im in render_pdf_pages(data, self._log):
             im = im.convert("RGB")
             im.thumbnail((_MAX_EDGE, _MAX_EDGE))
             buf = io.BytesIO(); im.save(buf, format="PNG")

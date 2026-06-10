@@ -81,6 +81,31 @@ class TestIngestEml(unittest.TestCase):
         self.assertEqual(metas[0].thread_id, indexer_tid)
 
 
+    def test_text_attachment_mime_carries_declared_charset(self):
+        """The declared charset must survive into the stored mime so extraction can
+        decode non-UTF-8 text attachments correctly (instead of latin-1 mojibake)."""
+        raw = (b"From: alice@work.com\r\nTo: bob@work.com\r\nSubject: Enc\r\n"
+               b"Message-ID: <enc@work>\r\nMIME-Version: 1.0\r\n"
+               b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n'
+               b"--B\r\nContent-Type: text/plain\r\n\r\nbody\r\n"
+               b'--B\r\nContent-Type: text/plain; charset="iso-8859-1"\r\n'
+               b'Content-Disposition: attachment; filename="latin.txt"\r\n'
+               b"Content-Transfer-Encoding: 8bit\r\n\r\n"
+               + "h\xe9llo".encode("iso-8859-1") + b"\r\n--B--\r\n")
+        path = os.path.join(self.d, "charset.eml")
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        ingest_eml([path], self.store)
+        metas = self.store.list_for(message_id="<enc@work>")
+        self.assertEqual(len(metas), 1)
+        self.assertEqual(metas[0].mime, "text/plain; charset=iso-8859-1")
+
+    def test_non_text_attachment_mime_stays_bare(self):
+        ingest_eml([self.eml], self.store)
+        pdf = next(m for m in self.store.list_for(message_id="<m1@work>")
+                   if m.filename == "report.pdf")
+        self.assertEqual(pdf.mime, "application/pdf")
+
     def test_encoded_word_filename_is_decoded(self):
         # RFC2047 base64 (ISO-8859-15) and quoted-printable forms
         self.assertEqual(_decode_filename("=?ISO-8859-15?B?QXRlbufjby5naWY=?="), "Atenção.gif")

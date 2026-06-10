@@ -85,9 +85,15 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
                 data = None
             if not data:
                 continue
+            # Preserve the declared charset for text parts (text/plain; charset=...)
+            # so extraction can decode them correctly instead of guessing.
+            mime = part.get_content_type()
+            charset = part.get_content_charset()
+            if charset and mime.startswith("text/"):
+                mime = f"{mime}; charset={charset}"
             store.put(data, message_id=message_id, thread_id=thread_id,
                       filename=filename or "(unnamed)",
-                      mime=part.get_content_type(), size=len(data),
+                      mime=mime, size=len(data),
                       source_type="eml", source_ref=path,
                       inline=(disp == "inline"))
             counts["attachments"] += 1

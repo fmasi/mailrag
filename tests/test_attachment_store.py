@@ -77,6 +77,25 @@ class TestAttachmentStore(unittest.TestCase):
             (sha,)).fetchone()
         self.assertIsNotNone(row["extractor_used"])
 
+    def test_cache_hit_preserves_extractor_used(self):
+        """A cache hit must report the extractor that actually produced the text
+        (extractor_used), not the registry name the cache row is keyed by."""
+        sha = self._put(data=b"plain body", name="a.txt", mime="text/plain")
+        first = self.store.get_text(sha)            # miss -> real extraction
+        self.assertEqual(first.extractor, "plaintext")
+        hit = self.store.get_text(sha)              # hit -> same answer
+        self.assertEqual(hit.extractor, first.extractor)
+
+    def test_fetch_reads_attachment_row_once(self):
+        sha = self._put(data=b"plain body", name="a.txt", mime="text/plain")
+        queries = []
+        self.store._conn.set_trace_callback(queries.append)
+        self.store.fetch(sha)                       # cache miss -> extracts
+        self.store._conn.set_trace_callback(None)
+        meta_reads = [q for q in queries if "FROM attachments" in q]
+        self.assertEqual(len(meta_reads), 1,
+                         "fetch must not query the attachments row twice")
+
     def test_force_bypasses_cache_and_reextracts(self):
         from src.attachments.extract import default_extractor_name
         sha = self._put(data=b"plain body", name="a.txt", mime="text/plain")
