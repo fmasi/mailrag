@@ -45,8 +45,13 @@ def _get_pinecone_vector_store():
 
 
 def _get_qdrant_client_and_collection():
-    """Build a Qdrant client and return it with the configured collection name."""
-    from qdrant_client import QdrantClient
+    """Build a Qdrant client and return it with the configured collection name.
+
+    The client construction is delegated to the shared seam (``src/config/qdrant.py``);
+    the ``RAGConfig`` fallback layer below is persist-specific (the other two call sites
+    do not consult ``RAGConfig``), so it stays here and feeds the seam explicit values.
+    """
+    from src.config.qdrant import get_qdrant_client
 
     url = (os.environ.get("QDRANT_URL") or RAGConfig.QDRANT_URL).strip()
     collection_name = (
@@ -64,7 +69,7 @@ def _get_qdrant_client_and_collection():
     if not collection_name:
         raise ValueError("QDRANT_COLLECTION_NAME environment variable is not set")
 
-    client = QdrantClient(url=url, api_key=api_key, prefer_grpc=prefer_grpc)
+    client = get_qdrant_client(url=url, api_key=api_key, prefer_grpc=prefer_grpc)
     return client, collection_name
 
 

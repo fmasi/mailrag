@@ -13,7 +13,10 @@ SPARSE = "sparse"
 
 
 def get_client(url: str = "http://localhost:6333", api_key: str = "") -> QdrantClient:
-    return QdrantClient(url=url, api_key=api_key or None)
+    """Build a Qdrant client via the shared seam (``src/config/qdrant.py``)."""
+    from src.config.qdrant import get_qdrant_client
+
+    return get_qdrant_client(url=url, api_key=api_key)
 
 
 def ensure_hybrid_collection(client: QdrantClient, name: str, dim: int = 1024, recreate: bool = False) -> None:

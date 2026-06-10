@@ -7,7 +7,6 @@ only custom pieces are the bge-m3 adapters (src/query/bge_m3_embedding.py) and t
 RRF callback (src/query/fusion.py). FlagEmbedding/reranker imports are lazy so this
 module imports cleanly in the unit-test env.
 """
-import os
 from typing import List
 
 from llama_index.core import VectorStoreIndex
@@ -27,27 +26,20 @@ DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
 def _qdrant_client(qdrant_url=None):
-    """Construct a Qdrant client (collection passed separately).
+    """Construct a Qdrant client via the shared seam (``src/config/qdrant.py``).
 
-    ``qdrant_url`` is an explicit override (e.g. from a corpus profile) and takes
-    precedence over the environment. It exists so the host CLI can target
-    ``localhost`` without inheriting a container-oriented ``QDRANT_URL`` from
-    ``.env`` (see issue #29). When unset, falls back to ``os.environ``.
+    ``qdrant_url`` is an explicit override (e.g. from a corpus profile) that takes
+    precedence over the environment, so the host CLI can target ``localhost`` without
+    inheriting a container-oriented ``QDRANT_URL`` from ``.env`` (issue #29). When
+    unset, the seam falls back to ``$QDRANT_URL`` (required) plus the optional
+    ``$QDRANT_API_KEY`` / ``$QDRANT_PREFER_GRPC``.
 
-    Reads ``os.environ`` directly rather than importing ``src.config.settings``: that
-    module eagerly imports heavy cloud llama-index integrations (OpenAI/Perplexity) which
-    the lightweight local ``rag`` query env does not (and should not, per the offline goal)
-    have. A URL is required; api-key/grpc are optional with local-friendly defaults.
+    The seam is lean (stdlib + a lazy ``qdrant_client`` import), so importing it keeps
+    this offline query path free of the heavy llama-index integrations.
     """
-    from qdrant_client import QdrantClient
+    from src.config.qdrant import get_qdrant_client
 
-    url = (qdrant_url or os.environ.get("QDRANT_URL") or "").strip()
-    if not url:
-        raise ValueError("QDRANT_URL environment variable is not set")
-    api_key = (os.environ.get("QDRANT_API_KEY") or "").strip() or None
-    grpc_raw = os.environ.get("QDRANT_PREFER_GRPC") or ""
-    prefer_grpc = grpc_raw.strip().lower() in {"1", "true", "yes", "on"}
-    return QdrantClient(url=url, api_key=api_key, prefer_grpc=prefer_grpc)
+    return get_qdrant_client(url=qdrant_url)
 
 
 def _make_reranker(model: str = DEFAULT_RERANK_MODEL, top_n: int = 5, use_fp16: bool = True):
