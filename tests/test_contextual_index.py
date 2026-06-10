@@ -143,6 +143,27 @@ class TestBuildContextualIndex(unittest.TestCase):
         self.assertEqual(res.chunks, 1)
         self.assertEqual(len(fake_embedder.encode.call_args[0][0]), 1)
 
+    def test_dense_only_embedder_uses_dense_collection(self):
+        """A produces_sparse=False embedder builds a dense-only collection and
+        dense-only points (no sparse leg)."""
+        email = _email("a real business email about the quarterly plan and budget")
+        fake = mock.Mock()
+        fake.produces_sparse = False
+        fake.dim = 1024
+        fake.encode.return_value = ([[0.0] * 1024], [{}])
+        with mock.patch("src.indexing.contextual_index.hq.get_client"), \
+             mock.patch("src.indexing.contextual_index.hq.ensure_dense_collection") as ed, \
+             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as eh, \
+             mock.patch("src.indexing.contextual_index.hq.make_dense_point") as mdp, \
+             mock.patch("src.indexing.contextual_index.hq.make_point") as mp, \
+             mock.patch("src.indexing.contextual_index.hq.upsert"):
+            build_contextual_index([email], collection="t", embedder=fake,
+                                   apply_noise_filter=False, qdrant_url="http://x")
+        ed.assert_called_once()
+        eh.assert_not_called()
+        self.assertTrue(mdp.called)
+        mp.assert_not_called()
+
     def test_no_emails_returns_zero_and_skips_collection(self):
         """Empty input returns a zero BuildResult and never touches Qdrant or the embedder."""
         fake_embedder = mock.Mock()
