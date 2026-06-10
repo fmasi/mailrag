@@ -6,10 +6,10 @@ A working reference for the retrieval techniques behind this project — written
 **interview-ready**: crisp definitions, the *why*, the trade-offs, and concrete examples
 you can talk through out loud. Grown incrementally as we build the system.
 
-> Running example used throughout: searching this corpus for **"ACP"** (the
-> *Acme Certified Partner* program). It's a great teaching case because it
-> mixes a semantic concept ("readiness / certification program") with rare exact
-> tokens ("ACP", ticket IDs like `00451823`) — which is exactly where the
+> Running example used throughout: searching this corpus for **"SPP"** (the
+> *Salon Partner Programme*). It's a great teaching case because it
+> mixes a semantic concept ("partnership / onboarding programme") with rare exact
+> tokens ("SPP", order IDs like `00451823`) — which is exactly where the
 > different retrieval methods diverge.
 
 ---
@@ -137,8 +137,8 @@ close together in vector space; you retrieve by **nearest-neighbour** search, us
 - ✅ **Understands synonyms & paraphrase.** A query *"time-off rules"* matches an email
   about *"vacation policy"* even with **zero shared words**.
 - ✅ Language-agnostic with a multilingual model — a Korean reply can match an English query.
-- ❌ **Weak on rare exact tokens.** Product codes, ticket IDs (`00451823`), acronyms
-  (`ACP`), surnames — the model captures the *gist*, not the literal string, so a precise
+- ❌ **Weak on rare exact tokens.** Product codes, order IDs (`00451823`), acronyms
+  (`SPP`), surnames — the model captures the *gist*, not the literal string, so a precise
   identifier can rank surprisingly low.
 
 > **Why "dense"?** The vector is *dense*: (almost) every one of the 1024 dimensions has a
@@ -172,7 +172,7 @@ summing, over each query term, three intuitions:
 1. **Term Frequency (TF)** — a document mentioning the term more is more relevant…
    - …but with **saturation**: the 10th occurrence adds far less than the 2nd (diminishing returns), unlike naive TF-IDF.
 2. **Inverse Document Frequency (IDF)** — rare terms across the corpus matter more.
-   *"the"* is in every email → near-zero weight; *"ACP"* is rare → high weight.
+   *"the"* is in every email → near-zero weight; *"SPP"* is rare → high weight.
 3. **Document-length normalisation** — long documents naturally contain more words, so
    BM25 discounts them to avoid a length bias (tunable via a parameter `b`).
 
@@ -229,7 +229,7 @@ Other specs worth quoting: **1024-dim** dense vectors, **cosine** similarity, st
 MIRACL/MTEB multilingual benchmarks.
 
 - **Dense** → semantic recall.
-- **Sparse (lexical)** → exact-match precision (the ACP/ticket-ID case).
+- **Sparse (lexical)** → exact-match precision (the SPP/order-ID case).
 - **ColBERT (multi-vector)** → token-level late-interaction scoring; heavier, typically used
   to rerank a shortlist rather than to search the whole corpus.
 
@@ -269,7 +269,7 @@ RRF_score(d) = Σ_lists  1 / (k + rank_of_d_in_that_list)
 
 #### Worked example (k = 60)
 
-Query: *"ACP test cases"*. Suppose:
+Query: *"SPP training materials"*. Suppose:
 
 - **Dense** ranks: 1️⃣ EmailA · 2️⃣ EmailB · 3️⃣ EmailC
 - **Sparse** ranks: 1️⃣ EmailC · 2️⃣ EmailD · 3️⃣ EmailA
@@ -326,7 +326,7 @@ score(q, d) = Σ_{i ∈ query tokens}  max_{j ∈ doc tokens} ( q_i · d_j )
 ```
 
 Intuition: *"every word in my query gets to find the single best word in the document to
-latch onto."* The token "ACP" in the query can lock onto the contextual "ACP" token in a
+latch onto."* The token "SPP" in the query can lock onto the contextual "SPP" token in a
 long email, even if the rest of the email is unrelated — combining exact-token precision
 with semantic, context-aware matching.
 

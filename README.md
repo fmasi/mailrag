@@ -211,12 +211,12 @@ the rest from the contextual summary, each increment individually measured above
 isn't any single trick; it's the disciplined stack and the rigor to prove every layer earns
 its place.
 
-**Worked example.** Searching for a partner certification program by its acronym (`"ACP"`)
-mixes a semantic concept (certification readiness) with a rare exact token (`ACP`).
+**Worked example.** Searching for the salon partner programme by its acronym (`"SPP"`)
+mixes a semantic concept (partnership onboarding) with a rare exact token (`SPP`).
 Dense-only finds the concept but ranks the literal acronym low; sparse-only finds the token
 but misses paraphrases; hybrid + RRF gets both. Multi-query expansion (searching several
-phrasings and fusing with RRF) further bridges acronym ↔ expansion ("ACP" ↔ "Acme Certified
-Partner"), at the cost of extra queries per search.
+phrasings and fusing with RRF) further bridges acronym ↔ expansion ("SPP" ↔ "Salon Partner
+Programme"), at the cost of extra queries per search.
 
 ## Project layout
 

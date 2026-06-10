@@ -8,8 +8,8 @@ the *trade-offs* with real numbers — including the places where the obvious as
 turned out wrong.
 
 > **Corpus:** 70,016 exported emails → **31,969** selected (work-account folders).
-> All identifying names replaced with placeholders (`ACP` = a partner certification
-> program; "the work domain" = the employer's own email domain).
+> All identifying names replaced with placeholders (`SPP` = a salon partner
+> programme; "the work domain" = the employer's own email domain).
 
 ---
 
@@ -157,8 +157,8 @@ cast a wide net, then rerank to drop the drift. **(Updated by §7:** once measur
 resolution turned out to be *thread-aware retrieval over a single collection `C`* — likely
 retiring `C′` — rather than pairing C′ with a reranker. Read §7 for the verdict.)
 
-**Worked example.** Searching for a partner certification program by its acronym (`ACP`)
-mixes a *semantic* concept (certification readiness) with a *rare exact token* (`ACP`):
+**Worked example.** Searching for the salon partner programme by its acronym (`SPP`)
+mixes a *semantic* concept (partnership onboarding) with a *rare exact token* (`SPP`):
 dense-only ranks the literal token low, sparse-only misses paraphrases, **hybrid + RRF gets
 both**; multi-query expansion bridges acronym ↔ expansion at the cost of extra queries.
 
