@@ -11,10 +11,21 @@ import os
 
 
 def make_client():
-    """Build an OpenAI SDK client pointed at the local LM Studio server."""
+    """Build an OpenAI SDK client for the configured chat endpoint.
+
+    Reads the **single canonical** endpoint variable ``RAG_LLM_API_BASE`` — the
+    same one ``RAGConfig`` / ``Settings.llm`` use — so configuring the LLM once
+    points *both* the LlamaIndex answer side and this cleanup-pipeline client at
+    the same server. ``RAG_LLM_BASE_URL`` is kept as a legacy alias, and the
+    default stays local-first (LM Studio on ``localhost:1234``).
+    """
     from openai import OpenAI
 
-    base_url = os.getenv("RAG_LLM_BASE_URL", "http://localhost:1234/v1").strip()
+    base_url = (
+        os.getenv("RAG_LLM_API_BASE")
+        or os.getenv("RAG_LLM_BASE_URL")  # legacy alias
+        or "http://localhost:1234/v1"
+    ).strip()
     api_key = os.getenv("RAG_LLM_API_KEY", "").strip() or "lm-studio"
     return OpenAI(base_url=base_url, api_key=api_key)
 
