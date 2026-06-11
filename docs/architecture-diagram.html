@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>mailrag architecture diagram</title>
+<style>
+  :root{
+    /* light */
+    --bg:#fbfaf7; --card:#ffffff; --ink:#1a1f29; --muted:#5b6573; --line:#e3ddd0; --sub:#7a7264;
+    --grn:#2f7d4a; --grn-bg:#f0f7f2; --grn-ln:#cfe6d6;
+    --blu:#2257c0; --blu-bg:#eef3fd; --blu-ln:#d3e0f7;
+    --amb:#b06f17; --amb-bg:#fbf3e6; --amb-ln:#ecd9b6;
+    --pill:#eef1f4; --pill-ink:#4a5563;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0a0e14; --card:#11161f; --ink:#e6edf3; --muted:#8b97a7; --line:#1f2733; --sub:#8b97a7;
+      --grn:#5bd6a0; --grn-bg:#0f1d18; --grn-ln:#274a3c;
+      --blu:#6cb8ff; --blu-bg:#0e1825; --blu-ln:#24374f;
+      --amb:#f3b65a; --amb-bg:#231b0f; --amb-ln:#4a3a1f;
+      --pill:#1a212c; --pill-ink:#aab6c2;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:var(--sans);color:var(--ink)}
+  .sheet{width:1180px;padding:34px 38px 26px;}
+  /* header */
+  .top{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+  .logo{font-family:var(--mono);font-weight:800;font-size:30px;color:var(--blu);letter-spacing:-.5px}
+  .chip{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--grn);
+        background:var(--grn-bg);border:1px solid var(--grn-ln);border-radius:999px;padding:4px 11px}
+  .sub{color:var(--muted);font-size:15px;margin:8px 0 22px}
+  /* two-column layout */
+  .cols{display:flex;gap:26px;align-items:flex-start}
+  .main{flex:1 1 62%}
+  .side{flex:0 0 35%}
+  /* source pills + loader */
+  .srcrow{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
+  .srcpill{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--card);
+           border:1px solid var(--line);border-radius:8px;padding:5px 12px}
+  .loader{text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:14px}
+  /* pipeline container */
+  .pipe{border:1.5px dashed var(--grn-ln);border-radius:14px;padding:16px 16px 18px;position:relative;background:transparent}
+  .pipe-label{position:absolute;top:-9px;left:16px;background:var(--bg);padding:0 8px;font-family:var(--mono);
+              font-size:11px;letter-spacing:.06em;color:var(--grn);font-weight:700}
+  /* step box */
+  .step{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);
+        border-radius:10px;padding:10px 14px}
+  .step.g{border-left-color:var(--grn);background:var(--grn-bg)}
+  .step.b{border-left-color:var(--blu);background:var(--blu-bg)}
+  .step.a{border-left-color:var(--amb);border-left-style:dashed;background:var(--amb-bg)}
+  .step .t{font-family:var(--mono);font-weight:700;font-size:14px}
+  .step.g .t{color:var(--grn)} .step.b .t{color:var(--blu)} .step.a .t{color:var(--amb)}
+  .step .d{color:var(--muted);font-size:13px;margin-top:3px;line-height:1.45}
+  .step .d b{color:var(--ink)}
+  .tag{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.04em;color:var(--pill-ink);
+       background:var(--pill);border-radius:5px;padding:1.5px 6px;margin-left:8px;vertical-align:middle;text-transform:uppercase}
+  .arrow{text-align:center;color:var(--muted);font-size:14px;line-height:1.1;margin:5px 0}
+  .qt{display:flex;align-items:center;gap:10px;margin:13px 2px 9px;color:var(--muted);
+      font-family:var(--mono);font-size:11px;letter-spacing:.1em}
+  .qt::before,.qt::after{content:"";flex:1;height:1px;background:var(--line)}
+  /* personas sidebar */
+  .side h3{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--muted);margin:2px 0 4px;font-weight:700}
+  .dial{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--sub);
+        margin:0 2px 14px;font-family:var(--mono)}
+  .dial .bar{flex:1;height:3px;margin:0 8px;border-radius:2px;
+             background:linear-gradient(90deg,var(--grn),var(--blu) 55%,var(--amb))}
+  .persona{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:11px}
+  .persona.g{border-left:4px solid var(--grn)} .persona.b{border-left:4px solid var(--blu)}
+  .persona.a{border-left:4px solid var(--amb)} .persona.n{border-left:4px solid var(--line)}
+  .persona .pt{font-family:var(--mono);font-weight:700;font-size:13px}
+  .persona.g .pt{color:var(--grn)} .persona.b .pt{color:var(--blu)} .persona.a .pt{color:var(--amb)}
+  .persona.n .pt{color:var(--ink)}
+  .persona .pd{color:var(--muted);font-size:12px;margin-top:3px;line-height:1.45}
+  .persona .pd b{color:var(--ink)}
+  /* footer */
+  .foot{display:flex;justify-content:space-between;align-items:center;margin-top:20px;
+        font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .foot a{color:var(--muted);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="top">
+    <span class="logo">mailrag</span>
+    <span class="chip">100% LOCAL · NOTHING LEAVES YOUR NETWORK</span>
+  </div>
+  <p class="sub">A private email RAG — from raw mailbox to answered question, end to end on your own hardware.</p>
+
+  <div class="cols">
+    <!-- ===== left: the pipeline ===== -->
+    <div class="main">
+      <div class="srcrow">
+        <span class="srcpill">.eml archive</span>
+        <span class="srcpill">Enron (public)</span>
+        <span class="srcpill">Azure Blob</span>
+      </div>
+      <div class="loader">▼ &nbsp;EmailLoader → NormalizedEmail</div>
+
+      <div class="pipe">
+        <span class="pipe-label">on your machine</span>
+
+        <div class="step g"><div class="t">scan<span class="tag">no llm</span></div>
+          <div class="d">cluster embeddings, rank the noisy pockets, recommend a persona</div></div>
+        <div class="arrow">▼</div>
+
+        <div class="step g"><div class="t">Pass-1 · regex noise filter<span class="tag">no llm</span></div>
+          <div class="d">tag bulk &amp; newsletters by sender/subject rules</div></div>
+        <div class="arrow">▼</div>
+
+        <div class="step a"><div class="t">Pass-2 · local LLM judge + summarize<span class="tag">optional</span></div>
+          <div class="d">verdict on suspects, per-email summary, cached — <b>the enrichment step</b></div></div>
+        <div class="arrow">▼</div>
+
+        <div class="step b"><div class="t">clean</div>
+          <div class="d">drop noise · dedup · strip reply chains &amp; quoted text (≈⅔ smaller)</div></div>
+        <div class="arrow">▼</div>
+
+        <div class="step b"><div class="t">chunk</div>
+          <div class="d">SentenceSplitter (bge-m3 tokenizer) · optional: prepend summary → contextual retrieval</div></div>
+        <div class="arrow">▼</div>
+
+        <div class="step b"><div class="t">embed · bge-m3</div>
+          <div class="d">dense + learned sparse vectors</div></div>
+        <div class="arrow">▼</div>
+
+        <div class="step b"><div class="t">store · Qdrant (hybrid) / local</div>
+          <div class="d">vectors live on your disk, not a vendor's cloud</div></div>
+
+        <div class="qt">QUERY TIME</div>
+
+        <div class="step b"><div class="t">retrieve · hybrid + RRF</div>
+          <div class="d">dense + sparse fused, then <b>thread-aware expansion</b> (match one message, return the whole conversation) · optional rerank</div></div>
+        <div class="arrow">▼</div>
+
+        <div class="step a"><div class="t">answer · local LLM<span class="tag">optional</span></div>
+          <div class="d">grounded in the retrieved thread — or skip it and just read the hits</div></div>
+      </div>
+    </div>
+
+    <!-- ===== right: personas / budget dial ===== -->
+    <div class="side">
+      <h3>PERSONAS · BUDGET DIAL</h3>
+      <div class="dial"><span>cheapest</span><span class="bar"></span><span>best quality</span></div>
+
+      <div class="persona g"><div class="pt">llm-none</div>
+        <div class="pd">No LLM at all. Body-only embeddings; prune the regex-tagged bulk. Fastest, runs on modest hardware.</div></div>
+
+      <div class="persona b"><div class="pt">llm-verify</div>
+        <div class="pd">Safe budget. A cheap LLM <i>judge</i> confirms drops on flagged suspects, summaries on what's kept. Won't bin real mail blind.</div></div>
+
+      <div class="persona a"><div class="pt">llm-all</div>
+        <div class="pd">Full enrichment. Summaries across the corpus for the richest retrieval.</div></div>
+
+      <div class="persona n"><div class="pt">Tuned for Apple Silicon</div>
+        <div class="pd">(MPS / MLX on M-series). Answering works from a <b>4B</b> up to a <b>~26B</b> local model — because the ceiling is retrieval, not the model.</div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>open source · LlamaIndex · Qdrant · bge-m3</span>
+    <a href="https://github.com/fmasi/mailrag">github.com/fmasi/mailrag</a>
+  </div>
+
+</div>
+</body>
+</html>
