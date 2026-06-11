@@ -55,6 +55,7 @@ nvidia = ["llama-index-embeddings-nvidia", "llama-index-postprocessor-nvidia-rer
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"
+pytest-cov = "^6.0"
 ipykernel = "^7.2.0"
 
 [build-system]

@@ -32,7 +32,9 @@ jobs:
         run: python -m pip install --upgrade pip poetry
 
       - name: Install dependencies
-        run: poetry install --with dev --no-interaction --no-root
+        # --all-extras so the optional NVIDIA connectors are installed and the
+        # NimEmbedder / NIM-reranker tests actually RUN (not importorskip) in CI.
+        run: poetry install --with dev --all-extras --no-interaction --no-root
 
       - name: Run full test suite
-        run: poetry run python -m pytest tests/ -q
+        run: poetry run python -m pytest tests/ --cov=src --cov-report=term-missing -q
