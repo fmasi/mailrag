@@ -141,3 +141,31 @@ can run the pipeline by hand. Personas live in [`personas.yaml`](../personas.yam
 add an entry (or a gitignored `personas.local.yaml`) to define your own recipe; the
 wizard and `run` both read it. See [`VERBS.md`](VERBS.md) for the full ladder and the
 cost of each verb.
+
+## Attachments
+
+Attachments are stored separately from email bodies. The three commands are:
+
+```bash
+# ingest a profile's attachment bytes into the content-addressed store
+mailrag attachments build --profile <profile.json> [--limit N]
+
+# list a thread's / message's attachments (prints full sha256s)
+mailrag attachments list --thread-id <id>        # or --message-id <id>
+
+# fetch one attachment by sha256: extract + print its text, or write raw bytes
+mailrag attachments get <sha256> --text [--extractor llm|tesseract] [--force]
+mailrag attachments get <sha256> --out <path>    # raw bytes (always available)
+```
+
+Text extraction runs lazily on `get --text` (and is cached). `--extractor` overrides
+the `RAG_ATTACH_EXTRACTOR` env var for that call, and `--force` re-extracts even when a
+result is already cached. (`build` also accepts `--extractor` for forward compatibility,
+but does not extract text today — it only ingests bytes.)
+
+The default OCR backend is the **local vision-LLM (gemma-4 via LM Studio)** —
+on-device and private — with automatic fallback to local **tesseract** when the LLM
+is unavailable. Cloud OCR is opt-in and not yet implemented.
+
+For setup details (optional Python deps, system packages, config vars), see
+[`SETUP.md § 9`](SETUP.md#9-attachment-extraction).

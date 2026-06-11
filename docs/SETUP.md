@@ -147,3 +147,48 @@ a test that loads a real `config/noise_rules.yaml` (skips when only the template
 A Qdrant collection (dense bge-m3 + learned sparse, payload-indexed, optional per-email
 summaries) you can query with hybrid RRF retrieval. See
 [`EXPERIMENTS.md`](EXPERIMENTS.md) for the measured effect of each cleanup/retrieval step.
+
+---
+
+## 9. Attachment extraction
+
+`mailrag attachments build` extracts text from attachments so their content is
+searchable alongside email bodies. Extraction is handled by a subsystem in
+`src/attachments/extract/`: one handler per content type (plaintext, html, docx,
+xlsx, pptx, pdf, image) feeding into a swappable OCR-provider backend.
+
+### OCR / vision backend
+
+For images and image-only / scanned PDFs the default backend is a **local
+vision-LLM (gemma-4 via LM Studio)** — fully on-device, no data leaves the machine.
+If the LLM is unavailable it falls back automatically to local **tesseract**. Cloud
+is opt-in and not yet implemented.
+
+The LLM returns a structured description + transcription. Scanned-PDF pages read by
+any OCR backend (vision LLM or tesseract) are capped by `RAG_ATTACH_MAX_PAGES`
+(default `10`); pages past the cap are never rendered, and truncation is logged.
+
+### Config
+
+| Env var | Default | Values |
+|---------|---------|--------|
+| `RAG_ATTACH_EXTRACTOR` | `llm` | `llm` · `tesseract` · `cloud` |
+| `RAG_ATTACH_MAX_PAGES` | `10` | integer — max scanned-PDF pages rendered/read per attachment (any OCR backend) |
+
+Both can be overridden per-call with `--extractor <name>` on
+`mailrag attachments get` and `mailrag attachments build`. Use `--force` to
+re-extract even when a cached result already exists.
+
+### Optional Python dependencies
+
+```bash
+conda run -n <your-env> pip install \
+    pypdf python-docx openpyxl python-pptx pillow pytesseract pdf2image
+```
+
+Plus system packages for OCR: **tesseract** and **poppler**
+(e.g. `brew install tesseract poppler` on macOS).
+
+Without these, extraction degrades gracefully: unsupported types are stored with
+status `binary` or `ocr_unavailable`, and the raw attachment file is always
+served regardless.

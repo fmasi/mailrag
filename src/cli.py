@@ -384,7 +384,7 @@ def _cmd_attachments_list(args):
 def _cmd_attachments_get(args):
     store = AttachmentStore(args.store)
     try:
-        f = store.fetch(args.sha256)
+        f = store.fetch(args.sha256, extractor=args.extractor, force=args.force)
         if args.out:
             with open(args.out, "wb") as fh:
                 fh.write(store.get_bytes(args.sha256))
@@ -452,6 +452,8 @@ def build_parser():
     _add_profile_arg(atb)
     atb.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
     atb.add_argument("--limit", type=int, default=None)
+    atb.add_argument("--extractor", default=None,
+                     help="OCR backend (accepted for forward compatibility; not yet wired into build)")
     atb.set_defaults(func=_cmd_attachments_build)
 
     atl = at_sub.add_parser("list", help="list a thread's / message's attachments")
@@ -465,6 +467,10 @@ def build_parser():
     atg.add_argument("--text", action="store_true", help="print extracted text")
     atg.add_argument("--out", default=None, help="write raw bytes to this path")
     atg.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
+    atg.add_argument("--extractor", default=None,
+                     help="OCR backend: llm | tesseract | cloud (default: RAG_ATTACH_EXTRACTOR or llm)")
+    atg.add_argument("--force", action="store_true",
+                     help="re-extract even if a cached result exists for this extractor")
     atg.set_defaults(func=_cmd_attachments_get)
 
     return p
