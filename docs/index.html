@@ -3,19 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>mailrag — private, self-hosted email RAG</title>
 <meta name="description" content="Turn your own mail archive into a queryable knowledge base on your hardware. Hybrid dense+sparse retrieval, thread-aware answers, optional local-LLM cleanup. Open-source, measured, self-hosted.">
 <style>
   :root{
-    --bg:#0a0e14; --panel:#11161f; --ink:#e6edf3; --muted:#8b97a7;
-    --line:#1f2733; --accent:#4cc9f0; --accent2:#80ffea; --ok:#3ddc97;
+    /* light (default) — warm cream paper, matching the family sites */
+    --bg:#fbfaf7; --panel:#ffffff; --ink:#1a1f29; --muted:#5b6573;
+    --line:#e8e3d7; --accent:#0e7490; --accent2:#0891b2; --ok:#0a8f57;
+    --code-bg:#f3efe6; --code-ink:#1a1f29; --glow:transparent;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      /* dark — the original deep navy */
+      --bg:#0a0e14; --panel:#11161f; --ink:#e6edf3; --muted:#8b97a7;
+      --line:#1f2733; --accent:#4cc9f0; --accent2:#80ffea; --ok:#3ddc97;
+      --code-bg:#0d1320; --code-ink:#e6edf3; --glow:rgba(76,201,240,.10);
+    }
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
-       background-image:radial-gradient(1200px 600px at 70% -10%,rgba(76,201,240,.10),transparent 60%);}
+       background-image:radial-gradient(1200px 600px at 70% -10%,var(--glow),transparent 60%);}
   .wrap{max-width:960px;margin:0 auto;padding:0 22px}
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
@@ -33,14 +44,15 @@
        background:var(--panel);color:var(--ink)}
   .btn.primary{background:linear-gradient(180deg,#1b6fa8,#155a87);border-color:#1c84c6;color:#fff}
   .btn:hover{text-decoration:none;border-color:var(--accent)}
-  .term{margin:30px 0 6px;border:1px solid var(--line);border-radius:14px;background:#0d1320;
+  /* terminal stays dark in both themes — fixed colours, independent of the palette */
+  .term{margin:30px 0 6px;border:1px solid #1f2733;border-radius:14px;background:#0d1320;
         font-family:var(--mono);font-size:13.5px;line-height:1.7;overflow:hidden}
-  .term .bar{background:var(--panel);border-bottom:1px solid var(--line);padding:8px 14px;
-             color:var(--muted);font-size:12px;letter-spacing:.04em}
-  .term pre{margin:0;padding:16px 18px;overflow-x:auto;color:var(--ink)}
-  .term .p{color:var(--accent2)}
-  .term .c{color:var(--muted)}
-  .term .o{color:var(--ok)}
+  .term .bar{background:#161c2b;border-bottom:1px solid #1f2733;padding:8px 14px;
+             color:#8b97a7;font-size:12px;letter-spacing:.04em}
+  .term pre{margin:0;padding:16px 18px;overflow-x:auto;color:#e6edf3}
+  .term .p{color:#80ffea}
+  .term .c{color:#8b97a7}
+  .term .o{color:#3ddc97}
   section{padding:34px 0;border-top:1px solid var(--line)}
   h2{font-size:13px;font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent2);margin:0 0 16px}
   .lead{font-size:18px;color:var(--ink)}
@@ -57,7 +69,7 @@
   th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.06em}
   td.n{font-family:var(--mono)}
   td .up{color:var(--ok)}
-  code{font-family:var(--mono);background:#0d1320;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
+  code{font-family:var(--mono);background:var(--code-bg);color:var(--code-ink);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
   footer{padding:40px 0 70px;border-top:1px solid var(--line);color:var(--muted);font-size:14.5px}
   footer a{color:var(--accent)}
 </style>
@@ -76,7 +88,7 @@
       <span class="badge">LlamaIndex</span>
       <span class="badge">bge-m3 hybrid</span>
       <span class="badge ok">self-hosted</span>
-      <span class="badge">coverage@3 45→84%</span>
+      <span class="badge">recall@5 46→93%</span>
       <span class="badge">Apache-2.0</span>
     </div>
     <div class="cta">
@@ -109,7 +121,7 @@
   <section>
     <h2>What it does</h2>
     <div class="grid">
-      <div class="card"><h3>Thread-aware answers</h3><p>The flagship: match a single message, then answer from its <em>entire</em> conversation. Roughly <b>doubles</b> answer coverage (terse replies 33% → ~80%) — and it needs no LLM.</p></div>
+      <div class="card"><h3>Thread-aware answers</h3><p>The flagship: match a single message, then answer from its <em>entire</em> conversation. Lifts recall@5 from <b>62% → 93%</b> — the single biggest lever, and it needs no LLM.</p></div>
       <div class="card"><h3>Hybrid retrieval</h3><p>bge-m3 dense + learned sparse vectors, RRF-fused in Qdrant. Gets both the concept <em>and</em> the rare exact token — acronyms, IDs, reference numbers.</p></div>
       <div class="card"><h3>Email-aware preprocessing</h3><p>Reply-chain stripping, calendar-invite collapsing, noise/newsletter filtering, and exact-text chunk dedup.</p></div>
       <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Point it at a model on <code>127.0.0.1</code>.</p></div>
@@ -121,9 +133,10 @@
   <section>
     <h2>How it works — the hard parts</h2>
     <ul class="hard">
-      <li><b>Thread-aware expansion is the biggest single win — and needs no LLM.</b> Matching a small
-         unit and returning its whole conversation lifts recall@1 from <b>36% → 60%</b> (terse
-         answer-coverage 33% → ~80%). Most of the headline gain comes from here, not the model.</li>
+      <li><b>Thread-aware reconstruction is the biggest single win — and needs no LLM.</b> Matching a single
+         message and returning its whole conversation lifts <b>recall@5 from 62% → 93%</b> (+29 points) —
+         bigger than the embedder and reranker choices combined. Most of the headline gain comes from
+         here, not the model.</li>
       <li><b>Cheap regex for the obvious bulk; the LLM only where it earns its keep.</b> Corpus-derived
          sender/subject rules catch ~65% of the noise at high precision. The other ~35% is interleaved
          mixed-domain noise you can't write a rule for — that's the local LLM's unique contribution,
@@ -132,9 +145,11 @@
          <b>87.6%</b> of a personal archive as noise — it would have deleted real receipts and bank
          statements — versus <b>61.5%</b> from a rubric calibrated for that corpus. A ~200-email
          calibration caught the gap before a multi-hour run, all on a local model with no cloud spend.</li>
-      <li><b>Two intuitive ideas, measured and rejected.</b> A cross-encoder reranker <i>hurt</i> under
-         an LLM-judged relevance test; query-side HyDE never beat the raw query on this entity-rich
-         corpus. Both stay in-tree, off by default, for corpora where they'd pay off.</li>
+      <li><b>Reranking helps pointed questions but hurts thread-spanning ones.</b> A cross-encoder reranker
+         adds only <b>+2.5 recall@5</b> overall and actively <i>demotes</i> the answer on questions that span
+         several emails — because no single message looks like the whole answer. That's exactly the case
+         thread reconstruction fixes; the two are complementary. (Query-side HyDE never beat the raw query
+         on this entity-rich corpus either.) Both stay in-tree, off by default.</li>
       <li><b>The ceiling is retrieval, not the model.</b> With the answer in context, even a 4 B model
          answered ~88% correctly; the lost points are queries where retrieval never surfaced the
          thread. Model size was second-order.</li>
@@ -149,20 +164,29 @@
 
   <section>
     <h2>The compound effect</h2>
-    <p class="muted" style="margin:0 0 14px">Stacking the ladder — body-only → +thread expansion →
-       +summary → +thread-aware summary, each increment individually measured — is what produces the
-       headline:</p>
+    <p class="muted" style="margin:0 0 14px">Stacking the ladder — each technique added one at a time and
+       individually measured on 360 real-email questions. <b>recall@5</b> = how often the right email lands
+       in the top 5 results:</p>
     <table>
-      <tr><th>Metric</th><th>Plain email RAG</th><th>Full stack</th></tr>
-      <tr><td>Answer coverage@3</td><td class="n">45%</td><td class="n"><span class="up">84%</span></td></tr>
-      <tr><td>Recall@1</td><td class="n">36%</td><td class="n"><span class="up">70%</span></td></tr>
-      <tr><td>MRR</td><td class="n">.43</td><td class="n"><span class="up">.78</span></td></tr>
+      <tr><th>Technique</th><th>recall@5</th><th>gain</th></tr>
+      <tr><td>plain dense (baseline)</td><td class="n">46%</td><td class="n">—</td></tr>
+      <tr><td>+ learned sparse</td><td class="n">49%</td><td class="n"><span class="up">+3</span></td></tr>
+      <tr><td>+ contextual summary</td><td class="n">62%</td><td class="n"><span class="up">+13</span></td></tr>
+      <tr><td>+ reranking</td><td class="n">64%</td><td class="n"><span class="up">+2</span></td></tr>
+      <tr><td>+ thread reconstruction ★</td><td class="n"><span class="up">93%</span></td><td class="n"><span class="up">+29</span></td></tr>
     </table>
-    <p class="muted" style="margin-top:14px">Author-reported on a real ~32,000-email corporate mailbox
-       (all references anonymized). The public <code>make demo</code> reproduces the <i>method</i>, not
-       the exact figures. The full methodology — 360 synthetic queries, a calibrated LLM judge
-       (Cohen's κ = 0.52), confound controls, and a cross-check against the TREC Legal Track's human
-       judgments — is in the
+    <p class="muted" style="margin:10px 0 0;font-size:13px">★ The final step switches the goal from
+       “find the exact email” to “find its thread” — a legitimately easier, and more useful, target. The
+       two biggest levers (thread reconstruction +29, contextual summary +13) are both about understanding
+       the conversation — not a fancier embedding model. <a href="https://fmasi.eu/blog/email-rag-retrieval/">Read the full benchmark →</a></p>
+    <p class="muted" style="margin-top:14px">Measured on a real work mailbox — 360 questions, each with a
+       known correct answer (a hard label, no subjective judging) — then cross-checked on the public
+       Enron-QA set (same ordering, so it isn't a quirk of one inbox). Run the <i>identical</i> comparison
+       on legal e-discovery (the TREC Legal benchmark) and the order flips: a general-purpose dense+rerank
+       stack wins there instead — same systems, opposite result, because the task is different. All
+       references anonymized; the public <code>make demo</code> reproduces the <i>method</i>, not the
+       figures. Full write-up in the
+       <a href="https://fmasi.eu/blog/email-rag-retrieval/">benchmark post</a> and the
        <a href="https://github.com/fmasi/mailrag#case-study-what-the-cleanup--retrieval-choices-actually-bought">case study</a>.</p>
   </section>
 
