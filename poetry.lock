@@ -2264,6 +2264,22 @@ typing-inspect = ">=0.8.0"
 wrapt = "*"
 
 [[package]]
+name = "llama-index-embeddings-nvidia"
+version = "0.5.1"
+description = "llama-index embeddings nvidia integration"
+optional = true
+python-versions = "<4.0,>=3.10"
+groups = ["main"]
+markers = "extra == \"nvidia\""
+files = [
+    {file = "llama_index_embeddings_nvidia-0.5.1-py3-none-any.whl", hash = "sha256:ab6b1e8369f46ef73709354235fc5e5b976136be2e2c08b20e1b457544271742"},
+    {file = "llama_index_embeddings_nvidia-0.5.1.tar.gz", hash = "sha256:3a45af84a49b75721f33c05394a81b15def9850d062e5c46320a81632972c2d2"},
+]
+
+[package.dependencies]
+llama-index-core = ">=0.13.0,<0.15"
+
+[[package]]
 name = "llama-index-embeddings-openai"
 version = "0.5.1"
 description = "llama-index embeddings openai integration"
@@ -2343,6 +2359,22 @@ files = [
 [package.dependencies]
 llama-index-core = ">=0.14.3,<0.15"
 llama-index-llms-openai = ">=0.6.0,<0.7"
+
+[[package]]
+name = "llama-index-postprocessor-nvidia-rerank"
+version = "0.6.0"
+description = "llama-index postprocessor nvidia_rerank integration"
+optional = true
+python-versions = "<4.0,>=3.10"
+groups = ["main"]
+markers = "extra == \"nvidia\""
+files = [
+    {file = "llama_index_postprocessor_nvidia_rerank-0.6.0-py3-none-any.whl", hash = "sha256:a84ade9a0859f5d69c21eb931dc4c0803ed8ee71939736957df96f197575ef18"},
+    {file = "llama_index_postprocessor_nvidia_rerank-0.6.0.tar.gz", hash = "sha256:169b1ec4f18c5e8d44c8e92016fa5b5f0d6bd024eaa6b90d77d0138236cf2325"},
+]
+
+[package.dependencies]
+llama-index-core = ">=0.13.0,<0.15"
 
 [[package]]
 name = "llama-index-readers-file"
@@ -6408,7 +6440,10 @@ files = [
     {file = "zlib_state-0.1.12.tar.gz", hash = "sha256:ccbb06321daf165b022aa4d22d62effb7df76f55035d50bbe8b93696db416cf0"},
 ]
 
+[extras]
+nvidia = ["llama-index-embeddings-nvidia", "llama-index-postprocessor-nvidia-rerank"]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "75be206ecc35df13292a5252eed425f01f3dee3e344000c8f778645d088f9ec3"
+content-hash = "b27c09e8056f1dd65840f75ff263bfa55d4d271f9a4cb458ef5c0fe793d3f63b"
