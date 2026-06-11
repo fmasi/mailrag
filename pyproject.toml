@@ -8,10 +8,18 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-llama-index = "^0.14.15"
-llama-index-embeddings-openai = "^0.5.1"
-llama-index-llms-openai = "^0.6.18"
-llama-index-llms-perplexity = "^0.4.2"
+# Depend on llama-index-core + the specific integration packages we import,
+# NOT the `llama-index` umbrella meta-package: the umbrella pins the openai
+# sub-packages to <0.7, which conflicts with llama-index-llms-openai-like (needs
+# >=0.7.0). The code never imports bare `llama_index`, only these sub-packages.
+llama-index-core = "^0.14.22"
+llama-index-embeddings-openai = "^0.6.0"
+llama-index-llms-openai = "^0.7.0"
+# Unified OpenAI-compatible LLM for the cleanup client (src/llm/client.py) and
+# the lmstudio answer side (Settings.llm): one LLM stack for LM Studio / NIM /
+# Ollama / vLLM / OpenAI. See P2 Step-3 unification (#39).
+llama-index-llms-openai-like = "^0.7.2"
+llama-index-llms-perplexity = "^0.5.1"
 llama-index-vector-stores-qdrant = "^0.10.0"
 # Optional NVIDIA NeMo Retriever connectors for the C/NIM experiment path
 # (dense-embedding NIM + reranking NIM). Imported lazily in src/ingest/embedder.py

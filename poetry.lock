@@ -934,18 +934,6 @@ files = [
 ]
 
 [[package]]
-name = "defusedxml"
-version = "0.7.1"
-description = "XML bomb protection for Python stdlib modules"
-optional = false
-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
-groups = ["main"]
-files = [
-    {file = "defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61"},
-    {file = "defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69"},
-]
-
-[[package]]
 name = "deprecated"
 version = "1.2.18"
 description = "Python @deprecated decorator to deprecate old python classes, functions or methods."
@@ -2145,92 +2133,15 @@ docs = ["intersphinx-registry", "myst-parser", "pydata-sphinx-theme", "sphinx-au
 test = ["ipykernel", "pre-commit", "pytest (<9)", "pytest-cov", "pytest-timeout"]
 
 [[package]]
-name = "llama-cloud"
-version = "0.1.35"
-description = ""
-optional = false
-python-versions = "<4,>=3.8"
-groups = ["main"]
-files = [
-    {file = "llama_cloud-0.1.35-py3-none-any.whl", hash = "sha256:b7abab4423118e6f638d2f326749e7a07c6426543bea6da99b623c715b22af71"},
-    {file = "llama_cloud-0.1.35.tar.gz", hash = "sha256:200349d5d57424d7461f304cdb1355a58eea3e6ca1e6b0d75c66b2e937216983"},
-]
-
-[package.dependencies]
-certifi = ">=2024.7.4"
-httpx = ">=0.20.0"
-pydantic = ">=1.10"
-
-[[package]]
-name = "llama-cloud-services"
-version = "0.6.54"
-description = "Tailored SDK clients for LlamaCloud services."
-optional = false
-python-versions = "<4.0,>=3.9"
-groups = ["main"]
-files = [
-    {file = "llama_cloud_services-0.6.54-py3-none-any.whl", hash = "sha256:07f595f7a0ba40c6a1a20543d63024ca7600fe65c4811d1951039977908997be"},
-    {file = "llama_cloud_services-0.6.54.tar.gz", hash = "sha256:baf65d9bffb68f9dca98ac6e22908b6675b2038b021e657ead1ffc0e43cbd45d"},
-]
-
-[package.dependencies]
-click = ">=8.1.7,<9"
-llama-cloud = "0.1.35"
-llama-index-core = ">=0.12.0"
-platformdirs = ">=4.3.7,<5"
-pydantic = ">=2.8,<2.10 || >2.10"
-python-dotenv = ">=1.0.1,<2"
-tenacity = ">=8.5.0,<10.0"
-
-[[package]]
-name = "llama-index"
-version = "0.14.15"
+name = "llama-index-core"
+version = "0.14.22"
 description = "Interface between LLMs and your data"
-optional = false
-python-versions = "<4.0,>=3.9"
-groups = ["main"]
-files = [
-    {file = "llama_index-0.14.15-py3-none-any.whl", hash = "sha256:469bf8ff77a445dbf402ed08978a0c8ebf59d40fcd15d289e07e5791e0513cea"},
-    {file = "llama_index-0.14.15.tar.gz", hash = "sha256:079f65e72af87c72dd8b516aa2dd520b52eb2128722d66ecce1e5148cee357c0"},
-]
-
-[package.dependencies]
-llama-index-cli = {version = ">=0.5.0,<0.6", markers = "python_version > \"3.9\""}
-llama-index-core = ">=0.14.15,<0.15.0"
-llama-index-embeddings-openai = ">=0.5.0,<0.6"
-llama-index-indices-managed-llama-cloud = ">=0.4.0"
-llama-index-llms-openai = ">=0.6.0,<0.7"
-llama-index-readers-file = ">=0.5.0,<0.6"
-llama-index-readers-llama-parse = ">=0.4.0"
-nltk = ">3.8.1"
-
-[[package]]
-name = "llama-index-cli"
-version = "0.5.3"
-description = "llama-index cli"
 optional = false
 python-versions = "<4.0,>=3.10"
 groups = ["main"]
 files = [
-    {file = "llama_index_cli-0.5.3-py3-none-any.whl", hash = "sha256:7deb1e953e582bd885443881ce8bd6ab2817b594fef00079dce9993c47d990f7"},
-    {file = "llama_index_cli-0.5.3.tar.gz", hash = "sha256:ebaf39e785efbfa8d50d837f60cb0f95125c04bf73ed1f92092a2a5f506172f8"},
-]
-
-[package.dependencies]
-llama-index-core = ">=0.13.0,<0.15"
-llama-index-embeddings-openai = ">=0.5.0,<0.6"
-llama-index-llms-openai = ">=0.6.0,<0.7"
-
-[[package]]
-name = "llama-index-core"
-version = "0.14.15"
-description = "Interface between LLMs and your data"
-optional = false
-python-versions = "<4.0,>=3.9"
-groups = ["main"]
-files = [
-    {file = "llama_index_core-0.14.15-py3-none-any.whl", hash = "sha256:e02b321c10673871a38aaefdc4a93d5ae8ec324cad4408683189e5a1aa1e3d52"},
-    {file = "llama_index_core-0.14.15.tar.gz", hash = "sha256:3766aeeb95921b3a2af8c2a51d844f75f404215336e1639098e3652db52c68ce"},
+    {file = "llama_index_core-0.14.22-py3-none-any.whl", hash = "sha256:9cfffde46fd5b7937101e1c0c9bb5c21bd7ff8c8a56937810b87ba3542f31225"},
+    {file = "llama_index_core-0.14.22.tar.gz", hash = "sha256:1384410f89bdbd32349aab444ef4f5c828c338787bc65bd1ffd8e86dfb44ac41"},
 ]
 
 [package.dependencies]
@@ -2243,10 +2154,10 @@ dirtyjson = ">=1.0.8,<2"
 filetype = ">=1.2.0,<2"
 fsspec = ">=2023.5.0"
 httpx = "*"
-llama-index-workflows = ">=2,<2.9.0 || >2.9.0,<3"
+llama-index-workflows = ">=2.14.0,<3"
 nest-asyncio = ">=1.5.8,<2"
 networkx = ">=3.0"
-nltk = ">3.8.1"
+nltk = ">=3.9.3"
 numpy = "*"
 pillow = ">=9.0.0"
 platformdirs = "*"
@@ -2281,36 +2192,19 @@ llama-index-core = ">=0.13.0,<0.15"
 
 [[package]]
 name = "llama-index-embeddings-openai"
-version = "0.5.1"
+version = "0.6.0"
 description = "llama-index embeddings openai integration"
 optional = false
-python-versions = "<4.0,>=3.9"
+python-versions = "<4.0,>=3.10"
 groups = ["main"]
 files = [
-    {file = "llama_index_embeddings_openai-0.5.1-py3-none-any.whl", hash = "sha256:a2fcda3398bbd987b5ce3f02367caee8e84a56b930fdf43cc1d059aa9fd20ca5"},
-    {file = "llama_index_embeddings_openai-0.5.1.tar.gz", hash = "sha256:1c89867a48b0d0daa3d2d44f5e76b394b2b2ef9935932daf921b9e77939ccda8"},
+    {file = "llama_index_embeddings_openai-0.6.0-py3-none-any.whl", hash = "sha256:039bb1007ad4267e25ddb89a206dfdab862bfb87d58da4271a3919e4f9df4d61"},
+    {file = "llama_index_embeddings_openai-0.6.0.tar.gz", hash = "sha256:eb3e6606be81cb89125073e23c97c0a6119dabb4827adbd14697c2029ad73f29"},
 ]
 
 [package.dependencies]
 llama-index-core = ">=0.13.0,<0.15"
 openai = ">=1.1.0"
-
-[[package]]
-name = "llama-index-indices-managed-llama-cloud"
-version = "0.9.4"
-description = "llama-index indices llama-cloud integration"
-optional = false
-python-versions = "<4.0,>=3.9"
-groups = ["main"]
-files = [
-    {file = "llama_index_indices_managed_llama_cloud-0.9.4-py3-none-any.whl", hash = "sha256:535a08811046803ca6ab7f8e9d510e926aa5306608b02201ad3d9d21701383bc"},
-    {file = "llama_index_indices_managed_llama_cloud-0.9.4.tar.gz", hash = "sha256:b5e00752ab30564abf19c57595a2107f5697c3b03b085817b4fca84a38ebbd59"},
-]
-
-[package.dependencies]
-deprecated = "1.2.18"
-llama-cloud = "0.1.35"
-llama-index-core = ">=0.13.0,<0.15"
 
 [[package]]
 name = "llama-index-instrumentation"
@@ -2330,14 +2224,14 @@ pydantic = ">=2.11.5"
 
 [[package]]
 name = "llama-index-llms-openai"
-version = "0.6.18"
+version = "0.7.9"
 description = "llama-index llms openai integration"
 optional = false
-python-versions = "<4.0,>=3.9"
+python-versions = "<4.0,>=3.10"
 groups = ["main"]
 files = [
-    {file = "llama_index_llms_openai-0.6.18-py3-none-any.whl", hash = "sha256:73bbbf233d38116d48350391a3649884829564f4c8f6168c8fa3f3ae1b557376"},
-    {file = "llama_index_llms_openai-0.6.18.tar.gz", hash = "sha256:36c0256a7a211bbbc5ecc00d3f2caa9730eea1971ced3b68b7c94025c0448020"},
+    {file = "llama_index_llms_openai-0.7.9-py3-none-any.whl", hash = "sha256:0bc8f59faddf8dbc9f90c5576127ab2fa6d368be5078885dc7e611af129b5a79"},
+    {file = "llama_index_llms_openai-0.7.9.tar.gz", hash = "sha256:f54a24b717134c86e724007057a06a84394f019d1f01e918b624894e208a86df"},
 ]
 
 [package.dependencies]
@@ -2345,20 +2239,39 @@ llama-index-core = ">=0.14.5,<0.15"
 openai = ">=1.108.1,<3"
 
 [[package]]
-name = "llama-index-llms-perplexity"
-version = "0.4.2"
-description = "llama-index llms perplexity integration"
+name = "llama-index-llms-openai-like"
+version = "0.7.2"
+description = "llama-index llms openai like integration"
 optional = false
-python-versions = "<4.0,>=3.9"
+python-versions = "<4.0,>=3.10"
 groups = ["main"]
 files = [
-    {file = "llama_index_llms_perplexity-0.4.2-py3-none-any.whl", hash = "sha256:441d188c7ffb135ef21ef21f9f1abb45dd6b73c6d0e7893a9020e0946faec9ba"},
-    {file = "llama_index_llms_perplexity-0.4.2.tar.gz", hash = "sha256:80cc5a508ea55c1093598483c71df603c95e053bf2194a127ae31bc33a7c0046"},
+    {file = "llama_index_llms_openai_like-0.7.2-py3-none-any.whl", hash = "sha256:1f45a7b1cec8fb3f5997684327ffe6c19f93e789c2fff35dc5522465850faf0b"},
+    {file = "llama_index_llms_openai_like-0.7.2.tar.gz", hash = "sha256:ed9ff73f975dce470f98ac61c982151ba78eedfa3fb9b03894bc1d1312b213ff"},
 ]
 
 [package.dependencies]
 llama-index-core = ">=0.14.3,<0.15"
-llama-index-llms-openai = ">=0.6.0,<0.7"
+llama-index-llms-openai = ">=0.7.0,<0.8"
+
+[package.extras]
+transformers = ["transformers (>=4.37.0,<5)"]
+
+[[package]]
+name = "llama-index-llms-perplexity"
+version = "0.5.1"
+description = "llama-index llms perplexity integration"
+optional = false
+python-versions = "<4.0,>=3.10"
+groups = ["main"]
+files = [
+    {file = "llama_index_llms_perplexity-0.5.1-py3-none-any.whl", hash = "sha256:2877258eb16003dcb6ca9217b5f833ee08f1f0ba4788da8bb20eeefa71df00b3"},
+    {file = "llama_index_llms_perplexity-0.5.1.tar.gz", hash = "sha256:009616ee36a4130b23212607e0d73ca1e6454b5bf210e27c528a2e12ec2ede2e"},
+]
+
+[package.dependencies]
+llama-index-core = ">=0.14.3,<0.15"
+llama-index-llms-openai = ">=0.7.0,<0.8"
 
 [[package]]
 name = "llama-index-postprocessor-nvidia-rerank"
@@ -2375,45 +2288,6 @@ files = [
 
 [package.dependencies]
 llama-index-core = ">=0.13.0,<0.15"
-
-[[package]]
-name = "llama-index-readers-file"
-version = "0.5.4"
-description = "llama-index readers file integration"
-optional = false
-python-versions = "<4.0,>=3.9"
-groups = ["main"]
-files = [
-    {file = "llama_index_readers_file-0.5.4-py3-none-any.whl", hash = "sha256:135be5ddda66c5b35883911918b2d99f67a2ab010d180af5630c872ea9509d45"},
-    {file = "llama_index_readers_file-0.5.4.tar.gz", hash = "sha256:5e766f32597622e66529464101914548ad683770a0a5d2bdc9ee84eb3a110332"},
-]
-
-[package.dependencies]
-beautifulsoup4 = ">=4.12.3,<5"
-defusedxml = ">=0.7.1"
-llama-index-core = ">=0.13.0,<0.15"
-pandas = "<2.3.0"
-pypdf = ">=5.1.0,<7"
-striprtf = ">=0.0.26,<0.0.27"
-
-[package.extras]
-pymupdf = ["pymupdf (>=1.23.21,<2)"]
-
-[[package]]
-name = "llama-index-readers-llama-parse"
-version = "0.5.1"
-description = "llama-index readers llama-parse integration"
-optional = false
-python-versions = "<4.0,>=3.9"
-groups = ["main"]
-files = [
-    {file = "llama_index_readers_llama_parse-0.5.1-py3-none-any.whl", hash = "sha256:0d41450ed29b0c49c024e206ef6c8e662b1854e77a1c5faefed3b958be54f880"},
-    {file = "llama_index_readers_llama_parse-0.5.1.tar.gz", hash = "sha256:2b78b73faa933e30e6c69df351e4e9f36dfe2ae142e2ab3969ddd2ac48930e37"},
-]
-
-[package.dependencies]
-llama-index-core = ">=0.13.0,<0.15"
-llama-parse = ">=0.5.0"
 
 [[package]]
 name = "llama-index-vector-stores-pinecone"
@@ -2468,21 +2342,6 @@ typing-extensions = ">=4.6.0"
 [package.extras]
 client = ["llama-agents-client (>=0.1.0,<1.0.0)"]
 server = ["llama-agents-server (>=0.1.0,<1.0.0)"]
-
-[[package]]
-name = "llama-parse"
-version = "0.6.54"
-description = "Parse files into RAG-Optimized formats."
-optional = false
-python-versions = "<4.0,>=3.9"
-groups = ["main"]
-files = [
-    {file = "llama_parse-0.6.54-py3-none-any.whl", hash = "sha256:c66c8d51cf6f29a44eaa8595a595de5d2598afc86e5a33a4cebe5fe228036920"},
-    {file = "llama_parse-0.6.54.tar.gz", hash = "sha256:c707b31152155c9bae84e316fab790bbc8c85f4d8825ce5ee386ebeb7db258f1"},
-]
-
-[package.dependencies]
-llama-cloud-services = ">=0.6.54"
 
 [[package]]
 name = "lxml"
@@ -5434,18 +5293,6 @@ pure-eval = "*"
 tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
-name = "striprtf"
-version = "0.0.26"
-description = "A simple library to convert rtf to text"
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = [
-    {file = "striprtf-0.0.26-py3-none-any.whl", hash = "sha256:8c8f9d32083cdc2e8bfb149455aa1cc5a4e0a035893bedc75db8b73becb3a1bb"},
-    {file = "striprtf-0.0.26.tar.gz", hash = "sha256:fdb2bba7ac440072d1c41eab50d8d74ae88f60a8b6575c6e2c7805dc462093aa"},
-]
-
-[[package]]
 name = "sympy"
 version = "1.14.0"
 description = "Computer algebra system (CAS) in Python"
@@ -6446,4 +6293,4 @@ nvidia = ["llama-index-embeddings-nvidia", "llama-index-postprocessor-nvidia-rer
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "b27c09e8056f1dd65840f75ff263bfa55d4d271f9a4cb458ef5c0fe793d3f63b"
+content-hash = "ba04bc733c97d1b84b50f2483e6a8fabffe163db6f2e7b847514ed42232761e6"

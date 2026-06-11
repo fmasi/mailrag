@@ -105,12 +105,13 @@ class TestEmbeddingProviderSettings(unittest.TestCase):
     )
     @patch("src.config.settings.Settings")
     @patch("llama_index.embeddings.openai.OpenAIEmbedding")
-    @patch("llama_index.llms.openai.OpenAI")
+    @patch("llama_index.llms.openai_like.OpenAILike")
     def test_lmstudio_llm_does_not_require_openai_key(
         self, mock_llm, _mock_embedding, _mock_settings
     ):
         """LM Studio LLM mode should initialize without OPENAI_API_KEY, using the
-        configured api_base and a placeholder api_key."""
+        configured api_base and a placeholder api_key. Post P2 Step-3 the answer
+        side builds an OpenAILike (unified with the cleanup client)."""
         RAGConfig.initialize_settings(include_llm=True)
 
         mock_llm.assert_called_once()

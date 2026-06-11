@@ -59,6 +59,13 @@ class TestInjectableRerankerOnHybrid(unittest.TestCase):
 
 
 class TestMakeNimReranker(unittest.TestCase):
+    def setUp(self):
+        # The NVIDIA rerank connector is an optional `nvidia` extra; this test
+        # mocks it but needs the module importable to patch it. Skip cleanly
+        # when absent (CI installs without --extras nvidia).
+        import pytest
+        pytest.importorskip("llama_index.postprocessor.nvidia_rerank")
+
     def test_builds_nvidia_rerank_with_endpoint_and_model(self):
         with patch("llama_index.postprocessor.nvidia_rerank.NVIDIARerank") as NR:
             r = hybrid.make_nim_reranker(top_n=7, api_key="k")
