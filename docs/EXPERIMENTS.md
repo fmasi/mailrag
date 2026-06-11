@@ -621,6 +621,15 @@ quant — see "the quant confound" below for why same-quant matters):**
 The ladder is monotone. The two biggest jumps tell the story: **row 0→1** (R@1 36→60, LLM-free) is
 the value of thread expansion alone; **row 2→3** is the increment this work adds.
 
+> **Relation to the headline recall@5 ladder.** This section decomposes the *summary type* (which
+> summary helps), all measured **thread-level @8bit without reranking**. The repo's headline
+> **technique ladder** — plain dense 46 → +learned sparse 49 → +contextual summary 62 → +rerank 64
+> → +thread reconstruction **93** (recall@5) — is a *different cut*: it adds the NVIDIA-reranker step
+> and reports thread-recall *with* rerank (89→93). Both are now reproducible on `main`:
+> `scripts/eval/bench_avc.py` (technique ladder + NVIDIA C-arms + Enron-QA cross-check) and
+> `bench_thread_reconstruction.py` (email-recall vs thread-recall). They agree where they overlap
+> (preceding-context hybrid thread-recall@5 ≈ 87–89, → 93 with the reranker).
+
 ### ⚠ The quant confound (the key methodology lesson)
 
 An earlier pass compared preceding-context @**8bit** against an isolated control @**6bit** and

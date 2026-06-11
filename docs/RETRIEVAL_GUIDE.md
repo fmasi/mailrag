@@ -94,12 +94,12 @@ it re-reads the *actual* query against the *actual* email, it pushes drifted-in 
 > `C` is the cleaned **body-only** collection (live: `work-rag-bodyonly`). See the
 > [terminology box in `EXPERIMENTS.md`](EXPERIMENTS.md#terminology-read-this-first), which also
 > disambiguates the two senses of "thread-aware" (retrieval expansion vs. summary conditioning).
-> - **Reranking measured to *hurt*** under LLM-judged relevance (it demotes answer-bearing
->   emails) — *not* the clear win the eyeballing suggested. **Off by default.**
+> - **Reranking helps pointed queries (+2.5 recall@5) but demotes the answer on thread-spanning
+>   ones** (and hurt outright under the earlier LLM-judged eval). **Off by default.**
 > - **Contextual retrieval (`C′`) was the *best* arm** (ranked and end-to-end) — the "drift"
 >   penalty did not reproduce; **`C′` is kept, not retired.**
-> - **Thread-aware retrieval ~doubles answer-coverage** (terse 33% → ~80%) and is the headline
->   win; recommended stack is **`C′` + expand top ~1–3 threads, rerank off**.
+> - **Thread reconstruction is the headline win — recall@5 62% → 93%** (thread-recall): match a
+>   small unit, answer from its whole thread; recommended stack is **`C′` + expand top ~1–3 threads**.
 > - **Retrieval coverage (~76%), not the answer model, is the ceiling.**
 
 The original directional reads (kept for the record), comparing **dense → hybrid → hybrid+rerank**

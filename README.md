@@ -10,11 +10,15 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
-> **What it buys you.** On a real ~32k-email corporate mailbox, the full stack takes answer
-> coverage@3 from **45%** (plain email RAG) **to 84%**, and recall@1 from **36% to 70%** — most
-> of it from thread-aware expansion, the rest from preceding-context summaries. These are
-> author-reported numbers on a *private* mailbox; the public `make demo` reproduces the
-> *method*, not the exact figures. How they were measured, and the honest caveats, are in the
+> **What it buys you.** On a real ~32k-email corporate mailbox, stacking the retrieval
+> techniques takes **recall@5 from 46% (plain dense) to 93%** — and the two biggest levers
+> aren't a fancier model: a per-email contextual summary (**+13**) and reconstructing the whole
+> thread instead of hunting one message (**+29**). As a yardstick the email-tuned hybrid is
+> benchmarked against NVIDIA's general-purpose retrieval stack: it wins on email, while NVIDIA's
+> stack wins on broad legal e-discovery (TREC) — same systems, opposite winners, task-dependent.
+> Numbers are author-reported on a *private* mailbox (cross-checked on public Enron-QA, same
+> ordering); the 93% is thread-level recall (see caveats) and the public `make demo` reproduces
+> the *method*. Full write-up and reproducible scripts in the
 > [case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
 ## Why this exists
@@ -169,21 +173,21 @@ write-up:
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token / acronym precision, fused with semantics | needs a sparse-capable embedder + fusion; more storage |
 | **+ LLM noise removal** | precision — catches the ~⅓ of noise regex can't, and clears junk out of the top results (measured below) | one-time LLM cost (see above) |
 | **+ contextual retrieval** (prepend each email's summary before embedding — the `C′` / `work-rag-ctx-*` collection) | short/terse emails match by *gist*; the best ranked arm *and* the end-to-end winner | one extra embedded collection to build/maintain |
-| **+ cross-encoder reranker** | *(intuition: reorder candidates for precision)* | **measured to HURT** — under an LLM judge it demotes answer-bearing emails (§9); off by default |
-| **+ thread-aware expansion** (pull the full conversation of each top hit) | **~doubles answer-coverage** (terse replies 33% → ~80%) — match a small unit, answer from its thread | larger context per query (tunable: expand top-N threads) |
+| **+ cross-encoder reranker** | small precision lift on pointed queries (**+2.5 R@5**) | **demotes the answer on thread-spanning queries** (and hurt outright under the earlier LLM-judged eval, §9); off by default |
+| **+ thread reconstruction** (pull the full conversation of each top hit) | **recall@5 62% → 93%** — match a small unit, answer from its whole thread | larger context per query (tunable: expand top-N threads) |
 
-**How the eval was run.** The eval set is **360 synthetic queries** — generated from corpus
-bodies and graded by a local LLM judge. To trust that judge, it was calibrated against a
-stronger reference model (Cohen's κ = 0.52, Spearman 0.74), and both pre-registered
-decisions held under either judge. The core techniques were then cross-checked on the
-**TREC Legal Track's real human relevance judgments**, which broadly agreed. Results are
-scored as an evolution ladder — body-only → +thread expansion → +summary → +thread-aware
-summary — with significance tests and confound controls (full write-ups in
-[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29)):
+**How the eval was run.** The eval set is **360 synthetic queries** (144 terse / 144 content /
+72 spanning), each generated from a known email so the **recall ladder is scored against hard
+gold labels — no LLM judge in the loop**. A *separate* answer-quality lens does use a local LLM
+judge, calibrated against a stronger reference model (Cohen's κ = **0.52** on the 0–3 scale,
+**0.80** binary at the relevance threshold actually used; Spearman 0.74). The core techniques
+were cross-checked on the **TREC Legal Track's real human judgments** and on public **Enron-QA**,
+which agreed on ordering. Significance tests and confound controls are in
+[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29):
 
-- **Thread expansion is the biggest single win — and needs no LLM.** Matching a small unit
-  and returning its whole conversation lifts recall@1 from 36% → 60% (terse answer-coverage
-  33% → ~80%).
+- **Thread reconstruction is the biggest single win — and needs no LLM.** Matching a small unit
+  and returning its whole conversation lifts **recall@5 from 62% → 93%** (+29) — it trades
+  "find the needle" for "find the right thread," which the conversation then answers.
 - **Thread-aware *summaries* help where they're designed to — terse replies.** *(Note:
   "thread-aware" names two things — the retrieval expansion above, and this
   summary-conditioning step; see the
@@ -198,18 +202,33 @@ summary — with significance tests and confound controls (full write-ups in
   dents gold recall (the DB still finds the answer), but then **21% of queries surface noise
   in their top-3** (~11% of slots) — junk the LLM removes for free in the pass that also
   writes the summary.
-- **Two intuitive ideas, measured and rejected.** A cross-encoder reranker *hurt* under
-  LLM-judged relevance; query-side HyDE never beat the raw query on this entity-rich corpus.
-  Both are kept in-tree, off by default, for corpora where they'd pay off.
+- **Reranking helps pointed questions but hurts thread-spanning ones.** A cross-encoder reranker
+  adds only **+2.5 recall@5** overall and *demotes* the answer on multi-email questions (no single
+  message looks like the whole answer) — and it hurt outright under the earlier LLM-judged
+  answer-quality eval. Query-side HyDE never beat the raw query on this entity-rich corpus. Both
+  stay in-tree, off by default, for corpora where they'd pay off.
 - **The ceiling is retrieval, not the model.** With the answer in context, even a 4 B model
   answered ~88% correctly; the lost points are queries where retrieval never surfaced the
   thread. Model size was second-order.
 
-**The compound effect.** Stacked, that ladder is what produces the headline: coverage@3
-**45% → 84%**, recall@1 **36% → 70%**, MRR **.43 → .78** — most of it from thread-awareness,
-the rest from the contextual summary, each increment individually measured above. The value
-isn't any single trick; it's the disciplined stack and the rigor to prove every layer earns
-its place.
+**The compound effect — the canonical recall@5 ladder.** Each technique added one at a time,
+scored on the 360 queries against hard gold labels (no LLM judge), reproducible via
+`scripts/eval/bench_avc.py` + `bench_thread_reconstruction.py`:
+
+| step | recall@5 | gain |
+|------|----------|------|
+| plain dense | 46% | — |
+| + learned sparse | 49% | +3 |
+| + contextual summary | 62% | +13 |
+| + reranking | 64% | +2 |
+| **+ thread reconstruction** ★ | **93%** | **+29** |
+
+★ The last step switches from "find the exact email" to "find its *thread*" — a legitimately
+easier, more useful target (thread-recall). The two biggest levers (thread reconstruction +29,
+contextual summary +13) are both about understanding the conversation, not a fancier embedding
+model. Same ordering on public Enron-QA; the NVIDIA dense+rerank yardstick trails on email
+(57% R@5 vs the hybrid's 62%) but wins on TREC legal e-discovery — task-fit, not brand. The
+value isn't any single trick; it's the disciplined stack and the rigor to prove every layer.
 
 **Worked example.** Searching for the salon partner programme by its acronym (`"SPP"`)
 mixes a semantic concept (partnership onboarding) with a rare exact token (`SPP`).
