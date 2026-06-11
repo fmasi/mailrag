@@ -53,9 +53,11 @@ def build_contextual_index(
     collection:
         Qdrant collection name.
     embedder:
-        An object with an ``encode(texts, batch_size, max_length)`` method that
-        returns ``(dense_vecs, sparse_weight_dicts)``.  Typically a
-        ``BgeM3Embedder`` instance.
+        An :class:`~src.ingest.embedder.Embedder` — an ``encode(texts, batch_size,
+        max_length)`` method returning ``(dense_vecs, sparse_weight_dicts)``, plus a
+        ``dim`` used to size the collection (default 1024 if absent). Typically a
+        ``BgeM3Embedder``. (A dense-only embedder needs a dense-only collection;
+        that path is added with the NVIDIA-native embedder.)
     summaries:
         Optional mapping of ``message_id -> summary text``.  When supplied, each
         email's ``.summary`` field is set before chunking so that
@@ -129,9 +131,18 @@ def build_contextual_index(
     if not nodes:
         return BuildResult(collection=collection, kept_emails=kept_emails, chunks=0)
 
-    # 6. Prepare Qdrant collection
+    # 6. Prepare the Qdrant collection. Size it from the embedder so a non-bge-m3
+    # embedder (e.g. a NIM at 2048-d) gets a correctly-sized collection (default
+    # 1024 for a minimal duck-typed embedder). A dense-only embedder
+    # (produces_sparse=False) gets a dense-only collection — its endpoint cannot
+    # emit learned sparse weights, so there is no sparse leg to populate.
+    hybrid = getattr(embedder, "produces_sparse", True)
+    dim = getattr(embedder, "dim", 1024)
     client = hq.get_client(qdrant_url)
-    hq.ensure_hybrid_collection(client, collection, dim=1024, recreate=recreate)
+    if hybrid:
+        hq.ensure_hybrid_collection(client, collection, dim=dim, recreate=recreate)
+    else:
+        hq.ensure_dense_collection(client, collection, dim=dim, recreate=recreate)
 
     enc_max_len = embed_max_length(
         chunk_size, embed_summary, override=embed_max_length_override
@@ -152,10 +163,13 @@ def build_contextual_index(
         )
         points = []
         for n, dv, lw in zip(batch, dense, sparse):
-            idx, val = lexical_weights_to_sparse(lw)
             payload = dict(n.metadata)
             payload["text"] = n.get_content(metadata_mode=MetadataMode.NONE)
-            points.append(hq.make_point(n.node_id, dv, idx, val, payload))
+            if hybrid:
+                idx, val = lexical_weights_to_sparse(lw)
+                points.append(hq.make_point(n.node_id, dv, idx, val, payload))
+            else:
+                points.append(hq.make_dense_point(n.node_id, dv, payload))
         hq.upsert(client, collection, points)
         done += len(batch)
 
