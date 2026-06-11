@@ -8,6 +8,13 @@ dense vector and cannot carry learned sparse weights.
 import unittest
 from unittest import mock
 
+import pytest
+
+# The NVIDIA NeMo connector is an optional `nvidia` extra; these tests mock it
+# but still need the module importable to patch it. Skip cleanly when it is not
+# installed (e.g. CI runs `poetry install` without --extras nvidia).
+pytest.importorskip("llama_index.embeddings.nvidia")
+
 
 def _patched_connector(batch_return):
     """Patch the lazily-imported NVIDIAEmbedding; return (patch_ctx, instance_mock)."""
