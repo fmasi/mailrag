@@ -275,14 +275,20 @@ class RAGConfig:
                     api_key=perplexity_api_key,
                 )
             elif RAGConfig.LLM_PROVIDER == "lmstudio":
-                from llama_index.llms.openai import OpenAI  # noqa: PLC0415
-                llm = OpenAI(
+                # OpenAILike (not llama_index.llms.openai.OpenAI) so the answer
+                # side uses the SAME LLM abstraction as the cleanup client
+                # (src.llm.client) and accepts arbitrary OpenAI-compatible model
+                # ids (LM Studio / NIM / Ollama / vLLM) without OpenAI enum
+                # validation. This is the P2 Step-3 unification.
+                from llama_index.llms.openai_like import OpenAILike  # noqa: PLC0415
+                llm = OpenAILike(
                     model=RAGConfig.LLM_MODEL,
                     temperature=RAGConfig.LLM_TEMPERATURE,
                     api_base=RAGConfig.LLM_API_BASE,
                     # LM Studio does not require auth; pass a placeholder so the
                     # OpenAI client doesn't complain about a missing api_key.
                     api_key=RAGConfig.LLM_API_KEY or "lm-studio",
+                    is_chat_model=True,
                 )
             else:
                 raise ValueError(f"Unknown LLM provider: {RAGConfig.LLM_PROVIDER}")
