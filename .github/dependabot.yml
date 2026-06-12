@@ -14,3 +14,9 @@ updates:
    directory: "/"
    schedule:
      interval: weekly
+ # Keep the SHA-pinned GitHub Actions fresh (they're pinned to commit SHAs for
+ # supply-chain safety; Dependabot proposes version bumps as PRs).
+ - package-ecosystem: "github-actions"
+   directory: "/"
+   schedule:
+     interval: weekly
