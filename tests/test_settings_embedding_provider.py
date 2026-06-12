@@ -3,6 +3,13 @@
 import unittest
 from unittest.mock import patch
 
+import pytest
+
+# These tests patch llama_index.embeddings.openai.OpenAIEmbedding; the optional
+# embeddings integration must be importable to patch it. Skip cleanly when it's
+# absent so the suite passes out of the box on a minimal env (#44).
+pytest.importorskip("llama_index.embeddings.openai")
+
 from src.config.settings import RAGConfig
 
 

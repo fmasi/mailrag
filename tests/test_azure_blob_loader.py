@@ -4,6 +4,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
+import pytest
+
+# Azure SDK is optional; skip this module (don't error at collection) when it's
+# not installed, so `pytest tests/` passes out of the box on a minimal env (#44).
+pytest.importorskip("azure.storage.blob")
+
 from src.data.loaders.azure_blob import AzureBlobEmailLoader
 from src.data.models import NormalizedEmail
 

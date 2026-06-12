@@ -9,7 +9,11 @@ from typing import List, Optional
 
 from llama_index.core import Document
 
-from src.data.loaders import AzureBlobEmailLoader, EnronDatasetLoader, MailArchiveXLoader
+# AzureBlobEmailLoader is imported lazily in the azure_blob branch below: it
+# pulls the optional `azure-storage-blob` dependency, so a top-level import here
+# would make `from src.data.loader import load_emails` fail on a minimal install
+# (the enron / mail_archive_x paths need no Azure). See #44.
+from src.data.loaders import EnronDatasetLoader, MailArchiveXLoader
 
 
 def load_emails(
@@ -35,6 +39,7 @@ def load_emails(
             raise ValueError("backup_dir required for mail_archive_x source")
         loader = MailArchiveXLoader(backup_dir)
     elif source == "azure_blob":
+        from src.data.loaders import AzureBlobEmailLoader  # noqa: PLC0415 (optional dep)
         loader = AzureBlobEmailLoader()
     else:
         raise ValueError(
