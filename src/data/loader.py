@@ -25,7 +25,7 @@ def load_emails(
     Load emails from a specified source and return Document objects.
 
     Args:
-        source: "enron" or "mail_archive_x".
+        source: "enron", "mail_archive_x", or "azure_blob".
         backup_dir: Required when source="mail_archive_x".
         num_samples: Maximum number of emails to load. None means all.
 
