@@ -21,6 +21,10 @@ llama-index-llms-openai = "^0.7.0"
 llama-index-llms-openai-like = "^0.7.2"
 llama-index-llms-perplexity = "^0.5.1"
 llama-index-vector-stores-qdrant = "^0.10.0"
+# Default cross-encoder reranker (bge-m3 / A path) used by query/hybrid.py.
+# FlagEmbedding is already a main dep; this is the thin LlamaIndex wrapper. It
+# was previously pulled only transitively / installed ad-hoc in the rag env.
+llama-index-postprocessor-flag-embedding-reranker = "^0.5.0"
 # Optional NVIDIA NeMo Retriever connectors for the C/NIM experiment path
 # (dense-embedding NIM + reranking NIM). Imported lazily in src/ingest/embedder.py
 # and src/query/hybrid.py; install with `poetry install --extras nvidia`.
