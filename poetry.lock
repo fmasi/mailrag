@@ -2393,6 +2393,21 @@ llama-index-core = ">=0.14.3,<0.15"
 llama-index-llms-openai = ">=0.7.0,<0.8"
 
 [[package]]
+name = "llama-index-postprocessor-flag-embedding-reranker"
+version = "0.5.0"
+description = "llama-index postprocessor flag embedding reranker integration"
+optional = false
+python-versions = "<4.0,>=3.10"
+groups = ["main"]
+files = [
+    {file = "llama_index_postprocessor_flag_embedding_reranker-0.5.0-py3-none-any.whl", hash = "sha256:6518aeb1c10ebab912460360384953f2984c7fbbb19e69b960306ddaa6dafd23"},
+    {file = "llama_index_postprocessor_flag_embedding_reranker-0.5.0.tar.gz", hash = "sha256:778c7d8a16e28fdcd816e4810710b1d4cdd85f3b1d2500685962cea4575f3417"},
+]
+
+[package.dependencies]
+llama-index-core = ">=0.13.0,<0.15"
+
+[[package]]
 name = "llama-index-postprocessor-nvidia-rerank"
 version = "0.6.0"
 description = "llama-index postprocessor nvidia_rerank integration"
@@ -6432,4 +6447,4 @@ nvidia = ["llama-index-embeddings-nvidia", "llama-index-postprocessor-nvidia-rer
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "d7d5c76d6fddade3f6a4279589c726478681a105a33b1def98eedfd09cc68adf"
+content-hash = "b47e7bc6410bb01b8d758f1003498071f262324405570936063dd1eed40b4671"

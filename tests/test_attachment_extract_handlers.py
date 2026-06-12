@@ -1,6 +1,8 @@
 import io
 import unittest
 from unittest import mock
+
+import pytest
 from src.attachments.extract.handlers.plaintext import PlaintextHandler
 from src.attachments.extract.handlers.html import HtmlHandler
 from src.attachments.extract.handlers.docx import DocxHandler
@@ -47,7 +49,9 @@ class TestHtml(unittest.TestCase):
 
 class TestOfficeHandlers(unittest.TestCase):
     def test_docx(self):
-        import docx
+        # Office parsers are optional; skip (don't error) when absent so the
+        # suite passes out of the box on a minimal install (#53, #44).
+        docx = pytest.importorskip("docx")
         d = docx.Document(); d.add_paragraph("Quarterly report up 12%")
         b = io.BytesIO(); d.save(b)
         h = DocxHandler()
@@ -58,7 +62,7 @@ class TestOfficeHandlers(unittest.TestCase):
         self.assertIn("Quarterly report", r.text)
 
     def test_xlsx(self):
-        import openpyxl
+        openpyxl = pytest.importorskip("openpyxl")
         wb = openpyxl.Workbook(); ws = wb.active; ws.append(["Item", "Cost"]); ws.append(["Widget", 42])
         b = io.BytesIO(); wb.save(b)
         r = XlsxHandler().extract(b.getvalue(), "application/octet-stream", "s.xlsx")
@@ -66,7 +70,7 @@ class TestOfficeHandlers(unittest.TestCase):
         self.assertIn("Widget", r.text)
 
     def test_pptx(self):
-        import pptx
+        pptx = pytest.importorskip("pptx")
         p = pptx.Presentation(); s = p.slides.add_slide(p.slide_layouts[5])
         s.shapes.title.text = "Roadmap 2026"
         b = io.BytesIO(); p.save(b)
