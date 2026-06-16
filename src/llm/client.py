@@ -29,13 +29,15 @@ def resolve_llm_api_base() -> str:
     Reads the **single canonical** variable ``RAG_LLM_API_BASE`` — the same one
     ``RAGConfig`` / ``Settings.llm`` use — so configuring the LLM once points
     *both* the LlamaIndex answer side and this cleanup client at the same server.
-    ``RAG_LLM_BASE_URL`` is kept as a legacy alias.
+    ``RAG_LLM_BASE_URL`` is kept as a legacy alias. A blank or whitespace-only
+    value is treated as unset (so it falls through to the alias / default rather
+    than yielding an empty URL).
     """
-    return (
-        os.getenv("RAG_LLM_API_BASE")
-        or os.getenv("RAG_LLM_BASE_URL")  # legacy alias
-        or "http://localhost:1234/v1"
-    ).strip()
+    for var in ("RAG_LLM_API_BASE", "RAG_LLM_BASE_URL"):  # canonical, then legacy alias
+        value = (os.getenv(var) or "").strip()
+        if value:
+            return value
+    return "http://localhost:1234/v1"
 
 
 def _resolve_api_key() -> str:
