@@ -182,6 +182,27 @@ class TestResolveLlmApiBase(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
 
+    # A whitespace-only value must be treated as unset (fall through to the
+    # alias / default), never yielding an empty URL. One scenario per test.
+    def test_blank_canonical_falls_through_to_legacy(self):
+        with mock.patch.dict(os.environ,
+                             {"RAG_LLM_API_BASE": "   ",
+                              "RAG_LLM_BASE_URL": "http://legacy:2/v1"}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://legacy:2/v1")
+
+    def test_blank_canonical_alone_falls_through_to_default(self):
+        with mock.patch.dict(os.environ, {"RAG_LLM_API_BASE": "  "}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
+
+    def test_blank_legacy_falls_through_to_default(self):
+        with mock.patch.dict(os.environ, {"RAG_LLM_BASE_URL": "  "}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
+
+    def test_both_blank_falls_through_to_default(self):
+        with mock.patch.dict(os.environ,
+                             {"RAG_LLM_API_BASE": " ", "RAG_LLM_BASE_URL": "  "}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
+
 
 if __name__ == "__main__":
     unittest.main()
