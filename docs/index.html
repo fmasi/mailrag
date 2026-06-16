@@ -124,7 +124,7 @@
       <div class="card"><h3>Thread-aware answers</h3><p>The flagship: match a single message, then answer from its <em>entire</em> conversation. Lifts recall@5 from <b>62% → 93%</b> — the single biggest lever, and it needs no LLM.</p></div>
       <div class="card"><h3>Hybrid retrieval</h3><p>bge-m3 dense + learned sparse vectors, RRF-fused in Qdrant. Gets both the concept <em>and</em> the rare exact token — acronyms, IDs, reference numbers.</p></div>
       <div class="card"><h3>Email-aware preprocessing</h3><p>Reply-chain stripping, calendar-invite collapsing, noise/newsletter filtering, and exact-text chunk dedup.</p></div>
-      <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Point it at a model on <code>127.0.0.1</code>.</p></div>
+      <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Local by default — but point it at <em>any</em> OpenAI-compatible server (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI) with one env var.</p></div>
       <div class="card"><h3>Pluggable loaders</h3><p>Public Enron corpus, local <code>.eml</code> archives, or Azure Blob — behind one <code>EmailLoader</code> interface, ready for live sources next.</p></div>
       <div class="card"><h3>Measured methodology</h3><p>A 360-query eval that prices every technique, controls for confounds, reports significance — and in several cases overturned the intuitive choice.</p></div>
     </div>
