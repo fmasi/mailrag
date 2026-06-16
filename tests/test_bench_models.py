@@ -33,6 +33,10 @@ class TestNativeApiBase(unittest.TestCase):
         # only a /v1 path segment is stripped, never a hostname that ends in v1
         self.assertEqual(native_api_base("http://hostv1:1234"), "http://hostv1:1234")
 
+    def test_v1_mid_path_preserved(self):
+        # /v1 not at the end is left untouched (only a trailing /v1 is stripped)
+        self.assertEqual(native_api_base("http://h:1234/v1/chat"), "http://h:1234/v1/chat")
+
 
 if __name__ == "__main__":
     unittest.main()
