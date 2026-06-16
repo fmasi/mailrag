@@ -191,6 +191,9 @@ class TestResolveLlmApiBase(unittest.TestCase):
             self.assertEqual(client.resolve_llm_api_base(), "http://legacy:2/v1")
         with mock.patch.dict(os.environ, {"RAG_LLM_API_BASE": "  "}, clear=True):
             self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
+        # a whitespace-only legacy alias must also fall through to the default
+        with mock.patch.dict(os.environ, {"RAG_LLM_BASE_URL": "  "}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
 
 
 if __name__ == "__main__":

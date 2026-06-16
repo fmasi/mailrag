@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # native /api/v0 stats endpoint, not the OpenAI-compatible path.
 from src.llm.client import resolve_llm_api_base
 
-BASE = resolve_llm_api_base().rstrip("/").removesuffix("v1").rstrip("/")
+BASE = resolve_llm_api_base().rstrip("/").removesuffix("/v1")
 KEY = os.getenv("RAG_LLM_API_KEY", "lm-studio")
 
 
