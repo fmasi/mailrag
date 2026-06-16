@@ -6,8 +6,8 @@ model-independent contexts.jsonl).
 Output: eval/out/e2e/answers_<modeltag>.json = {query: {setup: answer_text}}.
 Real content -> eval/out (gitignored).
 
-Run on the HOST (rag env; RAG_LLM_BASE_URL + .env key):
-  RAG_LLM_BASE_URL=http://localhost:1234/v1 RAG_ANSWER_MODEL=gemma-4-31b-it-mlx \
+Run on the HOST (rag env; RAG_LLM_API_BASE + .env key):
+  RAG_LLM_API_BASE=http://localhost:1234/v1 RAG_ANSWER_MODEL=gemma-4-31b-it-mlx \
     conda run -n rag --no-capture-output \
     python scripts/eval/e2e_answer.py --contexts eval/out/e2e/contexts.jsonl \
     --tag gemma31b | tee eval/out/e2e_answer_gemma31b.log

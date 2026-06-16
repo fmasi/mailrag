@@ -6,8 +6,8 @@ Reads eval/out/queries.jsonl, writes eval/out/hyde_queries.jsonl
 once and reused by diagnose_coverage.py + e2e_context.py across all HyDE arms.
 Real content -> eval/out (gitignored).
 
-Run on the HOST (rag env; RAG_LLM_BASE_URL + .env key):
-  RAG_LLM_BASE_URL=http://localhost:1234/v1 RAG_HYDE_MODEL=gemma-4-e4b-it \
+Run on the HOST (rag env; RAG_LLM_API_BASE + .env key):
+  RAG_LLM_API_BASE=http://localhost:1234/v1 RAG_HYDE_MODEL=gemma-4-e4b-it \
     conda run -n rag --no-capture-output python scripts/eval/gen_hyde.py \
     --queries eval/out/queries.jsonl --out eval/out/hyde_queries.jsonl \
     | tee eval/out/gen_hyde.log

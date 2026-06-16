@@ -6,8 +6,8 @@ gold_text and an answers_<tag>.json for the answers.
 Output: eval/out/e2e/grades_<tag>.json = {query: {setup: grade}} + a per-setup
 mean-grade summary to stdout. Real content -> eval/out (gitignored).
 
-Run on the HOST (rag env; RAG_LLM_BASE_URL + .env key; strong judge model):
-  RAG_LLM_BASE_URL=http://localhost:1234/v1 RAG_JUDGE_MODEL=gemma-4-26b-a4b-it-mlx@8bit \
+Run on the HOST (rag env; RAG_LLM_API_BASE + .env key; strong judge model):
+  RAG_LLM_API_BASE=http://localhost:1234/v1 RAG_JUDGE_MODEL=gemma-4-26b-a4b-it-mlx@8bit \
     conda run -n rag --no-capture-output python scripts/eval/e2e_judge.py \
     --contexts eval/out/e2e/contexts_v2.jsonl --answers eval/out/e2e/answers_pm.json \
     --tag pm | tee eval/out/e2e_judge_pm.log

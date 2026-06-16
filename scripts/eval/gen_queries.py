@@ -7,7 +7,7 @@ hypothesis-weighted. Generated from thread BODY content only (leakage guard). Ou
 (real content) -> eval/out (gitignored).
 
 Run on the HOST (rag env; QDRANT_URL + RAG_LLM_* set; .env loaded for keys):
-  QDRANT_URL=http://localhost:6333 RAG_LLM_BASE_URL=http://localhost:1234/v1 \
+  QDRANT_URL=http://localhost:6333 RAG_LLM_API_BASE=http://localhost:1234/v1 \
     conda run -n rag --no-capture-output \
     python scripts/eval/gen_queries.py --collection work-rag \
     --n-terse 48 --n-content 48 --n-spanning 24 --out eval/out/queries.jsonl
