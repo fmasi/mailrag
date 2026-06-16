@@ -21,11 +21,18 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Reuse the canonical endpoint resolver (RAG_LLM_API_BASE, legacy RAG_LLM_BASE_URL
-# fallback) from the production client. Strip /v1 — this tool hits LM Studio's
-# native /api/v0 stats endpoint, not the OpenAI-compatible path.
+# fallback) from the production client.
 from src.llm.client import resolve_llm_api_base
 
-BASE = resolve_llm_api_base().rstrip("/").removesuffix("/v1")
+
+def native_api_base(base: str) -> str:
+    """Drop the OpenAI-compatible ``/v1`` to get the host for LM Studio's native
+    ``/api/v0`` stats endpoint. Handles a trailing slash; leaves a hostname that
+    merely ends in ``v1`` intact (only a ``/v1`` path segment is stripped)."""
+    return base.rstrip("/").removesuffix("/v1")
+
+
+BASE = native_api_base(resolve_llm_api_base())
 KEY = os.getenv("RAG_LLM_API_KEY", "lm-studio")
 
 
