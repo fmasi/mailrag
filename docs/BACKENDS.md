@@ -176,7 +176,7 @@ QDRANT_URL=http://localhost:6333
 RAG_LLM_PROVIDER=lmstudio
 RAG_LLM_API_BASE=https://integrate.api.nvidia.com/v1
 RAG_LLM_MODEL=meta/llama-3.1-8b-instruct
-RAG_LLM_API_KEY=${NVIDIA_API_KEY}
+RAG_LLM_API_KEY=nvapi-...             # your build.nvidia.com key
 ```
 
 **Ollama LLM (local):**
