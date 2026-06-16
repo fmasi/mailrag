@@ -26,6 +26,9 @@ matches how deep you want to go.
 
 ## Operations & reference
 
+- **[`BACKENDS.md`](BACKENDS.md)** — pointing mailrag at the LLM / embedder / vector store of
+  your choice (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI, Qdrant): the `RAG_*` variables,
+  per-backend examples, and the dense-only "sparse caveat".
 - **[`CLOUD_STORAGE_SETUP.md`](CLOUD_STORAGE_SETUP.md)** — Azure Blob Storage + Qdrant Cloud
   (Pinecone optional): batch indexing, cost estimates, validation, and reset.
 - **[`POETRY_MIGRATION.md`](POETRY_MIGRATION.md)** — Poetry dependency-management notes.
