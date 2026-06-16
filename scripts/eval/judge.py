@@ -7,8 +7,8 @@ Default: grade all (query, email) pairs in pool.jsonl -> grades.json
   calib_pairs.jsonl (one {query, message_id, email_text} per line) for the
   reference (Opus) judge to grade with the SAME rubric.
 
-Run on the HOST (rag env; RAG_LLM_BASE_URL + .env key; pick the strong judge model):
-  RAG_LLM_BASE_URL=http://localhost:1234/v1 RAG_JUDGE_MODEL=gemma-4-31b-it-mlx \
+Run on the HOST (rag env; RAG_LLM_API_BASE + .env key; pick the strong judge model):
+  RAG_LLM_API_BASE=http://localhost:1234/v1 RAG_JUDGE_MODEL=gemma-4-31b-it-mlx \
     conda run -n rag --no-capture-output \
     python scripts/eval/judge.py --pool eval/out/pool.jsonl --out eval/out/grades.json \
     | tee eval/out/judge.log

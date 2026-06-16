@@ -23,7 +23,7 @@ import threading
 _CONTEXT_WINDOW = 32768
 
 
-def _resolve_base_url() -> str:
+def resolve_llm_api_base() -> str:
     """The configured chat endpoint, local-first by default.
 
     Reads the **single canonical** variable ``RAG_LLM_API_BASE`` — the same one
@@ -90,7 +90,7 @@ class _LLMClient:
 
 def make_client() -> _LLMClient:
     """Build the unified LLM client for the configured chat endpoint."""
-    return _LLMClient(_resolve_base_url(), _resolve_api_key())
+    return _LLMClient(resolve_llm_api_base(), _resolve_api_key())
 
 
 def default_model() -> str:

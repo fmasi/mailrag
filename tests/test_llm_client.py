@@ -163,5 +163,25 @@ class TestMakeClientConfig(unittest.TestCase):
         self.assertEqual(self._base(c), "http://localhost:1234/v1")
 
 
+class TestResolveLlmApiBase(unittest.TestCase):
+    """The public endpoint resolver (shared by make_client and the eval tools,
+    e.g. scripts/eval/bench_models.py). Canonical RAG_LLM_API_BASE wins; legacy
+    RAG_LLM_BASE_URL is honored as a fallback; default is local-first."""
+
+    def test_prefers_canonical_over_legacy(self):
+        with mock.patch.dict(os.environ,
+                             {"RAG_LLM_API_BASE": "http://canon:9/v1",
+                              "RAG_LLM_BASE_URL": "http://legacy:2/v1"}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://canon:9/v1")
+
+    def test_legacy_alias_fallback(self):
+        with mock.patch.dict(os.environ, {"RAG_LLM_BASE_URL": "http://legacy:2/v1"}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://legacy:2/v1")
+
+    def test_local_first_default(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
+
+
 if __name__ == "__main__":
     unittest.main()

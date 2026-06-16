@@ -11,7 +11,7 @@ sha256 (+ message_id/content_sha256) so build_local_eml_rag --summary-cache inje
 it. Emits a tqdm progress bar. Real content -> ~/rag_pass2 + eval/out (gitignored).
 
 Run on the HOST (rag env; LM Studio loaded with the summary model):
-  RAG_LLM_BASE_URL=http://localhost:1234/v1 RAG_SUMMARY_MODEL=<model> \\
+  RAG_LLM_API_BASE=http://localhost:1234/v1 RAG_SUMMARY_MODEL=<model> \\
     conda run -n rag --no-capture-output python scripts/eval/gen_thread_summaries.py \\
     --slice eval/out/spike_slice.txt --mode thread --out ~/rag_pass2/spike_A.db \\
     | tee eval/out/gen_thread_summaries.log

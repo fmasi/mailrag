@@ -17,7 +17,12 @@ try:
 except ImportError:
     pass
 
-BASE = os.getenv("RAG_LLM_BASE_URL", "http://localhost:1234/v1").replace("/v1", "")
+# Reuse the canonical endpoint resolver (RAG_LLM_API_BASE, legacy RAG_LLM_BASE_URL
+# fallback) from the production client. Strip /v1 — this tool hits LM Studio's
+# native /api/v0 stats endpoint, not the OpenAI-compatible path.
+from src.llm.client import resolve_llm_api_base
+
+BASE = resolve_llm_api_base().replace("/v1", "")
 KEY = os.getenv("RAG_LLM_API_KEY", "lm-studio")
 
 
