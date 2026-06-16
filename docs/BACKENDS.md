@@ -11,7 +11,8 @@ local or cloud. The short version:
   on real email — see [`EXPERIMENTS.md`](EXPERIMENTS.md)). You *can* swap in a
   remote OpenAI-compatible embedder, with **one honest caveat**: it's dense-only
   (see [The sparse caveat](#the-sparse-caveat)).
-- **Vector store — Qdrant** (local Docker or managed), behind a single client seam.
+- **Vector store — Qdrant** (local Docker or managed; or in-memory `simple` for
+  quick evaluation), behind a single client seam.
 
 `mailrag` is local-first: the defaults run entirely on your machine, and every
 cloud option is opt-in. Copy [`.env.example`](../.env.example) to `.env` and set
@@ -48,7 +49,7 @@ one server:
 
 | Backend | `RAG_LLM_PROVIDER` | `RAG_LLM_API_BASE` | Key | Example `RAG_LLM_MODEL` |
 |---------|-------------------|--------------------|-----|--------------------------|
-| **LM Studio** (local, default) | `lmstudio` | `http://localhost:1234/v1` ¹ | LM Studio API token (if auth on) | `mistralai/magistral-small-2509` |
+| **LM Studio** (local) | `lmstudio` | `http://localhost:1234/v1` ¹ | LM Studio API token (if auth on) | `mistralai/magistral-small-2509` |
 | **Ollama** (local) | `lmstudio` | `http://localhost:11434/v1` | any non-empty string | `llama3.1` |
 | **vLLM** (self-hosted) | `lmstudio` | `http://<host>:8000/v1` | your token | the served model id |
 | **NVIDIA NIM** (hosted) | `lmstudio` | `https://integrate.api.nvidia.com/v1` | `$NVIDIA_API_KEY` | `meta/llama-3.1-8b-instruct` |
@@ -57,10 +58,14 @@ one server:
 
 ¹ Inside a devcontainer, reach the host with `http://host.docker.internal:1234/v1`.
 
+> **Heads-up on the default.** The *code* default is `RAG_LLM_PROVIDER=openai`
+> (it expects `OPENAI_API_KEY`). For a fully local run, set
+> `RAG_LLM_PROVIDER=lmstudio` explicitly — as every example below does.
+
 > **Vision / OCR.** The attachment OCR path (`chat_vision`) sends an inline image
 > to the chat endpoint, so it needs a **multimodal** model loaded (e.g. a Gemma-3/4
 > vision build in LM Studio, or `meta/llama-3.2-11b-vision-instruct` on NIM). Text
-> models silently ignore the image.
+> models may return an error or silently ignore the image.
 
 ---
 
@@ -140,7 +145,7 @@ The reranker is injectable, so you can supply either to `build_hybrid_searcher`.
 
 | Variable | Meaning |
 |----------|---------|
-| `VECTOR_STORE_PROVIDER` | `qdrant` (default), `simple` (local files), or `pinecone` (legacy). |
+| `VECTOR_STORE_PROVIDER` | `qdrant` (what the quickstart uses — set in `.env.example`), `simple` (in-memory/local; the code default), or `pinecone` (legacy — the query path is Qdrant-only). |
 | `QDRANT_URL` | `http://localhost:6333` (the quickstart's local Docker Qdrant) or a managed Qdrant Cloud URL. |
 | `QDRANT_API_KEY` | set for managed Qdrant. |
 | `QDRANT_COLLECTION_NAME` | collection to read/write. |
@@ -153,7 +158,7 @@ so swapping local ↔ cloud is a single URL change. See
 
 ## Worked `.env` examples
 
-**All-local (the default):** LM Studio LLM, local bge-m3 hybrid embeddings, local Qdrant.
+**All-local (recommended):** LM Studio LLM, local bge-m3 hybrid embeddings, local Qdrant.
 
 ```bash
 RAG_LLM_PROVIDER=lmstudio
