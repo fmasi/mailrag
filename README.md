@@ -314,9 +314,12 @@ easier for agents to reach, and keep its memory current:
 - **Live ingestion** — move from one-time imports to incremental ingest of incoming mail, so
   the index stays current: a *living* context source, not a static snapshot. (The
   `EmailLoader` interface is already source-agnostic to make this clean.)
-- **Guided TUI** ([#36](https://github.com/fmasi/mailrag/issues/36)) — a full-screen terminal
-  UI for the cleanup pipeline (pick a persona, watch the funnel, approve the calibrate gate),
-  replacing today's prompt-by-prompt flow.
+- **Guided TUI** ([#36](https://github.com/fmasi/mailrag/issues/36)) — ✅ shipped:
+  `mailrag wizard` is now a full-screen terminal app ([Textual](https://textual.textualize.io/)):
+  pick a persona, scope folders on a tree, review the plan, and watch the run live — with the
+  calibrate and confirm-before-spend gates as dialogs (see
+  [`docs/GUIDE.md`](docs/GUIDE.md#what-to-expect-from-the-wizard)). The old prompt flow
+  remains as `--classic`; `mailrag run` stays the headless path.
 
 ## Built by Frédéric Masi
 
