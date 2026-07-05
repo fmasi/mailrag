@@ -1,4 +1,5 @@
 """Tests for the bench_models eval tool's pure helper (no LM Studio needed)."""
+
 import importlib
 import os
 import unittest
@@ -7,6 +8,7 @@ import unittest
 # imports from src.*; import via importlib so a missing dep skips cleanly.
 try:
     import sys
+
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     _mod = importlib.import_module("scripts.eval.bench_models")
     native_api_base = _mod.native_api_base
@@ -16,7 +18,9 @@ except Exception as _import_err:  # noqa: BLE001
     _import_err_msg = str(_import_err)
 
 
-@unittest.skipUnless(_IMPORT_OK, f"bench_models not importable: {'' if _IMPORT_OK else _import_err_msg}")  # type: ignore[name-defined]
+@unittest.skipUnless(
+    _IMPORT_OK, f"bench_models not importable: {'' if _IMPORT_OK else _import_err_msg}"
+)  # type: ignore[name-defined]
 class TestNativeApiBase(unittest.TestCase):
     """Strips the OpenAI-compatible /v1 to reach LM Studio's native /api/v0 host."""
 

@@ -1,8 +1,12 @@
 """Interactive folder-selection stage. Pure rule logic is in ingest/selection.py;
 this is the thin glue that runs the picker and writes rules onto the profile."""
+
 from __future__ import annotations
+
 from src.ingest.selection import (
-    list_eml_relpaths, discover_structure, prompt_guided_selection,
+    discover_structure,
+    list_eml_relpaths,
+    prompt_guided_selection,
 )
 
 

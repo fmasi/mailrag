@@ -11,11 +11,12 @@ from llama_index.core import Document
 
 from .threading import compute_thread_id
 
-
 _MAX_SENDER_LEN = 256
 _MAX_SUBJECT_LEN = 512
 _MAX_RECIPIENT_PREVIEW_LEN = 512
-_MAX_RECIPIENT_FULL_LEN = 8192  # Keep some full data but trim to fit Pinecone's 40KB limit per vector
+_MAX_RECIPIENT_FULL_LEN = (
+    8192  # Keep some full data but trim to fit Pinecone's 40KB limit per vector
+)
 _MAX_SUMMARY_LEN = 1024
 
 
@@ -64,9 +65,7 @@ class NormalizedEmail:
             )
             metadata["to_full"] = _truncate(self.recipients, _MAX_RECIPIENT_FULL_LEN)
         if self.cc:
-            metadata["cc"] = _truncate(
-                _addresses_preview(self.cc), _MAX_RECIPIENT_PREVIEW_LEN
-            )
+            metadata["cc"] = _truncate(_addresses_preview(self.cc), _MAX_RECIPIENT_PREVIEW_LEN)
             metadata["cc_full"] = _truncate(self.cc, _MAX_RECIPIENT_FULL_LEN)
 
         # Thread linkage (RFC 5322). thread_id groups an entire conversation and
@@ -77,7 +76,9 @@ class NormalizedEmail:
         # fall back to a "subj:<slug>" key instead of persisting an empty string
         # that breaks thread-aware retrieval.
         metadata["thread_id"] = compute_thread_id(
-            self.message_id or "", self.in_reply_to or "", self.references or "",
+            self.message_id or "",
+            self.in_reply_to or "",
+            self.references or "",
             subject=self.subject or "",
         )
         if self.message_id:
@@ -85,9 +86,7 @@ class NormalizedEmail:
         if self.in_reply_to:
             metadata["in_reply_to"] = self.in_reply_to
         if self.references:
-            metadata["references"] = _truncate(
-                self.references, _MAX_RECIPIENT_FULL_LEN
-            )
+            metadata["references"] = _truncate(self.references, _MAX_RECIPIENT_FULL_LEN)
 
         if self.summary:
             metadata["summary"] = _truncate(self.summary, _MAX_SUMMARY_LEN)

@@ -6,8 +6,7 @@ from src import cli
 
 class TestRunVerb(unittest.TestCase):
     def test_unknown_persona_exits_2(self):
-        self.assertEqual(
-            cli.main(["run", "--profile", "p.json", "--persona", "nope"]), 2)
+        self.assertEqual(cli.main(["run", "--profile", "p.json", "--persona", "nope"]), 2)
 
     def test_llm_verify_is_runnable(self):
         # judge + prune now exist, so llm-verify dispatches end-to-end.
@@ -19,11 +18,11 @@ class TestRunVerb(unittest.TestCase):
             recorded["handler_keys"] = set(handlers)
             return []
 
-        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
-             mock.patch("src.cli.persona_executor.run_persona",
-                        side_effect=fake_run_persona):
-            rc = cli.main(["run", "--profile", "p.json", "--persona", "llm-verify",
-                           "--model", "m"])
+        with (
+            mock.patch("src.cli.CorpusProfile.load", return_value=prof),
+            mock.patch("src.cli.persona_executor.run_persona", side_effect=fake_run_persona),
+        ):
+            rc = cli.main(["run", "--profile", "p.json", "--persona", "llm-verify", "--model", "m"])
         self.assertEqual(rc, 0)
         self.assertEqual(recorded["persona"], "llm-verify")
         self.assertIn("judge", recorded["handler_keys"])
@@ -42,9 +41,10 @@ class TestRunVerb(unittest.TestCase):
             recorded["handler_keys"] = set(handlers)
             return []
 
-        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
-             mock.patch("src.cli.persona_executor.run_persona",
-                        side_effect=fake_run_persona):
+        with (
+            mock.patch("src.cli.CorpusProfile.load", return_value=prof),
+            mock.patch("src.cli.persona_executor.run_persona", side_effect=fake_run_persona),
+        ):
             rc = cli.main(["run", "--profile", "p.json", "--persona", "llm-none"])
         self.assertEqual(rc, 0)
         self.assertEqual(recorded["persona"], "llm-none")
@@ -67,14 +67,15 @@ class TestWizardVerb(unittest.TestCase):
 class TestRunLimit(unittest.TestCase):
     def test_run_passes_limit_to_build_handlers(self):
         prof = mock.Mock()
-        handlers = {v: (lambda p, **k: None) for v in
-                    ("scope", "measure", "scan", "tag", "prune", "index")}
-        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
-             mock.patch("src.cli.persona_runner.build_handlers",
-                        return_value=handlers) as bh, \
-             mock.patch("src.cli.persona_executor.run_persona", return_value=[]):
-            rc = cli.main(["run", "--profile", "p.json", "--persona", "llm-none",
-                           "--limit", "15"])
+        handlers = {
+            v: (lambda p, **k: None) for v in ("scope", "measure", "scan", "tag", "prune", "index")
+        }
+        with (
+            mock.patch("src.cli.CorpusProfile.load", return_value=prof),
+            mock.patch("src.cli.persona_runner.build_handlers", return_value=handlers) as bh,
+            mock.patch("src.cli.persona_executor.run_persona", return_value=[]),
+        ):
+            rc = cli.main(["run", "--profile", "p.json", "--persona", "llm-none", "--limit", "15"])
         self.assertEqual(rc, 0)
         self.assertEqual(bh.call_args.kwargs["limit"], 15)
 
@@ -82,10 +83,22 @@ class TestRunLimit(unittest.TestCase):
 class TestBuildHandlers(unittest.TestCase):
     def test_exposes_implemented_verbs_only(self):
         from src.persona.runner import build_handlers
+
         keys = set(build_handlers(profile_path="p.json", model="m"))
         self.assertEqual(
-            keys, {"scope", "measure", "tag", "scan", "calibrate", "summarize",
-                   "index", "judge", "prune"})
+            keys,
+            {
+                "scope",
+                "measure",
+                "tag",
+                "scan",
+                "calibrate",
+                "summarize",
+                "index",
+                "judge",
+                "prune",
+            },
+        )
 
 
 if __name__ == "__main__":

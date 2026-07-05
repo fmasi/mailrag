@@ -21,6 +21,7 @@ Configuration mirrors the CLI ``mailrag ask`` path:
 The LLM used by ``answer_question`` is the unified ``Settings.llm`` stack
 configured through the usual ``RAG_*`` env vars (see ``src.llm.client``).
 """
+
 from __future__ import annotations
 
 import os
@@ -45,11 +46,7 @@ def resolve_collection(collection: Optional[str] = None) -> str:
     manifest. Raises ``ValueError`` with an actionable message when none is
     available (so the MCP client sees a clear error rather than a crash).
     """
-    coll = (
-        collection
-        or os.environ.get("MAILRAG_COLLECTION")
-        or latest_manifest_collection()
-    )
+    coll = collection or os.environ.get("MAILRAG_COLLECTION") or latest_manifest_collection()
     if not coll:
         raise ValueError(
             "no email collection configured: set MAILRAG_COLLECTION or run "
@@ -139,9 +136,7 @@ def answer_question(query: str, k: int = 3, *, searcher=None) -> dict:
     searcher = searcher or get_searcher()
     contexts = searcher.search_threads(query)
     answer = answer_from_threads(query, contexts, k=k)
-    sources = [
-        {"thread_id": c.thread_id, "subject": c.subject} for c in contexts[:k]
-    ]
+    sources = [{"thread_id": c.thread_id, "subject": c.subject} for c in contexts[:k]]
     return {"answer": answer, "sources": sources}
 
 

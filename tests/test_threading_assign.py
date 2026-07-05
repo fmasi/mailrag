@@ -1,10 +1,10 @@
 import unittest
+
 from src.data.threading import assign_subject_fallback_thread_ids
 
 
 class _Email:
-    def __init__(self, subject="", thread_id=None, message_id="", in_reply_to="",
-                 references=""):
+    def __init__(self, subject="", thread_id=None, message_id="", in_reply_to="", references=""):
         self.subject = subject
         self.thread_id = thread_id
         self.message_id = message_id

@@ -12,6 +12,7 @@ Two adapters:
 The underlying ``BgeM3Embedder`` lazily imports FlagEmbedding only on first encode,
 so importing this module is safe in the (FlagEmbedding-free) unit-test env.
 """
+
 from typing import TYPE_CHECKING, Callable, List, Tuple
 
 from llama_index.core.bridge.pydantic import PrivateAttr

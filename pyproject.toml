@@ -76,3 +76,70 @@ addopts = "-m 'not integration'"
 markers = [
 	"integration: needs live Qdrant + LLM + bge-m3 (deselected by default)",
 ]
+
+# --- Ruff: lint + format -----------------------------------------------------
+# Conservative, formatter-friendly config. line-length matches the codebase
+# (most lines already sit under 100). The formatter reflows code; the linter
+# handles imports (I), pyflakes (F), pycodestyle errors/warnings (E/W).
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+	# E501 (line too long): the formatter already wraps code; the residual
+	# offenders are long string literals / comments / URLs that ruff format
+	# deliberately never splits. Enforcing it here would only add noqa noise.
+	"E501",
+	# E741 (ambiguous var name, e.g. `l`): a handful of short-lived loop
+	# variables in product + test code. Renaming them is a behaviour-neutral
+	# but noisy churn we skip in this CI-only change; it is purely stylistic.
+	"E741",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Deliberate late (non-top-of-file) imports to sidestep import cycles / keep a
+# module's public helpers defined before the integration imports that use them.
+"src/data/loaders/mail_archive_x.py" = ["E402"]
+"tests/test_summary_rerank.py" = ["E402"]
+# Standalone eval scripts bootstrap sys.path / os.chdir / offline env vars
+# BEFORE importing src.*, so their imports intentionally sit below that setup.
+"scripts/**" = ["E402"]
+
+# --- mypy: lenient type-check gate -------------------------------------------
+# Deliberately NOT strict: this repo was never annotated end-to-end, so the gate
+# only checks the annotations that DO exist and never fails on third-party libs
+# that ship no stubs (ignore_missing_imports). It is a regression guard, not a
+# push toward full typing.
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Untyped defs are fine (most of the codebase); we only type-check bodies where
+# annotations are present, so partially-typed modules still pass cleanly.
+check_untyped_defs = false
+warn_unused_ignores = false
+warn_redundant_casts = false
+files = ["src"]
+
+# Pre-existing type-debt: these modules were written before any typing pass and
+# trip mypy on Optional-vs-required args, invariant dicts, and library return
+# types. Properly annotating them is a code change out of scope for this
+# CI-only PR, so we silence errors per-module (the other ~88 modules stay fully
+# checked, so the gate still catches regressions in new/clean code).
+[[tool.mypy.overrides]]
+module = [
+	"src.config.settings",
+	"src.data.models",
+	"src.data.noise_filter",
+	"src.data.loaders.mail_archive_x",
+	"src.data.loaders.azure_blob",
+	"src.eval.metrics",
+	"src.indexing.contextual_index",
+	"src.ingest.embedder",
+	"src.llm.summary",
+	"src.pipeline.prune",
+	"src.query.summary_rerank",
+	"src.storage.persist",
+]
+ignore_errors = true

@@ -6,6 +6,7 @@ Keyed by the sha256 of the raw ``.eml`` bytes (the same hash space as
 rebuilds. The heavy LLM sweep writes here once; dry-run, apply, and the build
 all read from it.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -49,9 +50,7 @@ class Pass2Cache:
         for col in _IDENTITY_COLUMNS:
             if col not in existing:
                 self._conn.execute(f"ALTER TABLE pass2 ADD COLUMN {col} TEXT")
-            self._conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_pass2_{col} ON pass2({col})"
-            )
+            self._conn.execute(f"CREATE INDEX IF NOT EXISTS idx_pass2_{col} ON pass2({col})")
 
     def close(self) -> None:
         self._conn.close()
@@ -64,9 +63,14 @@ class Pass2Cache:
         cur = self._conn.execute("SELECT * FROM pass2 WHERE sha256=?", (sha256,))
         return cur.fetchone()
 
-    def put(self, sha256: str, record: Dict, model: str = "",
-            message_id: Optional[str] = None,
-            content_sha256: Optional[str] = None) -> None:
+    def put(
+        self,
+        sha256: str,
+        record: Dict,
+        model: str = "",
+        message_id: Optional[str] = None,
+        content_sha256: Optional[str] = None,
+    ) -> None:
         self._conn.execute(
             """INSERT OR REPLACE INTO pass2
                (sha256, summary, is_noise, confidence, reason, model, created_at,
@@ -86,8 +90,9 @@ class Pass2Cache:
         )
         self._conn.commit()
 
-    def get_resilient(self, sha256: str, message_id: Optional[str] = None,
-                      content_sha256: Optional[str] = None) -> Optional[sqlite3.Row]:
+    def get_resilient(
+        self, sha256: str, message_id: Optional[str] = None, content_sha256: Optional[str] = None
+    ) -> Optional[sqlite3.Row]:
         """Look up a row by exact file hash, then by stable fallback identifiers.
 
         Order is deliberate: an exact file-bytes match is authoritative; only
@@ -111,8 +116,9 @@ class Pass2Cache:
                 return row
         return None
 
-    def set_identity(self, sha256: str, message_id: Optional[str],
-                     content_sha256: Optional[str]) -> None:
+    def set_identity(
+        self, sha256: str, message_id: Optional[str], content_sha256: Optional[str]
+    ) -> None:
         """Backfill the stable identifiers on an existing row (no LLM cost)."""
         self._conn.execute(
             "UPDATE pass2 SET message_id=?, content_sha256=? WHERE sha256=?",
@@ -122,8 +128,7 @@ class Pass2Cache:
 
     def iter_noise(self, min_confidence: float = 0.0) -> Iterator[sqlite3.Row]:
         yield from self._conn.execute(
-            "SELECT * FROM pass2 WHERE is_noise=1 AND confidence>=? "
-            "ORDER BY confidence DESC",
+            "SELECT * FROM pass2 WHERE is_noise=1 AND confidence>=? ORDER BY confidence DESC",
             (min_confidence,),
         )
 
@@ -134,5 +139,4 @@ class Pass2Cache:
         row = self._conn.execute(
             "SELECT COUNT(*) AS total, COALESCE(SUM(is_noise),0) AS noise FROM pass2"
         ).fetchone()
-        return {"total": row["total"], "noise": row["noise"],
-                "kept": row["total"] - row["noise"]}
+        return {"total": row["total"], "noise": row["noise"], "kept": row["total"] - row["noise"]}

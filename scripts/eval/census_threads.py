@@ -10,6 +10,7 @@ Run on the HOST (rag env, QDRANT_URL set):
     python scripts/eval/census_threads.py --collection work-rag \
     --out eval/out/census.json | tee eval/out/census.log
 """
+
 import argparse
 import json
 import os
@@ -18,7 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.query.hybrid import _qdrant_client
-from src.query.thread_expand import group_into_emails, render_thread, estimate_tokens
+from src.query.thread_expand import estimate_tokens, group_into_emails, render_thread
 
 _PAGE = 512
 
@@ -37,8 +38,11 @@ def run(collection, out_path):
     total_points = 0
     while True:
         points, offset = client.scroll(
-            collection_name=collection, limit=_PAGE,
-            with_payload=True, with_vectors=False, offset=offset,
+            collection_name=collection,
+            limit=_PAGE,
+            with_payload=True,
+            with_vectors=False,
+            offset=offset,
         )
         for p in points:
             total_points += 1
@@ -53,7 +57,8 @@ def run(collection, out_path):
         emails = group_into_emails(payloads)
         sizes.append(len(emails))
         tokens.append(estimate_tokens(render_thread(tid, emails)))
-    sizes.sort(); tokens.sort()
+    sizes.sort()
+    tokens.sort()
     n = len(sizes)
     over = {b: sum(1 for t in tokens if t > b) for b in (4000, 8000, 16000)}
     report = {
@@ -64,12 +69,16 @@ def run(collection, out_path):
         "singleton_pct": round(100 * sum(1 for s in sizes if s == 1) / n, 1) if n else 0,
         "emails_per_thread": {
             "mean": round(sum(sizes) / n, 2) if n else 0,
-            "p50": _percentile(sizes, 0.50), "p90": _percentile(sizes, 0.90),
-            "p99": _percentile(sizes, 0.99), "max": sizes[-1] if sizes else 0,
+            "p50": _percentile(sizes, 0.50),
+            "p90": _percentile(sizes, 0.90),
+            "p99": _percentile(sizes, 0.99),
+            "max": sizes[-1] if sizes else 0,
         },
         "assembled_tokens": {
-            "p50": _percentile(tokens, 0.50), "p90": _percentile(tokens, 0.90),
-            "p99": _percentile(tokens, 0.99), "max": tokens[-1] if tokens else 0,
+            "p50": _percentile(tokens, 0.50),
+            "p90": _percentile(tokens, 0.90),
+            "p99": _percentile(tokens, 0.99),
+            "max": tokens[-1] if tokens else 0,
         },
         "threads_over_budget": over,
         "pct_over_budget": {str(b): round(100 * c / n, 2) if n else 0 for b, c in over.items()},

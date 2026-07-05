@@ -31,15 +31,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.config.settings import RAGConfig  # noqa: E402
 
-CHECKPOINT_FILE = os.path.join(
-    os.path.dirname(__file__), ".vector_batch_checkpoint.txt"
-)
+CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), ".vector_batch_checkpoint.txt")
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Reset Qdrant vectors and clear batch checkpoint."
-    )
+    parser = argparse.ArgumentParser(description="Reset Qdrant vectors and clear batch checkpoint.")
     parser.add_argument(
         "--yes",
         action="store_true",
@@ -195,10 +191,7 @@ def main() -> None:
         exists = client.collection_exists(collection_name=collection_name)
         if not exists:
             if not args.drop_schema:
-                print(
-                    f"✓ Collection '{collection_name}' does not exist. "
-                    "Nothing to clear."
-                )
+                print(f"✓ Collection '{collection_name}' does not exist. Nothing to clear.")
             else:
                 print(f"✓ Collection '{collection_name}' does not exist (already clean)")
         else:

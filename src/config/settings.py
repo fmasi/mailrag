@@ -8,7 +8,6 @@ without changing other parts of the codebase.
 """
 
 import os
-from typing import Optional
 
 from llama_index.core import Settings
 
@@ -16,23 +15,23 @@ from llama_index.core import Settings
 class RAGConfig:
     """
     Centralized configuration for the Email RAG system.
-    
+
     This class manages all configuration parameters and provides methods
     to initialize the LlamaIndex Settings object with the appropriate
     LLM and embedding models.
     """
-    
+
     # Storage and data paths
     STORAGE_DIR: str = "./storage"
     DATA_CACHE_DIR: str = "./data_cache"
-    
+
     # LLM Configuration
     LLM_PROVIDER: str = "openai"  # Options: "openai", "perplexity", or "lmstudio"
     LLM_MODEL: str = "gpt-3.5-turbo"
     LLM_TEMPERATURE: float = 0.7
     LLM_API_BASE: str = "https://api.openai.com/v1"
     LLM_API_KEY: str = ""
-    
+
     # Embedding Configuration
     EMBEDDING_PROVIDER: str = "openai"  # Options: "openai" or "lmstudio"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
@@ -41,20 +40,20 @@ class RAGConfig:
     EMBEDDING_BATCH_SIZE: int = 100
     EMBEDDING_NUM_WORKERS: int = 1
     EMBEDDING_TIMEOUT: int = 1800  # seconds; covers LM Studio cold-start (model load)
-    
+
     # Dataset Configuration
     DATASET_NAME: str = "MichaelR207/enron_qa_0922"
     DATASET_SPLIT: str = "train"
-    
+
     # Chunking and indexing parameters
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 64
-    
+
     # Azure Blob Storage (Phase 1)
     AZURE_STORAGE_CONNECTION_STRING: str = ""
     AZURE_BLOB_CONTAINER: str = "eml-archive"
     AZURE_BLOB_PREFIX: str = ""
-    
+
     # Vector Store Configuration (Phase 2)
     VECTOR_STORE_PROVIDER: str = "simple"  # "simple", "pinecone", or "qdrant"
     PINECONE_API_KEY: str = ""
@@ -63,7 +62,7 @@ class RAGConfig:
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION_NAME: str = "mailrag-demo"
     QDRANT_PREFER_GRPC: bool = False
-    
+
     @staticmethod
     def load_from_env() -> None:
         """
@@ -166,18 +165,14 @@ class RAGConfig:
         RAGConfig.EMBEDDING_API_BASE = _env_str(
             "RAG_EMBEDDING_API_BASE", RAGConfig.EMBEDDING_API_BASE
         )
-        RAGConfig.EMBEDDING_API_KEY = _env_str(
-            "RAG_EMBEDDING_API_KEY", RAGConfig.EMBEDDING_API_KEY
-        )
+        RAGConfig.EMBEDDING_API_KEY = _env_str("RAG_EMBEDDING_API_KEY", RAGConfig.EMBEDDING_API_KEY)
         RAGConfig.EMBEDDING_BATCH_SIZE = _env_int(
             "RAG_EMBEDDING_BATCH_SIZE", RAGConfig.EMBEDDING_BATCH_SIZE
         )
         RAGConfig.EMBEDDING_NUM_WORKERS = _env_int(
             "RAG_EMBEDDING_NUM_WORKERS", RAGConfig.EMBEDDING_NUM_WORKERS
         )
-        RAGConfig.EMBEDDING_TIMEOUT = _env_int(
-            "RAG_EMBEDDING_TIMEOUT", RAGConfig.EMBEDDING_TIMEOUT
-        )
+        RAGConfig.EMBEDDING_TIMEOUT = _env_int("RAG_EMBEDDING_TIMEOUT", RAGConfig.EMBEDDING_TIMEOUT)
         RAGConfig.CHUNK_SIZE = _env_int("RAG_CHUNK_SIZE", RAGConfig.CHUNK_SIZE)
         RAGConfig.CHUNK_OVERLAP = _env_int("RAG_CHUNK_OVERLAP", RAGConfig.CHUNK_OVERLAP)
         RAGConfig.LLM_TEMPERATURE = _env_float("RAG_LLM_TEMPERATURE", RAGConfig.LLM_TEMPERATURE)
@@ -189,14 +184,10 @@ class RAGConfig:
         RAGConfig.AZURE_BLOB_CONTAINER = _env_str(
             "AZURE_BLOB_CONTAINER", RAGConfig.AZURE_BLOB_CONTAINER
         )
-        RAGConfig.AZURE_BLOB_PREFIX = _env_str(
-            "AZURE_BLOB_PREFIX", RAGConfig.AZURE_BLOB_PREFIX
-        )
+        RAGConfig.AZURE_BLOB_PREFIX = _env_str("AZURE_BLOB_PREFIX", RAGConfig.AZURE_BLOB_PREFIX)
 
         # Vector Store Provider
-        vector_provider = _env_str(
-            "VECTOR_STORE_PROVIDER", RAGConfig.VECTOR_STORE_PROVIDER
-        ).lower()
+        vector_provider = _env_str("VECTOR_STORE_PROVIDER", RAGConfig.VECTOR_STORE_PROVIDER).lower()
         if vector_provider in {"simple", "pinecone", "qdrant"}:
             RAGConfig.VECTOR_STORE_PROVIDER = vector_provider
         else:
@@ -204,9 +195,7 @@ class RAGConfig:
                 f"Warning: Invalid VECTOR_STORE_PROVIDER='{vector_provider}'. "
                 f"Using default '{RAGConfig.VECTOR_STORE_PROVIDER}'."
             )
-        RAGConfig.PINECONE_API_KEY = _env_str(
-            "PINECONE_API_KEY", RAGConfig.PINECONE_API_KEY
-        )
+        RAGConfig.PINECONE_API_KEY = _env_str("PINECONE_API_KEY", RAGConfig.PINECONE_API_KEY)
         RAGConfig.PINECONE_INDEX_NAME = _env_str(
             "PINECONE_INDEX_NAME", RAGConfig.PINECONE_INDEX_NAME
         )
@@ -215,10 +204,8 @@ class RAGConfig:
         RAGConfig.QDRANT_COLLECTION_NAME = _env_str(
             "QDRANT_COLLECTION_NAME", RAGConfig.QDRANT_COLLECTION_NAME
         )
-        RAGConfig.QDRANT_PREFER_GRPC = _env_bool(
-            "QDRANT_PREFER_GRPC", RAGConfig.QDRANT_PREFER_GRPC
-        )
-    
+        RAGConfig.QDRANT_PREFER_GRPC = _env_bool("QDRANT_PREFER_GRPC", RAGConfig.QDRANT_PREFER_GRPC)
+
     @staticmethod
     def initialize_settings(
         include_llm: bool = True,
@@ -256,6 +243,7 @@ class RAGConfig:
             # llama-index-core but NOT llama-index-llms-openai/perplexity.
             if RAGConfig.LLM_PROVIDER == "openai":
                 from llama_index.llms.openai import OpenAI  # noqa: PLC0415
+
                 openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
                 if not openai_api_key:
                     raise ValueError("OPENAI_API_KEY environment variable is not set")
@@ -266,6 +254,7 @@ class RAGConfig:
                 )
             elif RAGConfig.LLM_PROVIDER == "perplexity":
                 from llama_index.llms.perplexity import Perplexity  # noqa: PLC0415
+
                 perplexity_api_key = os.getenv("PERPLEXITY_API_KEY", "").strip()
                 if not perplexity_api_key:
                     raise ValueError("PERPLEXITY_API_KEY environment variable is not set")
@@ -281,6 +270,7 @@ class RAGConfig:
                 # ids (LM Studio / NIM / Ollama / vLLM) without OpenAI enum
                 # validation. This is the P2 Step-3 unification.
                 from llama_index.llms.openai_like import OpenAILike  # noqa: PLC0415
+
                 llm = OpenAILike(
                     model=RAGConfig.LLM_MODEL,
                     temperature=RAGConfig.LLM_TEMPERATURE,
@@ -343,13 +333,13 @@ class RAGConfig:
             Settings.llm = llm
         Settings.chunk_size = RAGConfig.CHUNK_SIZE
         Settings.chunk_overlap = RAGConfig.CHUNK_OVERLAP
-    
+
     @staticmethod
     def get_storage_dir() -> str:
         """Get the storage directory path, creating it if it doesn't exist."""
         os.makedirs(RAGConfig.STORAGE_DIR, exist_ok=True)
         return RAGConfig.STORAGE_DIR
-    
+
     @staticmethod
     def get_data_cache_dir() -> str:
         """Get the data cache directory path, creating it if it doesn't exist."""

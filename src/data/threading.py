@@ -40,11 +40,11 @@ def subject_slug(subject: str) -> str:
     """
     s = (subject or "").strip()
     while True:
-        m = re.match(r'^\s*(re|fwd|fw)\s*:\s*', s, flags=re.IGNORECASE)
+        m = re.match(r"^\s*(re|fwd|fw)\s*:\s*", s, flags=re.IGNORECASE)
         if not m:
             break
-        s = s[m.end():]
-    return re.sub(r'\s+', ' ', s).strip().lower()
+        s = s[m.end() :]
+    return re.sub(r"\s+", " ", s).strip().lower()
 
 
 def compute_thread_id(

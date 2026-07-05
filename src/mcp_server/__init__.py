@@ -7,6 +7,7 @@ indexed email corpus. No retrieval logic is reimplemented here.
 
 Launch with ``python -m src.mcp_server`` or ``mailrag mcp``.
 """
+
 from src.mcp_server.server import (
     answer_question,
     build_server,

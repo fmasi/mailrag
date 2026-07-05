@@ -12,6 +12,7 @@ because ``OpenAILike`` does not carry multimodal ``image_url`` content. Producti
 stays fully offline by default; the only cloud caller is the dev-only ``eval``
 harness (separate reference client).
 """
+
 from __future__ import annotations
 
 import os
@@ -105,8 +106,14 @@ def chat(client: _LLMClient, model: str, prompt: str, temperature: float = 0.0) 
     return client.llm(model, temperature).complete(prompt).text.strip()
 
 
-def chat_vision(client: _LLMClient, model: str, prompt: str, image_bytes: bytes,
-                mime: str, temperature: float = 0.0) -> str:
+def chat_vision(
+    client: _LLMClient,
+    model: str,
+    prompt: str,
+    image_bytes: bytes,
+    mime: str,
+    temperature: float = 0.0,
+) -> str:
     """Single-turn multimodal prompt: text + one inline (base64) image.
 
     Uses the raw-OpenAI shim because ``OpenAILike`` does not carry ``image_url``
@@ -117,10 +124,15 @@ def chat_vision(client: _LLMClient, model: str, prompt: str, image_bytes: bytes,
     b64 = base64.b64encode(image_bytes).decode("ascii")
     resp = client.raw_openai().chat.completions.create(
         model=model,
-        messages=[{"role": "user", "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-        ]}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                ],
+            }
+        ],
         temperature=temperature,
     )
     return resp.choices[0].message.content.strip()

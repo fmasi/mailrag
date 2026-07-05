@@ -17,7 +17,12 @@ Notes:
   - ``truncate=END`` keeps over-length chunks from erroring; verify the corpus
     fits the model's token cap (e5 = 512) before trusting the comparison.
 """
-import os, sys, json, time, urllib.request, urllib.error
+
+import json
+import os
+import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 QD = os.environ.get("QDRANT_URL", "http://localhost:6333")
@@ -34,13 +39,17 @@ def jreq(url, body=None, method="POST", hdr=None, timeout=120):
     for attempt in range(8):
         try:
             r = urllib.request.Request(
-                url, data=(json.dumps(body).encode() if body is not None else None),
-                headers=(hdr or {"Content-Type": "application/json"}), method=method)
+                url,
+                data=(json.dumps(body).encode() if body is not None else None),
+                headers=(hdr or {"Content-Type": "application/json"}),
+                method=method,
+            )
             with urllib.request.urlopen(r, timeout=timeout) as z:
                 return json.load(z) if z.length != 0 else {}
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                time.sleep(min(2 ** attempt, 30)); continue
+                time.sleep(min(2**attempt, 30))
+                continue
             raise
     raise RuntimeError("429 backoff exhausted")
 
@@ -52,42 +61,68 @@ def main():
         if off:
             b["offset"] = off
         res = jreq(f"{QD}/collections/{SRC}/points/scroll", b)["result"]
-        pts += res["points"]; off = res.get("next_page_offset")
+        pts += res["points"]
+        off = res.get("next_page_offset")
         if not off:
             break
 
     def etext(p):
-        s = (p["payload"].get("summary") or "").strip(); t = p["payload"].get("text") or ""
+        s = (p["payload"].get("summary") or "").strip()
+        t = p["payload"].get("text") or ""
         return (s + "\n\n" + t) if s else t
+
     texts = [etext(p) for p in pts]
     mids = [p["payload"].get("message_id") for p in pts]
     bodies = [(p["payload"].get("text") or "") for p in pts]
     print(f"pulled {len(pts)} chunks from {SRC}", flush=True)
 
     def embed(batch):
-        return [d["embedding"] for d in jreq(
-            EMB, {"model": MODEL, "input": batch, "input_type": "passage", "truncate": "END"},
-            hdr=H)["data"]]
-    batches = [texts[i:i + 64] for i in range(0, len(texts), 64)]
+        return [
+            d["embedding"]
+            for d in jreq(
+                EMB,
+                {"model": MODEL, "input": batch, "input_type": "passage", "truncate": "END"},
+                hdr=H,
+            )["data"]
+        ]
+
+    batches = [texts[i : i + 64] for i in range(0, len(texts), 64)]
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=3) as ex:
         results = list(ex.map(embed, batches))
     vecs = [v for r in results for v in r]
     dt = time.time() - t0
-    print(f"embedded {len(vecs)} in {dt:.0f}s ({len(vecs)/dt:.0f}/s, {len(batches)} reqs)", flush=True)
+    print(
+        f"embedded {len(vecs)} in {dt:.0f}s ({len(vecs) / dt:.0f}/s, {len(batches)} reqs)",
+        flush=True,
+    )
 
     try:
         jreq(f"{QD}/collections/{DST}", method="DELETE", timeout=15)
     except urllib.error.HTTPError:
         pass
     dim = len(vecs[0])
-    jreq(f"{QD}/collections/{DST}", {"vectors": {"dense": {"size": dim, "distance": "Cosine"}}},
-         method="PUT", timeout=15)
-    points = [{"id": i, "vector": {"dense": vecs[i]},
-               "payload": {"message_id": mids[i], "text": bodies[i][:6000]}} for i in range(len(vecs))]
+    jreq(
+        f"{QD}/collections/{DST}",
+        {"vectors": {"dense": {"size": dim, "distance": "Cosine"}}},
+        method="PUT",
+        timeout=15,
+    )
+    points = [
+        {
+            "id": i,
+            "vector": {"dense": vecs[i]},
+            "payload": {"message_id": mids[i], "text": bodies[i][:6000]},
+        }
+        for i in range(len(vecs))
+    ]
     for j in range(0, len(points), 512):
-        jreq(f"{QD}/collections/{DST}/points?wait=true", {"points": points[j:j + 512]},
-             method="PUT", timeout=60)
+        jreq(
+            f"{QD}/collections/{DST}/points?wait=true",
+            {"points": points[j : j + 512]},
+            method="PUT",
+            timeout=60,
+        )
     cnt = jreq(f"{QD}/collections/{DST}", method="GET")["result"]["points_count"]
     print(f"DONE {DST}: {cnt} points (dim={dim})", flush=True)
 

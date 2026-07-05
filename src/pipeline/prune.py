@@ -7,15 +7,16 @@ LLM pass. Nothing is deleted — only a text file of hashes is written, and a
 verify-before-prune confirmation shows a sample first.
 See docs/superpowers/specs/2026-06-05-persona-engine-judge-prune-design.md.
 """
+
 from __future__ import annotations
 
 from typing import Callable, List, Tuple
 
 from src.data.blacklist import append_to_blacklist, file_sha256
-from src.llm.cache import Pass2Cache
-from src.ingest.local_source import resolve_index_files
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 from src.data.noise_filter import NoiseFilter
+from src.ingest.local_source import resolve_index_files
+from src.llm.cache import Pass2Cache
 from src.pipeline import pass1
 
 
@@ -37,7 +38,7 @@ def _from_tag(profile) -> Tuple[List[str], List[str]]:
     hashes, preview = [], []
     for e in emails:
         if getattr(e, "noise_candidate", False) or getattr(e, "is_bulk", False):
-            src = getattr(e, "source_id", "") or ""   # the .eml file path
+            src = getattr(e, "source_id", "") or ""  # the .eml file path
             if src:
                 hashes.append(file_sha256(src))
                 if len(preview) < 10:
@@ -54,8 +55,13 @@ def collect(profile, *, source: str, min_confidence: float = 0.7) -> Tuple[List[
     raise ValueError(f"unknown prune source {source!r} (use tag|judge|summarize)")
 
 
-def run(profile, *, source: str, min_confidence: float = 0.7,
-        confirm: Callable[[List[str]], bool] = lambda preview: True) -> int:
+def run(
+    profile,
+    *,
+    source: str,
+    min_confidence: float = 0.7,
+    confirm: Callable[[List[str]], bool] = lambda preview: True,
+) -> int:
     """Collect drop hashes, confirm, and append them to the profile's blacklist.
 
     Returns the number of hashes newly added (0 if nothing to drop or declined)."""

@@ -2,11 +2,12 @@
 
 LLM calls are fully mocked — no network required.
 """
+
 import unittest
 from unittest import mock
 
-from src.llm.thread_summaries import generate_thread_summaries
 from src.data.models import NormalizedEmail
+from src.llm.thread_summaries import generate_thread_summaries
 
 
 def _e(body, mid, subject="Re: plan", date="2026-01-01", in_reply_to=""):
@@ -29,13 +30,12 @@ def _e(body, mid, subject="Re: plan", date="2026-01-01", in_reply_to=""):
 
 
 class TestGenerateThreadSummaries(unittest.TestCase):
-
     def test_returns_summary_per_email_with_preceding_context(self):
         """Email 2's prompt must contain email 1's body as preceding context."""
         # Email 2 replies to email 1 → same thread.
         thread = [
             _e("Can we ship Friday?", "<1>", date="2026-01-01"),
-            _e("Yes, 12:30 works",   "<2>", date="2026-01-02", in_reply_to="<1>"),
+            _e("Yes, 12:30 works", "<2>", date="2026-01-02", in_reply_to="<1>"),
         ]
         calls = []
 
@@ -43,8 +43,10 @@ class TestGenerateThreadSummaries(unittest.TestCase):
             calls.append(prompt)
             return '{"is_noise": false, "confidence": 0.9, "summary": "S", "reason": "r"}'
 
-        with mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat), \
-             mock.patch("src.llm.thread_summaries.make_client", return_value=object()):
+        with (
+            mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
+            mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
+        ):
             out = generate_thread_summaries(thread, model="m")
 
         # Both message_ids must be present in the result.
@@ -61,8 +63,10 @@ class TestGenerateThreadSummaries(unittest.TestCase):
         def fake_chat(client, model, prompt):
             return '{"is_noise": true, "confidence": 0.99, "summary": "", "reason": "ad"}'
 
-        with mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat), \
-             mock.patch("src.llm.thread_summaries.make_client", return_value=object()):
+        with (
+            mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
+            mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
+        ):
             out = generate_thread_summaries(emails, model="m")
 
         self.assertEqual(out["<3>"], "")
@@ -74,8 +78,10 @@ class TestGenerateThreadSummaries(unittest.TestCase):
         def fake_chat(client, model, prompt):
             raise RuntimeError("network error")
 
-        with mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat), \
-             mock.patch("src.llm.thread_summaries.make_client", return_value=object()):
+        with (
+            mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
+            mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
+        ):
             out = generate_thread_summaries(emails, model="m")
 
         self.assertIn("<4>", out)
@@ -92,8 +98,10 @@ class TestGenerateThreadSummaries(unittest.TestCase):
             calls.append(prompt)
             return '{"is_noise": false, "confidence": 0.8, "summary": "X", "reason": "ok"}'
 
-        with mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat), \
-             mock.patch("src.llm.thread_summaries.make_client", return_value=object()):
+        with (
+            mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
+            mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
+        ):
             out = generate_thread_summaries([e1, e2], model="m")
 
         self.assertIn("<5>", out)
@@ -115,8 +123,10 @@ class TestGenerateThreadSummaries(unittest.TestCase):
             return '{"is_noise": false, "confidence": 0.9, "summary": "Z", "reason": "r"}'
 
         emails = [_e("Hello", "<7>")]
-        with mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat), \
-             mock.patch("src.llm.thread_summaries.make_client") as mk:
+        with (
+            mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
+            mock.patch("src.llm.thread_summaries.make_client") as mk,
+        ):
             out = generate_thread_summaries(emails, model="m", client=sentinel)
 
         mk.assert_not_called()

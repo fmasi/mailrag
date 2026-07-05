@@ -1,14 +1,14 @@
 """Tests for src/data/noise_filter.py — NoiseFilter rule-based email classifier."""
 
+import os
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-import tempfile
-import os
 
-from src.data.noise_filter import NoiseFilter, _DEFAULT_RULES_PATH
 from src.data.models import NormalizedEmail
+from src.data.noise_filter import _DEFAULT_RULES_PATH, NoiseFilter
 
 # The real config/noise_rules.yaml is gitignored ("sensitive noise rules"), so it
 # is absent in CI / fresh checkouts. The committed template carries the public seed.
@@ -17,9 +17,7 @@ _TEMPLATE_RULES_PATH = (
 )
 
 
-def _make_email(
-    sender: str = "", subject: str = "", is_bulk: bool = False
-) -> NormalizedEmail:
+def _make_email(sender: str = "", subject: str = "", is_bulk: bool = False) -> NormalizedEmail:
     return NormalizedEmail(
         sender=sender,
         subject=subject,
@@ -33,9 +31,7 @@ def _make_email(
 
 def _filter_from_yaml(content: str) -> NoiseFilter:
     """Write YAML to a temp file and return a NoiseFilter loaded from it."""
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
         f.write(textwrap.dedent(content))
         path = f.name
     try:
@@ -48,8 +44,8 @@ def _filter_from_yaml(content: str) -> NoiseFilter:
 # Loading
 # ---------------------------------------------------------------------------
 
-class TestNoiseFilterLoading(unittest.TestCase):
 
+class TestNoiseFilterLoading(unittest.TestCase):
     def test_loads_sender_domains(self):
         nf = _filter_from_yaml("""
             categories:
@@ -112,8 +108,8 @@ class TestNoiseFilterLoading(unittest.TestCase):
 # sender_domains matching
 # ---------------------------------------------------------------------------
 
-class TestSenderDomainMatching(unittest.TestCase):
 
+class TestSenderDomainMatching(unittest.TestCase):
     def setUp(self):
         self.nf = _filter_from_yaml("""
             categories:
@@ -159,8 +155,8 @@ class TestSenderDomainMatching(unittest.TestCase):
 # sender_patterns matching
 # ---------------------------------------------------------------------------
 
-class TestSenderPatternMatching(unittest.TestCase):
 
+class TestSenderPatternMatching(unittest.TestCase):
     def setUp(self):
         self.nf = _filter_from_yaml("""
             categories:
@@ -191,8 +187,8 @@ class TestSenderPatternMatching(unittest.TestCase):
 # subject_patterns matching
 # ---------------------------------------------------------------------------
 
-class TestSubjectPatternMatching(unittest.TestCase):
 
+class TestSubjectPatternMatching(unittest.TestCase):
     def setUp(self):
         # Use YAML single-quoted strings for regexes: no escape processing,
         # so \b and \[ reach the regex engine as literal backslash sequences.
@@ -230,8 +226,8 @@ class TestSubjectPatternMatching(unittest.TestCase):
 # matched_category
 # ---------------------------------------------------------------------------
 
-class TestMatchedCategory(unittest.TestCase):
 
+class TestMatchedCategory(unittest.TestCase):
     def setUp(self):
         self.nf = _filter_from_yaml("""
             categories:
@@ -260,8 +256,8 @@ class TestMatchedCategory(unittest.TestCase):
 # match_payload (used for post-index Qdrant scanning)
 # ---------------------------------------------------------------------------
 
-class TestMatchPayload(unittest.TestCase):
 
+class TestMatchPayload(unittest.TestCase):
     def setUp(self):
         self.nf = _filter_from_yaml("""
             categories:
@@ -303,8 +299,8 @@ class TestMatchPayload(unittest.TestCase):
 # Multiple rules on one category + multiple categories
 # ---------------------------------------------------------------------------
 
-class TestMultipleRulesAndCategories(unittest.TestCase):
 
+class TestMultipleRulesAndCategories(unittest.TestCase):
     def setUp(self):
         self.nf = _filter_from_yaml("""
             categories:
@@ -344,8 +340,8 @@ class TestMultipleRulesAndCategories(unittest.TestCase):
 # Empty / edge-case filters
 # ---------------------------------------------------------------------------
 
-class TestEmptyFilter(unittest.TestCase):
 
+class TestEmptyFilter(unittest.TestCase):
     def test_empty_filter_never_matches_email(self):
         nf = NoiseFilter([])
         email = _make_email(sender="spam@linkedin.com", subject="You won!")
@@ -376,8 +372,8 @@ class TestEmptyFilter(unittest.TestCase):
 #   - subject looks transactional            (receipts / shipping / bookings)
 # ---------------------------------------------------------------------------
 
-class TestBulkHeaderFiltering(unittest.TestCase):
 
+class TestBulkHeaderFiltering(unittest.TestCase):
     def setUp(self):
         self.nf = _filter_from_yaml(
             "categories:\n"
@@ -421,9 +417,7 @@ class TestBulkHeaderFiltering(unittest.TestCase):
 
     def test_bulk_email_from_exempt_sender_pattern_is_kept(self):
         # LinkedIn InMail carries List-Unsubscribe but is real human outreach.
-        email = _make_email(
-            sender="Recruiter <inmail-hit-reply@linkedin.com>", is_bulk=True
-        )
+        email = _make_email(sender="Recruiter <inmail-hit-reply@linkedin.com>", is_bulk=True)
         self.assertFalse(self.nf.is_noise(email))
 
     def test_bulk_email_with_transactional_subject_is_kept(self):
@@ -480,7 +474,6 @@ class TestBulkHeaderFiltering(unittest.TestCase):
 
 
 class TestNoBulkFilterSection(unittest.TestCase):
-
     def test_bulk_email_kept_when_no_bulk_filter_configured(self):
         nf = _filter_from_yaml("""
             categories:
@@ -496,8 +489,8 @@ class TestNoBulkFilterSection(unittest.TestCase):
 # LinkedIn rule narrowed: drop automated notifications, keep genuine InMail
 # ---------------------------------------------------------------------------
 
-class TestLinkedInNarrowing(unittest.TestCase):
 
+class TestLinkedInNarrowing(unittest.TestCase):
     def setUp(self):
         self.nf = _filter_from_yaml(
             "categories:\n"
@@ -509,15 +502,11 @@ class TestLinkedInNarrowing(unittest.TestCase):
         )
 
     def test_job_alert_noreply_is_noise(self):
-        email = _make_email(
-            sender="LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>"
-        )
+        email = _make_email(sender="LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>")
         self.assertTrue(self.nf.is_noise(email))
 
     def test_newsletter_noreply_is_noise(self):
-        email = _make_email(
-            sender="Notion via LinkedIn <newsletters-noreply@linkedin.com>"
-        )
+        email = _make_email(sender="Notion via LinkedIn <newsletters-noreply@linkedin.com>")
         self.assertTrue(self.nf.is_noise(email))
 
     def test_marketing_subdomain_is_noise(self):
@@ -526,9 +515,7 @@ class TestLinkedInNarrowing(unittest.TestCase):
 
     def test_inmail_is_kept(self):
         # Real human outreach relayed via LinkedIn InMail — must NOT be filtered.
-        email = _make_email(
-            sender="Vanshika Bajaj <inmail-hit-reply@linkedin.com>"
-        )
+        email = _make_email(sender="Vanshika Bajaj <inmail-hit-reply@linkedin.com>")
         self.assertFalse(self.nf.is_noise(email))
 
 

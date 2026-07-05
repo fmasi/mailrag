@@ -7,18 +7,28 @@ for manual curation — query drafting must use subject/thread, NOT the summary.
 
   python scripts/select_terse_emails.py --collection work-rag --max-body 150 --limit 12
 """
-import argparse, json, urllib.request
+
+import argparse
+import json
+import urllib.request
+
 
 def post(base, path, body):
-    req = urllib.request.Request(base + path, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(
+        base + path,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)
+
 
 def body_text(pl):
     # work-rag stores the chunk body directly in payload "text" (this collection was
     # built by qdrant-client directly, not the legacy llama-index "_node_content" format).
     return (pl.get("text") or "").strip()
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -54,11 +64,12 @@ def main():
 
     candidates.sort()  # shortest body first
     print(f"{len(candidates)} terse candidates (body <= {args.max_body} chars, summary present)\n")
-    for n, (blen, rid, subj, body, summ) in enumerate(candidates[:args.limit], 1):
+    for n, (blen, rid, subj, body, summ) in enumerate(candidates[: args.limit], 1):
         print(f"--- candidate {n} | body={blen} chars | message_id={rid}")
         print(f"  subject: {subj[:90]}")
         print(f"  body   : {body[:160]!r}")
         print(f"  summary: {summ[:140]}")
+
 
 if __name__ == "__main__":
     main()

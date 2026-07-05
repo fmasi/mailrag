@@ -26,9 +26,7 @@ class TestPineconeStorage(unittest.TestCase):
         """index_exists returns True when Pinecone index has vectors."""
         mock_pc_instance = MagicMock()
         mock_index = MagicMock()
-        mock_index.describe_index_stats.return_value = SimpleNamespace(
-            total_vector_count=500
-        )
+        mock_index.describe_index_stats.return_value = SimpleNamespace(total_vector_count=500)
         mock_pc_instance.Index.return_value = mock_index
 
         mock_pinecone_cls = MagicMock(return_value=mock_pc_instance)
@@ -48,9 +46,7 @@ class TestPineconeStorage(unittest.TestCase):
         """index_exists returns False when Pinecone index is empty."""
         mock_pc_instance = MagicMock()
         mock_index = MagicMock()
-        mock_index.describe_index_stats.return_value = SimpleNamespace(
-            total_vector_count=0
-        )
+        mock_index.describe_index_stats.return_value = SimpleNamespace(total_vector_count=0)
         mock_pc_instance.Index.return_value = mock_index
 
         mock_pinecone_cls = MagicMock(return_value=mock_pc_instance)
@@ -90,9 +86,7 @@ class TestPineconeStorage(unittest.TestCase):
     @patch("src.storage.persist._get_pinecone_vector_store")
     @patch("src.storage.persist.VectorStoreIndex")
     @patch("src.storage.persist.StorageContext")
-    def test_create_and_save_index_pinecone(
-        self, MockSC, MockVSI, mock_get_vs
-    ):
+    def test_create_and_save_index_pinecone(self, MockSC, MockVSI, mock_get_vs):
         """create_and_save_index uses Pinecone vector store and StorageContext."""
         mock_vs = MagicMock()
         mock_get_vs.return_value = mock_vs

@@ -5,6 +5,7 @@ Import-missing errors (pytesseract/PIL not installed) yield OCR_UNAVAILABLE so
 the ChainedOcr can fall through to the next provider. Runtime failures (tesseract
 binary crashed, corrupt image, etc.) yield ERROR — a distinct status per #37.
 """
+
 from __future__ import annotations
 
 import io
@@ -40,13 +41,12 @@ class TesseractOcr:
 
     def _pdf(self, data: bytes) -> OcrResult:
         try:
-            import pdf2image   # noqa: F401 — probed here so a missing lib is UNAVAILABLE, not ERROR
+            import pdf2image  # noqa: F401 — probed here so a missing lib is UNAVAILABLE, not ERROR
             import pytesseract
         except Exception:
             return OcrResult("", Status.OCR_UNAVAILABLE, _NAME)
         try:
-            text = "\n".join(pytesseract.image_to_string(im)
-                             for im in render_pdf_pages(data))
+            text = "\n".join(pytesseract.image_to_string(im) for im in render_pdf_pages(data))
             return _ok(text)
         except Exception:
             return OcrResult("", Status.ERROR, _NAME)

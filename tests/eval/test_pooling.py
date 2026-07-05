@@ -1,5 +1,6 @@
 # tests/eval/test_pooling.py
 import unittest
+
 from src.eval.flatten import EmailHit
 from src.eval.pooling import build_pool, graded_rankings, total_relevant
 

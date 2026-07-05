@@ -12,6 +12,7 @@ to rerun.
 reformatting.  ``Message-ID`` is deliberately NOT folded in: it is stored as a
 separate fallback key, keeping the two signals independent.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -31,9 +32,9 @@ def _norm_body(body: Optional[str]) -> str:
     return "\n".join(lines).strip()
 
 
-def content_sha256(*, sender: str = "", subject: str = "",
-                   date: Union[datetime, str, None] = None,
-                   body: str = "") -> str:
+def content_sha256(
+    *, sender: str = "", subject: str = "", date: Union[datetime, str, None] = None, body: str = ""
+) -> str:
     """Stable hex sha256 over the normalized content of an email.
 
     ``date`` may be a ``datetime`` (canonicalized via ``isoformat``) or an
@@ -44,14 +45,20 @@ def content_sha256(*, sender: str = "", subject: str = "",
     return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
 
 
-def email_identity(*, sender: str = "", subject: str = "",
-                   date: Union[datetime, str, None] = None, body: str = "",
-                   message_id: str = "") -> "tuple[Optional[str], str]":
+def email_identity(
+    *,
+    sender: str = "",
+    subject: str = "",
+    date: Union[datetime, str, None] = None,
+    body: str = "",
+    message_id: str = "",
+) -> "tuple[Optional[str], str]":
     """Return ``(normalized Message-ID or None, content_sha256)`` for an email.
 
     The single place both the run (write) and build (read) paths derive the
     cache's stable fallback identifiers, so they always agree.
     """
     from src.data.threading import normalize_message_id
+
     mid = normalize_message_id(message_id or "") or None
     return mid, content_sha256(sender=sender, subject=subject, date=date, body=body)
