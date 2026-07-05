@@ -320,7 +320,7 @@ class TestExecutePlan(unittest.TestCase):
         self.assertEqual(prof.rubric, "work")
         self.assertEqual(calls.count("calibrate"), 2)
 
-    def test_calibrate_gate_retune_cancelled_recalibrates_same_rubric(self):
+    def test_calibrate_gate_retune_cancelled_reopens_gate_without_recalibrating(self):
         ui = FakeUI(gates=["retune", "proceed"], rubrics=[None])
         with (
             mock.patch("src.llm.calibration.format_report", return_value="B"),
@@ -329,7 +329,10 @@ class TestExecutePlan(unittest.TestCase):
             rc, calls, prof = self._run("llm-all", ui)
         self.assertEqual(rc, 0)
         self.assertEqual(prof.rubric, "personal")
-        self.assertEqual(calls.count("calibrate"), 2)
+        # No rubric change -> the gate re-opens on the same report; the LLM
+        # calibrate pass is NOT spent again.
+        self.assertEqual(calls.count("calibrate"), 1)
+        self.assertEqual(ui.gates, [])  # gate shown twice
 
     def test_spend_declined_stops_before_summarize(self):
         ui = FakeUI(gates=["proceed"], spend=False)

@@ -58,7 +58,8 @@ def _recording_handlers(calls, prune_confirm=None):
 
         def prune(prof, **params):
             calls.append("prune")
-            return 2 if prune_confirm(["0.91  promo blast", "0.88  newsletter"]) else 0
+            # bracketed subject exercises markup-escaping in the prune dialog
+            return 2 if prune_confirm(["0.91  [Receipt] promo blast", "0.88  newsletter"]) else 0
 
         handlers["prune"] = prune
     return handlers
@@ -71,7 +72,14 @@ class _TuiCase(unittest.IsolatedAsyncioTestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = os.path.join(self.tmp.name, "mailbox")
-        for rel in ("Inbox/a.eml", "Inbox/Acme/b.eml", "Archive/c.eml", "root.eml"):
+        # "[Lists]" exercises markup-escaping of folder names in the scope tree.
+        for rel in (
+            "Inbox/a.eml",
+            "Inbox/Acme/b.eml",
+            "Archive/c.eml",
+            "root.eml",
+            "[Lists]/l.eml",
+        ):
             path = os.path.join(root, *rel.split("/"))
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as fh:
@@ -140,6 +148,8 @@ class TestHappyPathNoLLM(_TuiCase):
         async with app.run_test(size=_SIZE) as pilot:
             await self.to_scope(app, pilot, persona_index=0)  # llm-none is first
             await self.wait_for(pilot, self._screen_is(app, ScopeScreen))
+            # llm-none has no LLM steps: no Model stage in the breadcrumb
+            self.assertNotIn("Model", app.stage_names)
             # rows: root-files leaf, Archive/, Inbox/ (+child). Toggle Inbox/.
             await pilot.press("down", "down", "space")
             await pilot.press("c")
@@ -173,7 +183,8 @@ class TestLLMPathAndGates(_TuiCase):
     def setUp(self):
         super().setUp()
         for target, value in (
-            ("src.llm.calibration.format_report", "CALIBRATION BUCKETS"),
+            # bracketed subject exercises markup-escaping in the calibrate dialog
+            ("src.llm.calibration.format_report", "BUCKETS: [Receipt] Your order :: 50% off"),
             ("src.llm.rubrics.names", ["personal", "work"]),
         ):
             p = mock.patch(target, return_value=value)
@@ -251,7 +262,20 @@ class TestLLMPathAndGates(_TuiCase):
         async with app.run_test(size=_SIZE) as pilot:
             await self.to_scope(app, pilot, persona_index=2)  # llm-all
             await self.wait_for(pilot, self._screen_is(app, ScopeScreen))
+            # the skipped Model stage must not appear in the breadcrumb at all
+            self.assertNotIn("Model", app.stage_names)
         self.assertEqual(app.state.model, "cli-model")
+
+    async def test_model_back_returns_to_persona(self):
+        app = self.app()
+        async with app.run_test(size=_SIZE) as pilot:
+            await self.to_scope(app, pilot, persona_index=2)  # llm-all
+            await self.wait_for(pilot, self._screen_is(app, ModelScreen))
+            await pilot.press("escape")
+            await self.wait_for(pilot, self._screen_is(app, PersonaScreen))
+            await pilot.press("enter")  # the chosen persona is still highlighted
+            await self.wait_for(pilot, self._screen_is(app, ModelScreen))
+        self.assertEqual(app.state.persona_name, "llm-all")
 
 
 class TestNavigationAndEdges(_TuiCase):

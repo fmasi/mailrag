@@ -258,12 +258,14 @@ class WizardUI(Protocol):
 def run_calibrate_gate(prof: Any, handler: Handler, ui: WizardUI) -> str:
     """Calibrate, show the buckets, and loop on re-tune (same as the classic gate).
 
-    Returns ``"proceed"`` or ``"abort"``."""
+    A cancelled rubric pick re-opens the gate on the *existing* report instead
+    of re-running calibrate — no LLM call is spent unless the rubric actually
+    changed. Returns ``"proceed"`` or ``"abort"``."""
     from src.llm import calibration as calibration_lib
     from src.llm import rubrics
 
+    report = handler(prof)  # runs calibrate, records on prof
     while True:
-        report = handler(prof)  # runs calibrate, records on prof
         decision = ui.calibrate_gate(calibration_lib.format_report(report))
         if decision == "proceed":
             return "proceed"
@@ -273,6 +275,7 @@ def run_calibrate_gate(prof: Any, handler: Handler, ui: WizardUI) -> str:
         if new:
             prof.rubric = new
             ui.log(f"rubric -> {new}; re-calibrating")
+            report = handler(prof)
 
 
 def execute_plan(

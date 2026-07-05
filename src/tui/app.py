@@ -25,6 +25,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
+from textual.markup import escape
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Footer, Input, OptionList, ProgressBar, RichLog, Static, Tree
 from textual.widgets.option_list import Option
@@ -81,20 +82,31 @@ class WizardState:
 
 
 class StageBar(Static):
-    """Breadcrumb of wizard stages with the current one highlighted."""
+    """Breadcrumb of wizard stages with the current one highlighted.
+
+    Reads the app's ``stage_names`` — the stages that actually apply to the
+    chosen persona — so a skipped stage (e.g. Model for a no-LLM persona)
+    never shows up as visited."""
 
     def __init__(self, current: str) -> None:
+        super().__init__("", id="stagebar")
+        self._current = current
+
+    def on_mount(self) -> None:
+        names = getattr(self.app, "stage_names", None) or list(STAGES)
+        if self._current not in names:  # pragma: no cover - defensive
+            names = list(STAGES)
         parts: List[str] = []
         seen_current = False
-        for name in STAGES:
-            if name == current:
+        for name in names:
+            if name == self._current:
                 parts.append(f"[bold reverse] {name} [/]")
                 seen_current = True
             elif not seen_current:
                 parts.append(f"[green]✓[/] [dim]{name}[/]")
             else:
                 parts.append(f"[dim]{name}[/]")
-        super().__init__("  ".join(parts), id="stagebar")
+        self.update("  ".join(parts))
 
 
 class WizardScreen(Screen[Any]):
@@ -143,7 +155,7 @@ class WelcomeScreen(WizardScreen):
         ]
         if st.limit:
             facts.append(("limit", f"first {st.limit} messages (test run)"))
-        rows = "\n".join(f"[dim]{k:>14}[/]  {v}" for k, v in facts)
+        rows = "\n".join(f"[dim]{k:>14}[/]  {escape(str(v))}" for k, v in facts)
         rec = (
             f"\n\n[green]★ scan recommends the [bold]{st.recommendation}[/bold] persona[/]"
             if st.recommendation
@@ -214,7 +226,7 @@ class PersonaScreen(WizardScreen):
         card = self._card(name)
         if card is None:  # pragma: no cover - defensive
             return
-        lines = [f"[bold]{card.label}[/]", f"[dim]{card.hint}[/]", ""]
+        lines = [f"[bold]{escape(card.label)}[/]", f"[dim]{escape(card.hint)}[/]", ""]
         if card.recommended:
             lines.insert(2, "[green]★ recommended by scan for this mailbox[/]")
         lines.append("[b]Recipe[/] [dim](cost-ordered — cheap screens before the LLM spends)[/]")
@@ -370,11 +382,12 @@ class ScopeScreen(WizardScreen):
         else:
             scope_node = self._find(node_id)
             text = scope_node.label if scope_node else node_id
+        text = escape(text)  # folder names may contain markup-significant brackets
         if node_id in self._checked:
             return f"[green]▣[/] {text}"
         parent = self._parent_of(node_id)
         if parent and parent in self._checked:
-            return f"[dim]▣ {text} (covered by {parent})[/]"
+            return f"[dim]▣ {text} (covered by {escape(parent)})[/]"
         return f"[dim]☐[/] {text}"
 
     def _find(self, node_id: str) -> Optional[flow.ScopeNode]:
@@ -489,11 +502,11 @@ class ReviewScreen(WizardScreen):
     def compose_body(self) -> ComposeResult:
         st = self._state
         facts = [
-            ("persona", f"{self._persona.name} — {self._persona.label}"),
-            ("model", st.model or "[dim]none (no LLM steps)[/]"),
+            ("persona", escape(f"{self._persona.name} — {self._persona.label}")),
+            ("model", escape(st.model) if st.model else "[dim]none (no LLM steps)[/]"),
             ("scope", f"{len(st.scope_rules or [])} selection rule(s)"),
-            ("rubric", st.profile.rubric),
-            ("collection", st.profile.collection),
+            ("rubric", escape(st.profile.rubric)),
+            ("collection", escape(st.profile.collection)),
             ("limit", f"first {st.limit} messages" if st.limit else "full corpus"),
         ]
         with Horizontal(id="review-body"):
@@ -501,14 +514,14 @@ class ReviewScreen(WizardScreen):
                 yield Static("[b]Configuration[/]", classes="panel-title")
                 yield Static("\n".join(f"[dim]{k:>12}[/]  {v}" for k, v in facts))
                 for rule in (st.scope_rules or [])[:8]:
-                    yield Static(f"[dim]{'':>12}  · {_describe_rule(rule)}[/]")
+                    yield Static(f"[dim]{'':>12}  · {escape(_describe_rule(rule))}[/]")
             with Vertical(id="review-plan-panel"):
                 yield Static("[b]Planned steps[/]", classes="panel-title")
                 for i, step in enumerate(self._planned, start=1):
                     marker = "[dim]– skipped (optional)[/]" if step.skipped else ""
                     yield Static(
                         f"  {i}. [bold]{step.verb:<10}[/] {_cost_badge(step.cost)}  "
-                        f"[dim]{step.does}[/] {marker}"
+                        f"[dim]{escape(step.does)}[/] {marker}"
                     )
                 if self._missing:
                     yield Static(
@@ -598,7 +611,8 @@ class CalibrateGateModal(ModalScreen[str]):
         with Vertical(classes="dialog dialog-wide"):
             yield Static("[b]Calibration gate[/]", classes="dialog-title")
             with VerticalScroll(classes="dialog-scroll"):
-                yield Static(self._report)
+                # The report quotes email subjects/senders — escape their brackets.
+                yield Static(escape(self._report))
             yield Static(
                 "[dim]Trust it before you spend: proceed only if these buckets look right.[/]\n"
                 "[b]p[/] proceed to the LLM pass   [b]r[/] re-tune (another rubric)   "
@@ -628,7 +642,7 @@ class RubricPickModal(ModalScreen[Optional[str]]):
 
     def compose(self) -> ComposeResult:
         options = [
-            Option(f"{n}  [dim](current)[/]" if n == self._current else n, id=n)
+            Option(f"{escape(n)}  [dim](current)[/]" if n == self._current else escape(n), id=n)
             for n in self._names
         ]
         with Vertical(classes="dialog"):
@@ -686,12 +700,12 @@ class _WorkerBridge:
 
     def on_step_start(self, index: int, step: flow.PlannedStep) -> None:
         self._ui(self._screen.mark_step, index, "running")
-        self._ui(self._screen.write_log, f"[bold cyan]▶ {step.verb}[/] — {step.does}")
+        self._ui(self._screen.write_log, f"[bold cyan]▶ {step.verb}[/] — {escape(step.does)}")
 
     def on_step_done(self, index: int, step: flow.PlannedStep, result: Any) -> None:
         self._ui(self._screen.mark_step, index, "done")
         if result is not None:
-            self._ui(self._screen.write_log, f"[dim]  {flow.short_result(result)}[/]")
+            self._ui(self._screen.write_log, f"[dim]  {escape(flow.short_result(result))}[/]")
 
     def on_step_skip(self, index: int, step: flow.PlannedStep) -> None:
         self._ui(self._screen.mark_step, index, "skipped")
@@ -718,8 +732,9 @@ class _WorkerBridge:
         )
 
     def confirm_prune(self, preview: List[str]) -> bool:
+        # Preview lines quote email senders/subjects — escape their brackets.
         body = "About to blacklist these as noise (sample):\n\n" + "\n".join(
-            f"  [dim]{line}[/]" for line in preview
+            f"  [dim]{escape(line)}[/]" for line in preview
         )
         return bool(self._ask(lambda: ConfirmModal("Prune", body, yes_hint="blacklist")))
 
@@ -762,7 +777,8 @@ class RunScreen(Screen[int]):
         with Horizontal(id="run-body"):
             with Vertical(id="run-steps-panel"):
                 yield Static(
-                    f"[b]{self._persona.name}[/] — {self._persona.label}", classes="panel-title"
+                    f"[b]{self._persona.name}[/] — {escape(self._persona.label)}",
+                    classes="panel-title",
                 )
                 for i, step in enumerate(self._planned):
                     yield Static("", id=f"step-{i}", classes="step-row")
@@ -776,7 +792,7 @@ class RunScreen(Screen[int]):
     def on_mount(self) -> None:
         for i in range(len(self._planned)):
             self.mark_step(i, "pending")
-        self.write_log(f"[dim]profile: {self._state.profile_path}[/]")
+        self.write_log(f"[dim]profile: {escape(self._state.profile_path)}[/]")
         self.run_worker(self._execute, thread=True, exclusive=True)
 
     # -- UI-thread helpers (called via call_from_thread) -------------------------
@@ -784,9 +800,9 @@ class RunScreen(Screen[int]):
     def mark_step(self, index: int, status: str) -> None:
         step = self._planned[index]
         row = self.query_one(f"#step-{index}", Static)
-        text = f" {_STEP_ICON[status]} [bold]{step.verb:<10}[/] [dim]{step.does}[/]"
+        text = f" {_STEP_ICON[status]} [bold]{step.verb:<10}[/] [dim]{escape(step.does)}[/]"
         if status == "skipped":
-            text = f" {_STEP_ICON[status]} [dim]{step.verb:<10} {step.does} (skipped)[/]"
+            text = f" {_STEP_ICON[status]} [dim]{step.verb:<10} {escape(step.does)} (skipped)[/]"
         row.update(text)
         if status in ("done", "skipped"):
             self.query_one("#run-progress", ProgressBar).advance(1)
@@ -800,7 +816,7 @@ class RunScreen(Screen[int]):
         if code == 0:
             status.update(
                 f"[green]✓ persona '{self._persona.name}' complete[/] — profile saved to "
-                f"{self._state.profile_path} — press [b]enter[/] to exit"
+                f"{escape(self._state.profile_path)} — press [b]enter[/] to exit"
             )
         else:
             status.update("[yellow]run stopped[/] — press [b]enter[/] to exit")
@@ -978,6 +994,9 @@ class MailragWizardApp(App[int]):
         self._personas = registry or load_registry()
         profile = CorpusProfile.load(profile_path)
         self._cli_model = flow.validate_model(model)
+        #: Stages the breadcrumb shows; narrowed to the chosen persona's actual
+        #: path by _stage_factories (so a skipped Model never reads as visited).
+        self.stage_names: List[str] = list(STAGES)
         self._state = WizardState(
             profile_path=profile_path,
             profile=profile,
@@ -1014,6 +1033,11 @@ class MailragWizardApp(App[int]):
             if any(s.verb == "scope" for s in persona.steps):
                 stages.append(("scope", lambda: ScopeScreen(st)))
         stages.append(("review", lambda: ReviewScreen(st, self._personas)))
+        # Until a persona is chosen the breadcrumb shows the full ladder; after
+        # that, only the stages this persona actually walks.
+        self.stage_names = (
+            list(STAGES) if persona is None else [name.capitalize() for name, _ in stages] + ["Run"]
+        )
         return stages
 
     @work(exclusive=True)
