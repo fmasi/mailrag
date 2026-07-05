@@ -11,6 +11,7 @@ aliases for one release.
 
 import argparse
 import datetime
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -326,6 +327,34 @@ def _configure_ask(p):
     p.add_argument("--k", type=int, default=3)
 
 
+def _cmd_mcp(args):
+    """Run the stdio MCP server exposing search_email / answer_question.
+
+    CLI flags are surfaced to the server via env vars (the server resolves all
+    config from the environment, mirroring `mailrag ask`)."""
+    if args.collection:
+        os.environ["MAILRAG_COLLECTION"] = args.collection
+    if args.qdrant_url:
+        os.environ["MAILRAG_QDRANT_URL"] = args.qdrant_url
+    from src.mcp_server.server import serve
+
+    serve()  # blocks, serving over stdio until the client disconnects
+    return 0
+
+
+def _configure_mcp(p):
+    p.add_argument(
+        "--collection",
+        default=None,
+        help="collection to serve (default: $MAILRAG_COLLECTION or latest manifest)",
+    )
+    p.add_argument(
+        "--qdrant-url",
+        default=None,
+        help="Qdrant URL (default: $MAILRAG_QDRANT_URL / $QDRANT_URL, else localhost)",
+    )
+
+
 def _configure_index(p):
     _add_profile_arg(p)
     p.add_argument("--recreate", action="store_true")
@@ -523,6 +552,13 @@ def build_parser():
         _cmd_ask,
         aliases=["query"],
         help="ask a question against an indexed collection",
+    )
+    _add_verb(
+        sub,
+        "mcp",
+        _configure_mcp,
+        _cmd_mcp,
+        help="run the MCP server (stdio) over the indexed corpus",
     )
     _add_verb(
         sub,

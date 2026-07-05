@@ -52,6 +52,9 @@ python-pptx = "^1.0"
 pytesseract = "^0.3"
 pdf2image = "^1.17"
 pillow = "^12.2"
+# Official Model Context Protocol SDK — powers the stdio MCP server
+# (src/mcp_server) that exposes the email-RAG query path to MCP clients.
+mcp = "^1.28.1"
 
 [tool.poetry.extras]
 # C/NIM experiment path (NVIDIA NeMo Retriever dense embed + rerank NIMs)
