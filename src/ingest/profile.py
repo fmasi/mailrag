@@ -5,6 +5,7 @@ widely across mailboxes); this is the one structural param it calculates.
 Factored out of scripts/build_local_eml_rag.py so the build script and the
 onboard flow share one implementation.
 """
+
 import math
 
 

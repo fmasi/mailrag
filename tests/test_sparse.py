@@ -1,4 +1,5 @@
 """Tests for converting bge-m3 lexical weights to Qdrant sparse-vector format."""
+
 import unittest
 
 from src.ingest import sparse

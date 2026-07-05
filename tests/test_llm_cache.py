@@ -1,5 +1,6 @@
 # tests/test_llm_cache.py
 """Tests for the content-addressed SQLite Pass-2 cache (stdlib-only)."""
+
 import os
 import tempfile
 import unittest
@@ -68,26 +69,32 @@ class TestPass2CacheResilientIdentity(unittest.TestCase):
         self.dir.cleanup()
 
     def test_put_stores_identity_columns(self):
-        self.cache.put("filehash", _rec(False, 1.0, "s"), model="g",
-                       message_id="<mid@x>", content_sha256="chash")
+        self.cache.put(
+            "filehash",
+            _rec(False, 1.0, "s"),
+            model="g",
+            message_id="<mid@x>",
+            content_sha256="chash",
+        )
         row = self.cache.get("filehash")
         self.assertEqual(row["message_id"], "<mid@x>")
         self.assertEqual(row["content_sha256"], "chash")
 
     def test_get_resilient_falls_back_to_message_id(self):
-        self.cache.put("filehash", _rec(False, 1.0, "s"),
-                       message_id="<mid@x>", content_sha256="chash")
+        self.cache.put(
+            "filehash", _rec(False, 1.0, "s"), message_id="<mid@x>", content_sha256="chash"
+        )
         # file hash changed (re-export) but Message-ID is stable
         row = self.cache.get_resilient("DIFFERENT", message_id="<mid@x>")
         self.assertIsNotNone(row)
         self.assertEqual(row["summary"], "s")
 
     def test_get_resilient_falls_back_to_content_sha256(self):
-        self.cache.put("filehash", _rec(False, 1.0, "s"),
-                       message_id="<mid@x>", content_sha256="chash")
+        self.cache.put(
+            "filehash", _rec(False, 1.0, "s"), message_id="<mid@x>", content_sha256="chash"
+        )
         # both file hash and Message-ID differ; content hash still matches
-        row = self.cache.get_resilient("DIFFERENT", message_id="<other>",
-                                       content_sha256="chash")
+        row = self.cache.get_resilient("DIFFERENT", message_id="<other>", content_sha256="chash")
         self.assertIsNotNone(row)
         self.assertEqual(row["summary"], "s")
 
@@ -99,8 +106,7 @@ class TestPass2CacheResilientIdentity(unittest.TestCase):
 
     def test_get_resilient_returns_none_when_nothing_matches(self):
         self.cache.put("filehash", _rec(False, 1.0, "s"), message_id="<mid@x>")
-        self.assertIsNone(self.cache.get_resilient("nope", message_id="<no>",
-                                                   content_sha256="no"))
+        self.assertIsNone(self.cache.get_resilient("nope", message_id="<no>", content_sha256="no"))
 
     def test_set_identity_backfills_existing_row(self):
         self.cache.put("filehash", _rec(False, 1.0, "s"))  # no identity yet
@@ -115,6 +121,7 @@ class TestPass2CacheMigration(unittest.TestCase):
 
     def _make_old_db(self, path):
         import sqlite3
+
         conn = sqlite3.connect(path)
         conn.execute(
             """CREATE TABLE pass2 (
@@ -123,9 +130,7 @@ class TestPass2CacheMigration(unittest.TestCase):
                    reason TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
                    created_at TEXT NOT NULL)"""
         )
-        conn.execute(
-            "INSERT INTO pass2 VALUES ('old1','sum',0,1.0,'','g','2026-01-01')"
-        )
+        conn.execute("INSERT INTO pass2 VALUES ('old1','sum',0,1.0,'','g','2026-01-01')")
         conn.commit()
         conn.close()
 

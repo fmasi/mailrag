@@ -10,7 +10,11 @@ Run on HOST in the `rag` env (MPS + live Qdrant). Real queries live in LOCAL fil
     --terse ~/rag_pass2/terse_queries.json --content ~/rag_pass2/probe_queries.txt \
     | tee ~/eval_summary_rerank.log
 """
-import argparse, json, os, sys
+
+import argparse
+import json
+import os
+import sys
 
 # Make the repo root importable so `from src...` works regardless of cwd
 # (matches scripts/build_local_eml_rag.py and scripts/compare_retrieval.py).
@@ -18,25 +22,64 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TOP_N = 10
 CONFIGS = [
-    ("C hybrid",           dict(collection="work-rag",     mode="hybrid", rerank=False)),
-    ("C rerank-body  f20", dict(collection="work-rag",     mode="hybrid", rerank=True,  dense_top_k=20, sparse_top_k=20)),
-    ("C rerank-summ  f20", dict(collection="work-rag",     mode="hybrid", rerank_with_summary=True, dense_top_k=20, sparse_top_k=20)),
-    ("C' hybrid",          dict(collection="work-rag-ctx", mode="hybrid", rerank=False)),
-    ("C' rerank-body f20", dict(collection="work-rag-ctx", mode="hybrid", rerank=True,  dense_top_k=20, sparse_top_k=20)),
-    ("C rerank-body  f50", dict(collection="work-rag",     mode="hybrid", rerank=True,  dense_top_k=50, sparse_top_k=50)),
-    ("C rerank-summ  f50", dict(collection="work-rag",     mode="hybrid", rerank_with_summary=True, dense_top_k=50, sparse_top_k=50)),
-    ("C' rerank-body f50", dict(collection="work-rag-ctx", mode="hybrid", rerank=True,  dense_top_k=50, sparse_top_k=50)),
+    ("C hybrid", dict(collection="work-rag", mode="hybrid", rerank=False)),
+    (
+        "C rerank-body  f20",
+        dict(collection="work-rag", mode="hybrid", rerank=True, dense_top_k=20, sparse_top_k=20),
+    ),
+    (
+        "C rerank-summ  f20",
+        dict(
+            collection="work-rag",
+            mode="hybrid",
+            rerank_with_summary=True,
+            dense_top_k=20,
+            sparse_top_k=20,
+        ),
+    ),
+    ("C' hybrid", dict(collection="work-rag-ctx", mode="hybrid", rerank=False)),
+    (
+        "C' rerank-body f20",
+        dict(
+            collection="work-rag-ctx", mode="hybrid", rerank=True, dense_top_k=20, sparse_top_k=20
+        ),
+    ),
+    (
+        "C rerank-body  f50",
+        dict(collection="work-rag", mode="hybrid", rerank=True, dense_top_k=50, sparse_top_k=50),
+    ),
+    (
+        "C rerank-summ  f50",
+        dict(
+            collection="work-rag",
+            mode="hybrid",
+            rerank_with_summary=True,
+            dense_top_k=50,
+            sparse_top_k=50,
+        ),
+    ),
+    (
+        "C' rerank-body f50",
+        dict(
+            collection="work-rag-ctx", mode="hybrid", rerank=True, dense_top_k=50, sparse_top_k=50
+        ),
+    ),
 ]
 
-def _log(m): print(m, flush=True)
+
+def _log(m):
+    print(m, flush=True)
+
 
 def node_msgid(n):
     md = getattr(n, "metadata", {}) or {}
     return md.get("message_id")
 
+
 def node_subject(n):
     md = getattr(n, "metadata", {}) or {}
     return (md.get("subject") or "(no subject)")[:70]
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -47,14 +90,17 @@ def main():
     _log("Loading bge-m3 (silent ~1 min)...")
     from src.ingest.embedder import BgeM3Embedder
     from src.query.hybrid import build_hybrid_searcher
+
     embedder = BgeM3Embedder()
     _log("loaded.\n")
 
     # Build each searcher ONCE (rerankers load eagerly; rebuilding per query would
     # reload the cross-encoder model every time). Reused across all queries.
     _log("building searchers (loads rerankers once)...")
-    searchers = [(name, build_hybrid_searcher(embedder=embedder, top_n=TOP_N, **cfg))
-                 for name, cfg in CONFIGS]
+    searchers = [
+        (name, build_hybrid_searcher(embedder=embedder, top_n=TOP_N, **cfg))
+        for name, cfg in CONFIGS
+    ]
     _log(f"built {len(searchers)} searchers.\n")
 
     # Terse set -> recall@10 + rank
@@ -70,12 +116,19 @@ def main():
                 ids = [node_msgid(n) for n in nodes]
                 rank = ids.index(target) + 1 if target in ids else None
                 cells.append(str(rank) if rank else "-")
-            _log(q[:40].ljust(40) + " | " + " | ".join(c.center(len(name)) for c, (name, _) in zip(cells, searchers)))
+            _log(
+                q[:40].ljust(40)
+                + " | "
+                + " | ".join(c.center(len(name)) for c, (name, _) in zip(cells, searchers))
+            )
 
     # Content set -> top-5 subjects per config
     if args.content:
-        queries = [l.strip() for l in open(args.content, encoding="utf-8")
-                   if l.strip() and not l.startswith("#")]
+        queries = [
+            l.strip()
+            for l in open(args.content, encoding="utf-8")
+            if l.strip() and not l.startswith("#")
+        ]
         _log("\n\n==== CONTENT-RICH top-5 subjects per config ====")
         for q in queries:
             _log(f"\n### {q}")
@@ -85,6 +138,7 @@ def main():
                 for n in nodes:
                     _log(f"     {node_subject(n)}")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

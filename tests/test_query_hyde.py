@@ -1,4 +1,5 @@
 """Tests for HyDE query-side helpers (issue #16)."""
+
 import unittest
 
 from src.query.hyde import build_hyde_prompt, build_hyde_prompt_anchored, combine_query

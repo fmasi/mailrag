@@ -1,10 +1,11 @@
 """Tests for the RRF hybrid_fusion_fn callback."""
+
 import unittest
 
 from llama_index.core.schema import TextNode
 from llama_index.core.vector_stores.types import VectorStoreQueryResult
 
-from src.query.fusion import reciprocal_rank_fusion, make_rank_fusion
+from src.query.fusion import make_rank_fusion, reciprocal_rank_fusion
 
 
 def _result(ids):
@@ -66,11 +67,11 @@ class TestPowerMeanFusion(unittest.TestCase):
         # m is mediocre in BOTH lists (rank1 each); g is the TOP hit of one list only.
         # p=1 (sum): m's two terms beat g's one -> m ABOVE g.
         # p=inf (max): g's stronger single term beats m -> g ABOVE m (rescued). FLIP.
-        dense = _result(["f", "m"])     # f rank0, m rank1
-        sparse = _result(["g", "m"])    # g rank0, m rank1
+        dense = _result(["f", "m"])  # f rank0, m rank1
+        sparse = _result(["g", "m"])  # g rank0, m rank1
         p1 = make_rank_fusion(p=1.0)(dense, sparse, top_k=5, k=60)
         pinf = make_rank_fusion(p=float("inf"))(dense, sparse, top_k=5, k=60)
-        self.assertLess(p1.ids.index("m"), p1.ids.index("g"))      # m above g at p=1
+        self.assertLess(p1.ids.index("m"), p1.ids.index("g"))  # m above g at p=1
         self.assertLess(pinf.ids.index("g"), pinf.ids.index("m"))  # g above m at p=inf
 
     def test_buried_hit_rank_improves_monotonically_in_p(self):
@@ -80,14 +81,14 @@ class TestPowerMeanFusion(unittest.TestCase):
         for p in (1.0, 2.0, 10.0, float("inf")):
             out = make_rank_fusion(p=p)(dense, sparse, top_k=5, k=60)
             idx.append(out.ids.index("g"))
-        self.assertEqual(idx, sorted(idx, reverse=True))   # g's index never worsens as p grows
-        self.assertLess(idx[-1], idx[0])                   # and is strictly better at p=inf than p=1
+        self.assertEqual(idx, sorted(idx, reverse=True))  # g's index never worsens as p grows
+        self.assertLess(idx[-1], idx[0])  # and is strictly better at p=inf than p=1
 
     def test_p_inf_tiebreak_by_sum(self):
         # both "g" and "h" tie on max term (each rank 0 in one list); "h" is also
         # present (rank 1) in the other list, so its sum is larger -> h first.
-        dense = _result(["g", "h"])     # g rank0, h rank1
-        sparse = _result(["h", "q"])    # h rank0
+        dense = _result(["g", "h"])  # g rank0, h rank1
+        sparse = _result(["h", "q"])  # h rank0
         out = make_rank_fusion(p=float("inf"))(dense, sparse, top_k=4, k=60)
         self.assertEqual(out.ids[0], "h")
 

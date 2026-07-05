@@ -3,18 +3,19 @@
 `Extractor` is constructed with its OCR provider (an explicit dependency) and dispatches
 each blob to the first handler whose can_handle() matches, else returns UNSUPPORTED.
 """
+
 from __future__ import annotations
 
 from typing import List
 
 from src.attachments.extract.handlers.base import Handler
-from src.attachments.extract.handlers.plaintext import PlaintextHandler
-from src.attachments.extract.handlers.html import HtmlHandler
 from src.attachments.extract.handlers.docx import DocxHandler
-from src.attachments.extract.handlers.xlsx import XlsxHandler
-from src.attachments.extract.handlers.pptx import PptxHandler
-from src.attachments.extract.handlers.pdf import PdfHandler
+from src.attachments.extract.handlers.html import HtmlHandler
 from src.attachments.extract.handlers.image import ImageHandler
+from src.attachments.extract.handlers.pdf import PdfHandler
+from src.attachments.extract.handlers.plaintext import PlaintextHandler
+from src.attachments.extract.handlers.pptx import PptxHandler
+from src.attachments.extract.handlers.xlsx import XlsxHandler
 from src.attachments.extract.ocr.base import OcrProvider
 from src.attachments.extract.result import ExtractResult, Status
 

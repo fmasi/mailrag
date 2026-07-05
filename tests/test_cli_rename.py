@@ -18,8 +18,7 @@ PAIRS = [
 
 
 def _subparsers(parser):
-    return [a for a in parser._actions
-            if isinstance(a, argparse._SubParsersAction)][0]
+    return [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)][0]
 
 
 class TestVerbRename(unittest.TestCase):
@@ -28,9 +27,11 @@ class TestVerbRename(unittest.TestCase):
         for new, old in PAIRS:
             self.assertIn(new, choices, f"missing canonical verb {new}")
             self.assertIn(old, choices, f"missing alias {old}")
-            self.assertIs(choices[new].get_default("func"),
-                          choices[old].get_default("func"),
-                          f"{old} must dispatch to the same handler as {new}")
+            self.assertIs(
+                choices[new].get_default("func"),
+                choices[old].get_default("func"),
+                f"{old} must dispatch to the same handler as {new}",
+            )
 
     def test_old_names_hidden_from_help(self):
         buf = io.StringIO()
@@ -41,7 +42,7 @@ class TestVerbRename(unittest.TestCase):
                 pass
         help_text = buf.getvalue()
         self.assertIn("scan", help_text)
-        self.assertNotIn("explore", help_text)   # alias suppressed
+        self.assertNotIn("explore", help_text)  # alias suppressed
         self.assertNotIn("pass2", help_text)
         self.assertIn("summarize", help_text)
 

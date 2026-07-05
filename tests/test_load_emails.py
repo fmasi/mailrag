@@ -1,12 +1,12 @@
 """Unit tests for the unified load_emails function."""
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+from llama_index.core import Document
 
 from src.data.loader import load_emails, load_enron_dataset
-from llama_index.core import Document
 
 
 class TestLoadEmails(unittest.TestCase):

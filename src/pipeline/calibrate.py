@@ -5,14 +5,15 @@ It reuses the Pass-2 loader shape, ``sample_files`` for a deterministic subset,
 and the same parse path, but collects records directly and writes NOTHING to the
 real Pass-2 cache (it is a throwaway look, not a sweep).
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List
 
 from src.ingest.local_source import resolve_index_files
-from src.llm.pass2 import sample_files
+from src.llm import calibration, rubrics, summary
 from src.llm import client as llm_client
-from src.llm import summary, rubrics, calibration
+from src.llm.pass2 import sample_files
 
 
 def _make_load_email(body_chars: int) -> Callable[[str], Dict[str, Any]]:
@@ -25,28 +26,43 @@ def _make_load_email(body_chars: int) -> Callable[[str], Dict[str, Any]]:
         if not emails:
             raise ValueError("no email parsed")
         e = emails[0]
-        return {"sender": e.sender, "subject": e.subject,
-                "date": e.date.isoformat() if e.date else "unknown",
-                "body": e.body, "message_id": e.message_id or ""}
+        return {
+            "sender": e.sender,
+            "subject": e.subject,
+            "date": e.date.isoformat() if e.date else "unknown",
+            "body": e.body,
+            "message_id": e.message_id or "",
+        }
+
     return load_email
 
 
-def judge_sample(paths: List[str], load_email: Callable[[str], Dict[str, Any]],
-                 judge: Callable[[Dict[str, Any]], Dict[str, Any]],
-                 workers: int = 4, progress: bool = False) -> List[Dict[str, Any]]:
+def judge_sample(
+    paths: List[str],
+    load_email: Callable[[str], Dict[str, Any]],
+    judge: Callable[[Dict[str, Any]], Dict[str, Any]],
+    workers: int = 4,
+    progress: bool = False,
+) -> List[Dict[str, Any]]:
     """Judge each path into a flat record; errored paths are skipped.
 
     ``judge(email_dict) -> {is_noise, confidence, summary, reason}``. Parallelized
     with a thread pool when *workers* > 1 (network-bound LLM calls).
     """
+
     def _one(path: str) -> Dict[str, Any]:
         e = load_email(path)
         j = judge(e)
-        return {"sender": e.get("sender", ""), "subject": e.get("subject", ""),
-                # is_noise is guaranteed by summary.parse_response (raises if absent); a
-                # missing key here is a real error and is counted as a skip by the caller.
-                "is_noise": bool(j["is_noise"]), "confidence": j.get("confidence", 0.0),
-                "summary": j.get("summary", ""), "reason": j.get("reason", "")}
+        return {
+            "sender": e.get("sender", ""),
+            "subject": e.get("subject", ""),
+            # is_noise is guaranteed by summary.parse_response (raises if absent); a
+            # missing key here is a real error and is counted as a skip by the caller.
+            "is_noise": bool(j["is_noise"]),
+            "confidence": j.get("confidence", 0.0),
+            "summary": j.get("summary", ""),
+            "reason": j.get("reason", ""),
+        }
 
     records: List[Dict[str, Any]] = []
     skipped = 0
@@ -54,6 +70,7 @@ def judge_sample(paths: List[str], load_email: Callable[[str], Dict[str, Any]],
     if progress:
         try:
             from tqdm import tqdm
+
             bar = tqdm(total=len(paths), unit="email", desc="calibrate", smoothing=0.05)
         except ImportError:
             bar = None
@@ -64,6 +81,7 @@ def judge_sample(paths: List[str], load_email: Callable[[str], Dict[str, Any]],
 
     if workers and workers > 1:
         from concurrent.futures import ThreadPoolExecutor, as_completed
+
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = [ex.submit(_one, p) for p in paths]
             for f in as_completed(futs):
@@ -86,8 +104,16 @@ def judge_sample(paths: List[str], load_email: Callable[[str], Dict[str, Any]],
     return records
 
 
-def run(profile, *, model: str, sample: int = 200, seed: int = 11, workers: int = 4,
-        body_chars: int = 4000, progress: bool = False) -> calibration.CalibrationReport:
+def run(
+    profile,
+    *,
+    model: str,
+    sample: int = 200,
+    seed: int = 11,
+    workers: int = 4,
+    body_chars: int = 4000,
+    progress: bool = False,
+) -> calibration.CalibrationReport:
     """Sample *sample* files deterministically (by *seed*), judge each with the
     profile's rubric, and return a :class:`CalibrationReport`. Writes no cache."""
     kept, _ = resolve_index_files(profile.resolved_root(), profile.selection_rules, None)
@@ -97,8 +123,8 @@ def run(profile, *, model: str, sample: int = 200, seed: int = 11, workers: int 
 
     def judge(email: Dict[str, Any]) -> Dict[str, Any]:
         return summary.parse_response(
-            llm_client.chat(cl, model,
-                            rubrics.build_prompt(profile.rubric, email, body_chars)))
+            llm_client.chat(cl, model, rubrics.build_prompt(profile.rubric, email, body_chars))
+        )
 
     records = judge_sample(paths, load_email, judge, workers=workers, progress=progress)
     return calibration.CalibrationReport(

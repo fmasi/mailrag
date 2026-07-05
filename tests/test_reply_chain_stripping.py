@@ -273,7 +273,9 @@ class TestStripReplyChainAsianOutlookHeaders(unittest.TestCase):
         self._assert_strips_correctly(body, "확인했습니다", "이전 내용")
 
     def test_korean_not_stripped_at_start(self):
-        self._assert_not_stripped_at_start("보낸 사람: Kim\n날짜: 2024\n받는 사람: Lee\n주제: 회의\n본문.")
+        self._assert_not_stripped_at_start(
+            "보낸 사람: Kim\n날짜: 2024\n받는 사람: Lee\n주제: 회의\n본문."
+        )
 
     # ── Japanese ──────────────────────────────────────────────────────────────
 
@@ -282,7 +284,9 @@ class TestStripReplyChainAsianOutlookHeaders(unittest.TestCase):
         self._assert_strips_correctly(body, "ご確認ください", "古いメール")
 
     def test_japanese_not_stripped_at_start(self):
-        self._assert_not_stripped_at_start("差出人: Tanaka\n日付: 2024年\n宛先: Suzuki\n件名: テスト\nメール本文。")
+        self._assert_not_stripped_at_start(
+            "差出人: Tanaka\n日付: 2024年\n宛先: Suzuki\n件名: テスト\nメール本文。"
+        )
 
     # ── Chinese Simplified ────────────────────────────────────────────────────
 
@@ -291,7 +295,9 @@ class TestStripReplyChainAsianOutlookHeaders(unittest.TestCase):
         self._assert_strips_correctly(body, "请确认", "旧邮件内容")
 
     def test_chinese_simplified_not_stripped_at_start(self):
-        self._assert_not_stripped_at_start("发件人: Wang\n日期: 2024\n收件人: Li\n主题: 测试\n邮件正文。")
+        self._assert_not_stripped_at_start(
+            "发件人: Wang\n日期: 2024\n收件人: Li\n主题: 测试\n邮件正文。"
+        )
 
     # ── Chinese Traditional ───────────────────────────────────────────────────
 
@@ -300,7 +306,9 @@ class TestStripReplyChainAsianOutlookHeaders(unittest.TestCase):
         self._assert_strips_correctly(body, "請確認", "舊郵件內容")
 
     def test_chinese_traditional_not_stripped_at_start(self):
-        self._assert_not_stripped_at_start("寄件人: Chen\n日期: 2024\n收件者: Lin\n主旨: 測試\n郵件正文。")
+        self._assert_not_stripped_at_start(
+            "寄件人: Chen\n日期: 2024\n收件者: Lin\n主旨: 測試\n郵件正文。"
+        )
 
     # ── Thai ──────────────────────────────────────────────────────────────────
 
@@ -309,7 +317,9 @@ class TestStripReplyChainAsianOutlookHeaders(unittest.TestCase):
         self._assert_strips_correctly(body, "รับทราบครับ", "เนื้อหาเดิม")
 
     def test_thai_not_stripped_at_start(self):
-        self._assert_not_stripped_at_start("จาก: Somchai\nวันที่: 2024\nถึง: Malee\nหัวเรื่อง: ทดสอบ\nข้อความ")
+        self._assert_not_stripped_at_start(
+            "จาก: Somchai\nวันที่: 2024\nถึง: Malee\nหัวเรื่อง: ทดสอบ\nข้อความ"
+        )
 
     # ── Vietnamese ────────────────────────────────────────────────────────────
 
@@ -318,7 +328,9 @@ class TestStripReplyChainAsianOutlookHeaders(unittest.TestCase):
         self._assert_strips_correctly(body, "Đã xác nhận", "Nội dung cũ")
 
     def test_vietnamese_not_stripped_at_start(self):
-        self._assert_not_stripped_at_start("Từ: Nguyen\nNgày: 2024\nTới: Tran\nChủ đề: Test\nNội dung.")
+        self._assert_not_stripped_at_start(
+            "Từ: Nguyen\nNgày: 2024\nTới: Tran\nChủ đề: Test\nNội dung."
+        )
 
     # ── Indonesian / Malay ────────────────────────────────────────────────────
 
@@ -327,7 +339,9 @@ class TestStripReplyChainAsianOutlookHeaders(unittest.TestCase):
         self._assert_strips_correctly(body, "Sudah dikonfirmasi", "Konten lama")
 
     def test_indonesian_not_stripped_at_start(self):
-        self._assert_not_stripped_at_start("Dari: Budi\nTanggal: 2024\nKepada: Sari\nPerihal: Tes\nIsi pesan.")
+        self._assert_not_stripped_at_start(
+            "Dari: Budi\nTanggal: 2024\nKepada: Sari\nPerihal: Tes\nIsi pesan."
+        )
 
 
 class TestStripReplyChainJapaneseOutlookHeader(unittest.TestCase):
@@ -672,9 +686,7 @@ class TestStripReplyChainInvariants(unittest.TestCase):
         )
 
     def test_invariant_with_on_wrote(self):
-        self._assert_first_line_preserved(
-            "Will do.\n\nOn Mon Jan 1 2024, Alice wrote:\n> Sure."
-        )
+        self._assert_first_line_preserved("Will do.\n\nOn Mon Jan 1 2024, Alice wrote:\n> Sure.")
 
     def test_invariant_with_outlook_inline_header(self):
         self._assert_first_line_preserved(
@@ -697,7 +709,8 @@ class TestStripReplyChainInvariants(unittest.TestCase):
         for body in bodies:
             stripped = MailArchiveXLoader._strip_reply_chain(body)
             self.assertLessEqual(
-                len(stripped), len(body),
+                len(stripped),
+                len(body),
                 f"Stripping increased length for body: {body!r}",
             )
 

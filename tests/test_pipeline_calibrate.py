@@ -1,13 +1,14 @@
 import unittest
 from unittest import mock
 
-from src.profile import CorpusProfile
 from src.llm.calibration import CalibrationReport
+from src.profile import CorpusProfile
 
 
 class TestJudgeSample(unittest.TestCase):
     def test_collects_records_and_skips_errors(self):
         from src.pipeline import calibrate
+
         paths = ["a", "b", "boom"]
 
         def load_email(p):
@@ -16,8 +17,12 @@ class TestJudgeSample(unittest.TestCase):
             return {"sender": "s", "subject": p, "date": "d", "body": "x"}
 
         def judge(email):
-            return {"is_noise": email["subject"] == "a", "confidence": 1.0,
-                    "summary": "sum", "reason": "rs"}
+            return {
+                "is_noise": email["subject"] == "a",
+                "confidence": 1.0,
+                "summary": "sum",
+                "reason": "rs",
+            }
 
         recs = calibrate.judge_sample(paths, load_email, judge, workers=1)
         self.assertEqual(len(recs), 2)
@@ -27,6 +32,7 @@ class TestJudgeSample(unittest.TestCase):
 
     def test_threaded_collects_and_skips_errors(self):
         from src.pipeline import calibrate
+
         paths = ["a", "b", "boom", "c"]
 
         def load_email(p):
@@ -44,22 +50,41 @@ class TestJudgeSample(unittest.TestCase):
 class TestCalibrateRun(unittest.TestCase):
     def test_run_returns_report_for_profile_rubric(self):
         from src.pipeline import calibrate
-        prof = CorpusProfile(root="/r", selection_rules=[{"type": "prefix", "value": "a/"}],
-                             rubric="personal")
+
+        prof = CorpusProfile(
+            root="/r", selection_rules=[{"type": "prefix", "value": "a/"}], rubric="personal"
+        )
         sample_paths = ["/r/a/1.eml", "/r/a/2.eml"]
 
         def fake_judge_sample(paths, load_email, judge, workers, progress=False):
-            return [{"sender": "s", "subject": "Your invoice", "is_noise": True,
-                     "confidence": 1.0, "summary": "", "reason": "digest"},
-                    {"sender": "s", "subject": "Hi there", "is_noise": False,
-                     "confidence": 1.0, "summary": "a note", "reason": "human"}]
+            return [
+                {
+                    "sender": "s",
+                    "subject": "Your invoice",
+                    "is_noise": True,
+                    "confidence": 1.0,
+                    "summary": "",
+                    "reason": "digest",
+                },
+                {
+                    "sender": "s",
+                    "subject": "Hi there",
+                    "is_noise": False,
+                    "confidence": 1.0,
+                    "summary": "a note",
+                    "reason": "human",
+                },
+            ]
 
-        with mock.patch("src.pipeline.calibrate.resolve_index_files",
-                        return_value=(sample_paths, [])), \
-             mock.patch("src.pipeline.calibrate.sample_files", return_value=sample_paths), \
-             mock.patch("src.pipeline.calibrate.llm_client") as cl, \
-             mock.patch("src.pipeline.calibrate._make_load_email", return_value=lambda p: {}), \
-             mock.patch("src.pipeline.calibrate.judge_sample", side_effect=fake_judge_sample):
+        with (
+            mock.patch(
+                "src.pipeline.calibrate.resolve_index_files", return_value=(sample_paths, [])
+            ),
+            mock.patch("src.pipeline.calibrate.sample_files", return_value=sample_paths),
+            mock.patch("src.pipeline.calibrate.llm_client") as cl,
+            mock.patch("src.pipeline.calibrate._make_load_email", return_value=lambda p: {}),
+            mock.patch("src.pipeline.calibrate.judge_sample", side_effect=fake_judge_sample),
+        ):
             cl.make_client.return_value = mock.Mock()
             report = calibrate.run(prof, model="gemma", sample=2, workers=1)
 

@@ -4,7 +4,7 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 

@@ -3,6 +3,7 @@
 No network here — :func:`build_prompt` formats the prompt and
 :func:`parse_response` turns the model's reply into a normalized record.
 """
+
 from __future__ import annotations
 
 import json
@@ -73,7 +74,8 @@ Return ONLY this JSON (no markdown, no extra text):
 
 
 def _format_preceding(
-    preceding, per_email_chars: int,
+    preceding,
+    per_email_chars: int,
     header: str = "EARLIER messages in this thread (context only, oldest first):",
 ) -> str:
     """Render a thread-context block (empty string if no context messages).
@@ -95,10 +97,13 @@ def _format_preceding(
     return "\n".join(lines) + "\n\n"
 
 
-def build_thread_aware_prompt(email: Dict[str, Any], preceding,
-                              body_chars: int = _BODY_CHARS,
-                              per_email_chars: int = 800,
-                              max_preceding: int = 6) -> str:
+def build_thread_aware_prompt(
+    email: Dict[str, Any],
+    preceding,
+    body_chars: int = _BODY_CHARS,
+    per_email_chars: int = 800,
+    max_preceding: int = 6,
+) -> str:
     """Per-email summarize+judge prompt that resolves references using the *preceding*
     emails in the same thread (the request a terse reply answers). Append-only by
     design (no future context); emits the same schema as :func:`build_prompt`.
@@ -143,10 +148,13 @@ Return ONLY this JSON (no markdown, no extra text):
 {{"is_noise": <bool>, "confidence": <float>, "summary": "<text>", "reason": "<text>"}}"""
 
 
-def build_whole_thread_prompt(email: Dict[str, Any], others,
-                              body_chars: int = _BODY_CHARS,
-                              per_email_chars: int = 800,
-                              max_others: int = 24) -> str:
+def build_whole_thread_prompt(
+    email: Dict[str, Any],
+    others,
+    body_chars: int = _BODY_CHARS,
+    per_email_chars: int = 800,
+    max_others: int = 24,
+) -> str:
     """Per-email summarize+judge prompt conditioned on the WHOLE thread.
 
     The bidirectional control for the row-3 (preceding-only) method: *others* are all
@@ -163,8 +171,10 @@ def build_whole_thread_prompt(email: Dict[str, Any], others,
         body = body[:body_chars] + " […truncated]"
     return _WHOLE_THREAD_PROMPT_TEMPLATE.format(
         others_block=_format_preceding(
-            ctx, per_email_chars,
-            header="OTHER messages in this thread (full context, oldest first):"),
+            ctx,
+            per_email_chars,
+            header="OTHER messages in this thread (full context, oldest first):",
+        ),
         sender=(email.get("sender") or "")[:200],
         date=email.get("date") or "unknown",
         subject=(email.get("subject") or "")[:300],
@@ -185,7 +195,7 @@ def _first_json_object(text: str) -> Optional[str]:
         elif c == "}":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return text[start : i + 1]
     return None
 
 
@@ -227,8 +237,7 @@ def _extract_fields_regex(text: str) -> Optional[Dict[str, Any]]:
     mr = re.search(r'"reason"\s*:\s*"(.*?)"\s*}', text, re.DOTALL)
     reason = mr.group(1) if mr else ""
 
-    return {"is_noise": is_noise, "confidence": confidence,
-            "summary": summary, "reason": reason}
+    return {"is_noise": is_noise, "confidence": confidence, "summary": summary, "reason": reason}
 
 
 def _normalize(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -243,8 +252,7 @@ def _normalize(data: Dict[str, Any]) -> Dict[str, Any]:
     confidence = max(0.0, min(1.0, confidence))
     summary = "" if is_noise else str(data.get("summary", "")).strip()
     reason = str(data.get("reason", "")).strip()
-    return {"is_noise": is_noise, "confidence": confidence,
-            "summary": summary, "reason": reason}
+    return {"is_noise": is_noise, "confidence": confidence, "summary": summary, "reason": reason}
 
 
 def parse_response(text: str) -> Dict[str, Any]:

@@ -1,4 +1,5 @@
 import unittest
+
 from src.attachments.extract import Extractor, Status
 from src.attachments.extract.ocr.base import OcrResult
 

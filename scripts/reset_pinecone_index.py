@@ -29,9 +29,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.config.settings import RAGConfig  # noqa: E402
 
-CHECKPOINT_FILE = os.path.join(
-    os.path.dirname(__file__), ".vector_batch_checkpoint.txt"
-)
+CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), ".vector_batch_checkpoint.txt")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -72,11 +70,10 @@ def main() -> None:
     # Get Pinecone credentials with fallbacks
     api_key = os.environ.get("PINECONE_API_KEY")
     index_name = os.environ.get("PINECONE_INDEX_NAME", "email-rag")
-    
+
     if not api_key:
         raise ValueError(
-            "PINECONE_API_KEY is not set. "
-            "Either set it as a codespace secret or in .env file."
+            "PINECONE_API_KEY is not set. Either set it as a codespace secret or in .env file."
         )
 
     if not args.yes:
@@ -91,18 +88,18 @@ def main() -> None:
 
         pc = Pinecone(api_key=api_key)
         index = pc.Index(index_name)
-        
+
         # Get current stats before deletion
         stats_before = index.describe_index_stats()
         vector_count = stats_before.total_vector_count
-        
+
         if vector_count == 0:
             print(f"✓ Index '{index_name}' is already empty (0 vectors)")
         else:
             print(f"Deleting {vector_count} vectors from index '{index_name}'...")
             index.delete(delete_all=True)
             print(f"✓ All vectors deleted from '{index_name}'")
-        
+
     except Exception as e:
         print(f"✗ Error deleting vectors from Pinecone: {e}", file=sys.stderr)
         sys.exit(1)
@@ -116,11 +113,11 @@ def main() -> None:
             print(f"✗ Error removing checkpoint file: {e}", file=sys.stderr)
             sys.exit(1)
     else:
-        print(f"✓ No checkpoint file found (already clean)")
+        print("✓ No checkpoint file found (already clean)")
 
     print("=" * 60)
-    print(f"✓ Reset complete. Ready to run:")
-    print(f"  poetry run python scripts/batch_index_to_vector_store.py")
+    print("✓ Reset complete. Ready to run:")
+    print("  poetry run python scripts/batch_index_to_vector_store.py")
 
 
 if __name__ == "__main__":

@@ -5,12 +5,12 @@ import tempfile
 import unittest
 from unittest import mock
 
-from src import onboard
 from src.onboard import _coverage_at3, validate_coverage
 
 
 class _Node:
     """Minimal node whose metadata _node_metadata can read."""
+
     def __init__(self, thread_id):
         self.metadata = {"thread_id": thread_id, "message_id": "m"}
 
@@ -25,12 +25,13 @@ class _Searcher:
 
 class TestCoverage(unittest.TestCase):
     def test_coverage_at3_counts_top3_distinct(self):
-        s = _Searcher({
-            "q1": ["t1", "tx", "ty"],         # gold t1 at distinct-rank 0 -> covered
-            "q2": ["ta", "tb", "tc", "t2"],   # gold t2 at distinct-rank 3 -> not covered
-        })
-        queries = [{"query": "q1", "thread_id": "t1"},
-                   {"query": "q2", "thread_id": "t2"}]
+        s = _Searcher(
+            {
+                "q1": ["t1", "tx", "ty"],  # gold t1 at distinct-rank 0 -> covered
+                "q2": ["ta", "tb", "tc", "t2"],  # gold t2 at distinct-rank 3 -> not covered
+            }
+        )
+        queries = [{"query": "q1", "thread_id": "t1"}, {"query": "q2", "thread_id": "t2"}]
         cov, n = _coverage_at3(s, queries)
         self.assertEqual(n, 2)
         self.assertAlmostEqual(cov, 0.5)

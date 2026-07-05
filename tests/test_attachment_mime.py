@@ -1,6 +1,6 @@
 import unittest
 
-from src.attachments.extract.mime import mime_base, mime_charset, is_pdf
+from src.attachments.extract.mime import is_pdf, mime_base, mime_charset
 
 
 class TestMimeBase(unittest.TestCase):

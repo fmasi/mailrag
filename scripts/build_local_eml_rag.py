@@ -13,14 +13,16 @@ Run in the host `rag` conda env (MPS lives on the host). Examples:
   # 3) the real build:
   conda run -n rag python scripts/build_local_eml_rag.py --chunk-size 512 --recreate
 """
+
 import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.pipeline import build as build_stage
+from src.pipeline import profile as profile_stage
 from src.profile import CorpusProfile
-from src.pipeline import build as build_stage, profile as profile_stage
 
 
 def main(argv=None):
@@ -29,31 +31,58 @@ def main(argv=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--selection", default=os.path.expanduser("~/rag_eml.selection.json"))
-    ap.add_argument("--blacklist", default=None,
-                    help="(accepted for backwards compatibility; no-op in current stage)")
-    ap.add_argument("--summary-cache", default=None,
-                    help="Path to the LLM Pass-2 SQLite cache; injects summaries into payload")
+    ap.add_argument(
+        "--blacklist",
+        default=None,
+        help="(accepted for backwards compatibility; no-op in current stage)",
+    )
+    ap.add_argument(
+        "--summary-cache",
+        default=None,
+        help="Path to the LLM Pass-2 SQLite cache; injects summaries into payload",
+    )
     ap.add_argument("--collection", default="email-rag")
     ap.add_argument("--qdrant-url", default="http://localhost:6333")
     ap.add_argument("--chunk-size", type=int, default=512)
     ap.add_argument("--chunk-overlap", type=int, default=64)
-    ap.add_argument("--embed-batch", type=int, default=32,
-                    help="(accepted for backwards compatibility; no-op in current stage)")
-    ap.add_argument("--upsert-batch", type=int, default=256,
-                    help="(accepted for backwards compatibility; no-op in current stage)")
+    ap.add_argument(
+        "--embed-batch",
+        type=int,
+        default=32,
+        help="(accepted for backwards compatibility; no-op in current stage)",
+    )
+    ap.add_argument(
+        "--upsert-batch",
+        type=int,
+        default=256,
+        help="(accepted for backwards compatibility; no-op in current stage)",
+    )
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--only-files", default=None,
-                    help="path to a newline list of .eml paths; restrict the build "
-                         "to their intersection with the selection (spike slice). "
-                         "(accepted for backwards compatibility; no-op in current stage)")
-    ap.add_argument("--profile", action="store_true",
-                    help="report cleaned body token lengths + suggest chunk_size, then exit")
+    ap.add_argument(
+        "--only-files",
+        default=None,
+        help="path to a newline list of .eml paths; restrict the build "
+        "to their intersection with the selection (spike slice). "
+        "(accepted for backwards compatibility; no-op in current stage)",
+    )
+    ap.add_argument(
+        "--profile",
+        action="store_true",
+        help="report cleaned body token lengths + suggest chunk_size, then exit",
+    )
     ap.add_argument("--recreate", action="store_true")
-    ap.add_argument("--embed-summary", action="store_true",
-                    help="contextual retrieval: prepend each email's Pass-2 summary "
-                         "to the chunk text before embedding (needs --summary-cache)")
-    ap.add_argument("--embed-max-length", type=int, default=None,
-                    help="(accepted for backwards compatibility; no-op in current stage)")
+    ap.add_argument(
+        "--embed-summary",
+        action="store_true",
+        help="contextual retrieval: prepend each email's Pass-2 summary "
+        "to the chunk text before embedding (needs --summary-cache)",
+    )
+    ap.add_argument(
+        "--embed-max-length",
+        type=int,
+        default=None,
+        help="(accepted for backwards compatibility; no-op in current stage)",
+    )
     args = ap.parse_args(argv)
 
     # Warn about accepted-but-ignored flags so callers know they're no-ops.
@@ -69,8 +98,11 @@ def main(argv=None):
     if args.upsert_batch != 256:
         _noop_flags.append("--upsert-batch")
     if _noop_flags:
-        print(f"[shim] WARNING: the following flag(s) are parsed but currently no-ops "
-              f"(stage does not expose them yet): {', '.join(_noop_flags)}", flush=True)
+        print(
+            f"[shim] WARNING: the following flag(s) are parsed but currently no-ops "
+            f"(stage does not expose them yet): {', '.join(_noop_flags)}",
+            flush=True,
+        )
 
     prof = CorpusProfile.load(args.selection)
     prof.collection = args.collection
@@ -90,13 +122,14 @@ def main(argv=None):
     # Inject summaries if a summary-cache is provided (contextual retrieval).
     summaries = None
     if args.summary_cache:
-        from src.llm.cache import Pass2Cache
-        from src.llm.pass2 import inject_summaries
         from src.data.loaders.mail_archive_x import MailArchiveXLoader
         from src.ingest.local_source import resolve_index_files
+        from src.llm.cache import Pass2Cache
+        from src.llm.pass2 import inject_summaries
+
         kept, _ = resolve_index_files(prof.resolved_root(), prof.selection_rules, None)
         if args.limit:
-            kept = kept[:args.limit]
+            kept = kept[: args.limit]
         emails = MailArchiveXLoader(eml_files=kept).load()
         _cache = Pass2Cache(args.summary_cache)
         n_sum = inject_summaries(emails, _cache)
@@ -108,6 +141,7 @@ def main(argv=None):
         # surfaces as metadata["summary"].
 
     from src.ingest.embedder import BgeM3Embedder
+
     res = build_stage.run(
         prof,
         embedder=BgeM3Embedder(device="mps", use_fp16=True),

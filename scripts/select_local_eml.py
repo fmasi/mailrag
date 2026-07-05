@@ -14,6 +14,7 @@ Usage:
 The pure logic lives in ``src/ingest/selection.py`` (unit-tested); this script is
 thin interactive glue and requires the ``questionary`` package at runtime.
 """
+
 import argparse
 import os
 import sys
@@ -21,14 +22,12 @@ import sys
 # Allow running from the repo root without installation.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.profile import CorpusProfile
 from src.pipeline import select as select_stage
+from src.profile import CorpusProfile
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description="Guided selection over a local .eml export."
-    )
+    parser = argparse.ArgumentParser(description="Guided selection over a local .eml export.")
     parser.add_argument(
         "--root",
         default=os.path.expanduser("~/rag_eml"),

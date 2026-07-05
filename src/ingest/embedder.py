@@ -8,6 +8,7 @@ smoke-test, not the unit suite — so its identity/shape live in class-level met
 that callers (collection sizing, hybrid-vs-dense selection) can read without loading
 the model.
 """
+
 from typing import Dict, List, Protocol, Tuple, runtime_checkable
 
 import numpy as np
@@ -43,9 +44,13 @@ class BgeM3Embedder:
     dim: int = 1024
     produces_sparse: bool = True
 
-    def __init__(self, model_name: str = "BAAI/bge-m3", device: str | None = None, use_fp16: bool = True):
+    def __init__(
+        self, model_name: str = "BAAI/bge-m3", device: str | None = None, use_fp16: bool = True
+    ):
         from FlagEmbedding import BGEM3FlagModel
+
         from src.ingest.device import pick_device
+
         if device is None:
             device = pick_device()
 
@@ -87,17 +92,22 @@ class NimEmbedder:
         "nvidia/nv-embed-v1": 4096,
     }
 
-    def __init__(self, model: str = "nvidia/nv-embedqa-e5-v5", api_key: str | None = None,
-                 dim: int | None = None, truncate: str = "NONE", **kwargs):
+    def __init__(
+        self,
+        model: str = "nvidia/nv-embedqa-e5-v5",
+        api_key: str | None = None,
+        dim: int | None = None,
+        truncate: str = "NONE",
+        **kwargs,
+    ):
         import os
+
         from llama_index.embeddings.nvidia import NVIDIAEmbedding
 
         self.name = model
         self.dim = dim if dim is not None else self._KNOWN_DIMS.get(model)
         if self.dim is None:
-            raise ValueError(
-                f"Unknown dim for embedder {model!r}; pass dim=... explicitly."
-            )
+            raise ValueError(f"Unknown dim for embedder {model!r}; pass dim=... explicitly.")
         key = api_key or os.environ.get("NVIDIA_API_KEY")
         self._embed = NVIDIAEmbedding(model=model, api_key=key, **kwargs)
         # truncate="NONE" => the NIM errors on over-length input rather than
@@ -107,8 +117,9 @@ class NimEmbedder:
         except Exception:  # pragma: no cover - connector without the attribute
             pass
 
-    def encode(self, texts: List[str], batch_size: int = 32, max_length: int = 512
-               ) -> Tuple[np.ndarray, List[Dict[str, float]]]:
+    def encode(
+        self, texts: List[str], batch_size: int = 32, max_length: int = 512
+    ) -> Tuple[np.ndarray, List[Dict[str, float]]]:
         """Return ``(dense_vecs [N, dim], [{} ...])`` — dense-only, empty sparse.
 
         Batching is handled by the connector (``embed_batch_size``); the

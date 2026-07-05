@@ -1,4 +1,5 @@
 """XLSX handler (openpyxl)."""
+
 from __future__ import annotations
 
 import io

@@ -7,6 +7,7 @@ gain a topical, entity-rich vector (and the summary's terms also strengthen the
 sparse/lexical side). Opt-in via the build's ``--embed-summary`` flag; the
 default build leaves the embedded text unchanged.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -15,9 +16,12 @@ SUMMARY_EMBED_HEADROOM = 256  # extra token budget reserved for a prepended summ
 # so it augments the body chunk rather than displacing its tail at encode time (EXPERIMENTS §4.7).
 
 
-def embed_max_length(chunk_size: int, embed_summary: bool,
-                     override: Optional[int] = None,
-                     headroom: int = SUMMARY_EMBED_HEADROOM) -> int:
+def embed_max_length(
+    chunk_size: int,
+    embed_summary: bool,
+    override: Optional[int] = None,
+    headroom: int = SUMMARY_EMBED_HEADROOM,
+) -> int:
     """Token ceiling for bge-m3 encoding.
 
     Default is ``chunk_size`` (body-only builds, unchanged). When a summary is

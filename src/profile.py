@@ -1,8 +1,11 @@
 # src/profile.py
 """Single source of truth threaded through every pipeline stage."""
+
 from __future__ import annotations
-import json, os
-from dataclasses import dataclass, field, fields, asdict
+
+import json
+import os
+from dataclasses import asdict, dataclass, field, fields
 from typing import Optional
 
 
@@ -12,11 +15,11 @@ class CorpusProfile:
     selection_rules: list = field(default_factory=list)
     chunk_size: int = 512
     chunk_overlap: int = 64
-    rubric: str = "personal"          # stored now; consumed in increment 1b
+    rubric: str = "personal"  # stored now; consumed in increment 1b
     collection: str = "email-rag"
     qdrant_url: str = "http://localhost:6333"
     pass2_cache: Optional[str] = None
-    blacklist: Optional[str] = None     # content-addressed drop set (written by prune)
+    blacklist: Optional[str] = None  # content-addressed drop set (written by prune)
     calibration: Optional[dict] = None  # written by 1b's calibrate gate
     updated_at: Optional[str] = None
 

@@ -1,4 +1,5 @@
 """Tests for gen_thread_summaries helpers (pure, no LM Studio / Qdrant needed)."""
+
 import importlib
 import json
 import os
@@ -13,6 +14,7 @@ import unittest
 # ---------------------------------------------------------------------------
 try:
     import sys
+
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     _mod = importlib.import_module("scripts.eval.gen_thread_summaries")
     _record_failure = _mod._record_failure
@@ -23,7 +25,9 @@ except Exception as _import_err:  # noqa: BLE001
     _import_err_msg = str(_import_err)
 
 
-@unittest.skipUnless(_IMPORT_OK, f"gen_thread_summaries not importable: {'' if _IMPORT_OK else _import_err_msg}")  # type: ignore[name-defined]
+@unittest.skipUnless(
+    _IMPORT_OK, f"gen_thread_summaries not importable: {'' if _IMPORT_OK else _import_err_msg}"
+)  # type: ignore[name-defined]
 class TestRecordFailure(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -66,9 +70,12 @@ class TestRecordFailure(unittest.TestCase):
             self.fail(f"_record_failure raised on unwritable path: {exc}")
 
 
-@unittest.skipUnless(_IMPORT_OK, f"gen_thread_summaries not importable: {'' if _IMPORT_OK else _import_err_msg}")  # type: ignore[name-defined]
+@unittest.skipUnless(
+    _IMPORT_OK, f"gen_thread_summaries not importable: {'' if _IMPORT_OK else _import_err_msg}"
+)  # type: ignore[name-defined]
 class TestBuildPromptDispatch(unittest.TestCase):
     """The mode->prompt dispatch is the only branching logic in the network loop."""
+
     def _e(self, body):
         return {"sender": "s@x.com", "date": "2026-01-01", "subject": "Re: x", "body": body}
 

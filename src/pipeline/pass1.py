@@ -1,6 +1,8 @@
 """Pass-1: cheap, zero-loss noise pass. Tags noise_candidate on any rule match;
 drops nothing. The single home for noise tagging (was inlined in build_local_eml_rag.py)."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 

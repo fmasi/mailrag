@@ -1,4 +1,5 @@
 import unittest
+
 from src.onboard import filter_kept
 
 
@@ -16,9 +17,9 @@ class TestFilterKept(unittest.TestCase):
     def test_drops_confident_noise_only(self):
         a, b, c = _Email("a"), _Email("b"), _Email("c")
         judgments = {
-            "a": _rec(True, 0.9),            # dropped
-            "b": _rec(True, 0.5),            # kept (below threshold)
-            "c": _rec(False, 0.99, "ham"),   # kept, summary set
+            "a": _rec(True, 0.9),  # dropped
+            "b": _rec(True, 0.5),  # kept (below threshold)
+            "c": _rec(False, 0.99, "ham"),  # kept, summary set
         }
         kept, dropped = filter_kept([a, b, c], judgments, min_confidence=0.7)
         self.assertEqual(dropped, 1)

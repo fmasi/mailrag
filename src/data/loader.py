@@ -40,6 +40,7 @@ def load_emails(
         loader = MailArchiveXLoader(backup_dir)
     elif source == "azure_blob":
         from src.data.loaders import AzureBlobEmailLoader  # noqa: PLC0415 (optional dep)
+
         loader = AzureBlobEmailLoader()
     else:
         raise ValueError(
@@ -50,8 +51,7 @@ def load_emails(
 
     normalized_emails = loader.load(num_samples=num_samples)
     documents = [
-        email.to_document(doc_id=f"{email.source}_{i}")
-        for i, email in enumerate(normalized_emails)
+        email.to_document(doc_id=f"{email.source}_{i}") for i, email in enumerate(normalized_emails)
     ]
     return documents
 
@@ -64,29 +64,29 @@ def load_enron_dataset(num_samples: Optional[int] = None) -> List[Document]:
 def validate_documents(documents: List[Document]) -> None:
     """
     Validate that documents were loaded correctly.
-    
+
     Args:
         documents: List of Document objects to validate
-        
+
     Why this approach:
         - Good practice to validate data before indexing
         - Helps catch issues early (e.g., empty documents)
         - Provides feedback on data quality
     """
     print("\nValidating documents...")
-    
+
     # Check for empty documents
     empty_docs = [d for d in documents if not d.text or len(d.text.strip()) == 0]
     if empty_docs:
         print(f"  Warning: {len(empty_docs)} empty documents found")
-    
+
     # Check metadata completeness
     docs_with_metadata = sum(1 for d in documents if d.metadata)
     print(f"  ✓ {docs_with_metadata}/{len(documents)} documents have metadata")
-    
+
     # Show sample
     if documents:
-        print(f"\n  Sample document:")
+        print("\n  Sample document:")
         print(f"    From: {documents[0].metadata.get('sender', 'N/A')}")
         print(f"    Subject: {documents[0].metadata.get('subject', 'N/A')}")
         print(f"    Date: {documents[0].metadata.get('date', 'N/A')}")

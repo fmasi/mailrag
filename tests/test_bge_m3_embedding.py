@@ -1,4 +1,5 @@
 """Tests for the bge-m3 LlamaIndex dense adapter + sparse query fn."""
+
 import unittest
 from unittest.mock import MagicMock
 

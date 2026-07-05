@@ -3,6 +3,7 @@
 Stdlib-only so the TDD loop runs under plain `python3` on the host (the Azure
 batch script pulls heavy deps and only runs in the devcontainer).
 """
+
 import os
 import tempfile
 import unittest
@@ -21,13 +22,16 @@ def _make_tree(root, rel_files):
 class TestListEmlRelpaths(unittest.TestCase):
     def test_lists_only_eml_as_sorted_forward_slash_relpaths(self):
         with tempfile.TemporaryDirectory() as root:
-            _make_tree(root, [
-                "top.eml",
-                "Inbox/Acme Corp/a.eml",
-                "Inbox/Google/b.eml",
-                "Acme Corp/Archive/c.eml",
-                "Inbox/Acme Corp/notes.txt",  # non-eml ignored
-            ])
+            _make_tree(
+                root,
+                [
+                    "top.eml",
+                    "Inbox/Acme Corp/a.eml",
+                    "Inbox/Google/b.eml",
+                    "Acme Corp/Archive/c.eml",
+                    "Inbox/Acme Corp/notes.txt",  # non-eml ignored
+                ],
+            )
             self.assertEqual(
                 selection.list_eml_relpaths(root),
                 [
@@ -81,13 +85,15 @@ class TestMatchesRule(unittest.TestCase):
 
 class TestDiscoverStructure(unittest.TestCase):
     def test_tracks_roots_children_and_root_files(self):
-        tree, has_root = selection.discover_structure([
-            "top.eml",
-            "Inbox/message.eml",
-            "Google/direct.eml",
-            "Google/All Mail/a.eml",
-            "Google/Sent/b.eml",
-        ])
+        tree, has_root = selection.discover_structure(
+            [
+                "top.eml",
+                "Inbox/message.eml",
+                "Google/direct.eml",
+                "Google/All Mail/a.eml",
+                "Google/Sent/b.eml",
+            ]
+        )
         self.assertTrue(has_root)
         self.assertEqual(tree["Inbox/"]["children"], set())
         self.assertTrue(tree["Inbox/"]["has_direct_files"])
@@ -101,12 +107,15 @@ class TestDiscoverStructure(unittest.TestCase):
 class TestSelectEmlPaths(unittest.TestCase):
     def test_returns_absolute_paths_matching_any_rule(self):
         with tempfile.TemporaryDirectory() as root:
-            _make_tree(root, [
-                "Inbox/Acme Corp/a.eml",
-                "Inbox/Google/b.eml",
-                "Acme Corp/Archive/c.eml",
-                "top.eml",
-            ])
+            _make_tree(
+                root,
+                [
+                    "Inbox/Acme Corp/a.eml",
+                    "Inbox/Google/b.eml",
+                    "Acme Corp/Archive/c.eml",
+                    "top.eml",
+                ],
+            )
             rules = [
                 {"type": "prefix", "value": "Inbox/Acme Corp/"},
                 {"type": "prefix", "value": "Acme Corp/"},
@@ -161,7 +170,9 @@ class TestPromptGuidedSelection(unittest.TestCase):
         )
 
     def test_include_whole_folder_uses_prefix_rule(self):
-        folder_tree = {"Acme Corp/": {"children": {"Acme Corp/Archive/"}, "has_direct_files": False}}
+        folder_tree = {
+            "Acme Corp/": {"children": {"Acme Corp/Archive/"}, "has_direct_files": False}
+        }
         fake = _FakeQuestionary(["all"])
         rules = selection.prompt_guided_selection(
             folder_tree, has_container_root_files=False, questionary=fake

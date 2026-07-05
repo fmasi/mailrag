@@ -4,6 +4,7 @@ Confirms the key used in the ingest path (get_content(MetadataMode.NONE))
 treats identical body text from different senders as one. Imports llama_index,
 so runs in the devcontainer.
 """
+
 import unittest
 
 from llama_index.core.schema import MetadataMode, TextNode

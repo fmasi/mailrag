@@ -1,4 +1,5 @@
 """DOCX handler (python-docx)."""
+
 from __future__ import annotations
 
 import io
@@ -8,7 +9,9 @@ from src.attachments.extract.result import ExtractResult, Status, ok
 
 class DocxHandler:
     def can_handle(self, mime: str, filename: str) -> bool:
-        return (filename or "").lower().endswith(".docx") or "wordprocessingml" in (mime or "").lower()
+        return (filename or "").lower().endswith(".docx") or "wordprocessingml" in (
+            mime or ""
+        ).lower()
 
     def extract(self, data: bytes, mime: str, filename: str) -> ExtractResult:
         try:

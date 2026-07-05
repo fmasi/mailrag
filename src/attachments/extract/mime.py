@@ -4,6 +4,7 @@ Stored mimes may carry parameters (``text/plain; charset=iso-8859-1`` — the in
 preserves the declared charset for text parts), so anything matching on a content
 type must compare against the parameter-stripped base.
 """
+
 from __future__ import annotations
 
 from typing import Optional

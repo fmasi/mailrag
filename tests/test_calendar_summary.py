@@ -1,4 +1,5 @@
 """Tests for calendar-invite detection + one-line summarization (stdlib-only)."""
+
 import unittest
 
 from src.data import calendar_summary as cal
@@ -19,8 +20,14 @@ END:VCALENDAR
 
 class TestIsCalendarSubject(unittest.TestCase):
     def test_matches_known_prefixes_case_insensitively(self):
-        for s in ["Canceled: x", "Accepted: y", "Declined: z",
-                  "Invitation: a", "Updated invitation: b", "tentative: c"]:
+        for s in [
+            "Canceled: x",
+            "Accepted: y",
+            "Declined: z",
+            "Invitation: a",
+            "Updated invitation: b",
+            "tentative: c",
+        ]:
             self.assertTrue(cal.is_calendar_subject(s), s)
 
     def test_rejects_normal_subjects(self):

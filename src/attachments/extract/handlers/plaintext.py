@@ -1,4 +1,5 @@
 """Plain-text family: text/plain, text/csv, text/calendar (.txt/.csv/.ics)."""
+
 from __future__ import annotations
 
 from src.attachments.extract.mime import mime_base, mime_charset
@@ -15,7 +16,7 @@ def decode_text(data: bytes, charset: str | None = None) -> str:
         try:
             return data.decode(charset)
         except (UnicodeDecodeError, LookupError):
-            pass   # mislabeled or unknown charset -> fall through
+            pass  # mislabeled or unknown charset -> fall through
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:

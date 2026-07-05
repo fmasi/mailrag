@@ -6,16 +6,17 @@ ONLY on the scan-flagged suspects (clusters at/above a score cutoff) — the thr
 intend to drop — so `prune` can blacklist them before the expensive summary pass.
 See docs/superpowers/specs/2026-06-05-persona-engine-judge-prune-design.md.
 """
+
 from __future__ import annotations
 
 import json
 import os
 from typing import Any, Dict, List
 
-from src.llm.pass2 import run_pass
-from src.llm.cache import Pass2Cache
 from src.llm import client as llm_client
-from src.llm import summary, rubrics
+from src.llm import rubrics, summary
+from src.llm.cache import Pass2Cache
+from src.llm.pass2 import run_pass
 from src.pipeline.pass2 import _make_load_email
 
 
@@ -37,11 +38,18 @@ def select_suspects(scan_json: Dict[str, Any], min_score: float) -> List[str]:
     return list(seen)
 
 
-def run(profile, *, model: str, scan_json: str, min_score: float = 0.6,
-        workers: int = 1, body_chars: int = 4000, progress: bool = True) -> Dict[str, int]:
+def run(
+    profile,
+    *,
+    model: str,
+    scan_json: str,
+    min_score: float = 0.6,
+    workers: int = 1,
+    body_chars: int = 4000,
+    progress: bool = True,
+) -> Dict[str, int]:
     if not os.path.exists(scan_json):
-        raise ValueError(
-            f"scan JSON not found: {scan_json}; run `mailrag scan` first")
+        raise ValueError(f"scan JSON not found: {scan_json}; run `mailrag scan` first")
     suspects = select_suspects(_load_json(scan_json), min_score)
     cache = Pass2Cache(profile.pass2_cache)
     cl = llm_client.make_client()
@@ -49,10 +57,13 @@ def run(profile, *, model: str, scan_json: str, min_score: float = 0.6,
 
     def judge_fn(email: Dict[str, Any]) -> Dict[str, Any]:
         return summary.parse_response(
-            llm_client.chat(cl, model,
-                            rubrics.build_judge_prompt(profile.rubric, email, body_chars)))
+            llm_client.chat(
+                cl, model, rubrics.build_judge_prompt(profile.rubric, email, body_chars)
+            )
+        )
 
-    counts = run_pass(suspects, cache, load_email, judge_fn, model,
-                      progress=progress, workers=workers)
+    counts = run_pass(
+        suspects, cache, load_email, judge_fn, model, progress=progress, workers=workers
+    )
     cache.close()
     return {**counts, "suspects": len(suspects)}

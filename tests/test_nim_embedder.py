@@ -5,6 +5,7 @@ no network calls and spend no credits. NimEmbedder is dense-only
 (produces_sparse=False): the OpenAI-style /embeddings endpoint returns a single
 dense vector and cannot carry learned sparse weights.
 """
+
 import unittest
 from unittest import mock
 
@@ -27,12 +28,14 @@ def _patched_connector(batch_return):
 class TestNimEmbedder(unittest.TestCase):
     def test_produces_sparse_is_false(self):
         from src.ingest.embedder import NimEmbedder
+
         self.assertFalse(NimEmbedder.produces_sparse)
 
     def test_known_model_sets_dim_and_name(self):
         ctx, _ = _patched_connector([[0.0] * 1024])
         with ctx:
             from src.ingest.embedder import NimEmbedder
+
             e = NimEmbedder(model="nvidia/nv-embedqa-e5-v5", api_key="k")
             self.assertEqual(e.dim, 1024)
             self.assertEqual(e.name, "nvidia/nv-embedqa-e5-v5")
@@ -41,6 +44,7 @@ class TestNimEmbedder(unittest.TestCase):
         ctx, _ = _patched_connector([[0.0] * 8])
         with ctx:
             from src.ingest.embedder import NimEmbedder
+
             with self.assertRaisesRegex(ValueError, "dim"):
                 NimEmbedder(model="nvidia/some-future-embedder", api_key="k")
 
@@ -48,6 +52,7 @@ class TestNimEmbedder(unittest.TestCase):
         ctx, inst = _patched_connector([[0.1, 0.2], [0.3, 0.4]])
         with ctx:
             from src.ingest.embedder import NimEmbedder
+
             e = NimEmbedder(model="nvidia/nv-embedqa-e5-v5", api_key="k", dim=2)
             dense, sparse = e.encode(["a", "b"])
             self.assertEqual(dense.shape, (2, 2))
@@ -58,6 +63,7 @@ class TestNimEmbedder(unittest.TestCase):
         ctx, inst = _patched_connector([[0.0] * 1024])
         with ctx:
             from src.ingest.embedder import NimEmbedder
+
             NimEmbedder(model="nvidia/nv-embedqa-e5-v5", api_key="k")
             # fail-loud: never silently truncate over-length chunks
             self.assertEqual(inst.truncate, "NONE")
@@ -65,13 +71,15 @@ class TestNimEmbedder(unittest.TestCase):
     def test_satisfies_embedder_protocol(self):
         ctx, _ = _patched_connector([[0.0] * 1024])
         with ctx:
-            from src.ingest.embedder import NimEmbedder, Embedder
+            from src.ingest.embedder import Embedder, NimEmbedder
+
             self.assertIsInstance(NimEmbedder(api_key="k"), Embedder)
 
     def test_make_embedder_nvidia_e5(self):
         ctx, _ = _patched_connector([[0.0] * 1024])
         with ctx:
-            from src.ingest.embedder import make_embedder, NimEmbedder
+            from src.ingest.embedder import NimEmbedder, make_embedder
+
             e = make_embedder("nvidia-e5", api_key="k")
             self.assertIsInstance(e, NimEmbedder)
             self.assertEqual(e.dim, 1024)

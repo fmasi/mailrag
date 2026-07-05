@@ -15,10 +15,10 @@ from batch_index_to_vector_store import (  # noqa: E402
     _discover_blob_structure,
     _filter_blobs_by_selection,
     _normalize_prefix,
-    _read_checkpoint_state,
-    _render_selection_tree,
-    _remove_checkpoint,
     _prompt_guided_selection,
+    _read_checkpoint_state,
+    _remove_checkpoint,
+    _render_selection_tree,
     _write_checkpoint_state,
 )
 
