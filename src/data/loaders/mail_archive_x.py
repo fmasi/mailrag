@@ -519,6 +519,10 @@ class MailArchiveXLoader(EmailLoader):
         # only the first), the real reply is at the bottom.  Re-extract from
         # the bottom and use whichever result contains actual non-quoted content.
         #
+        # Also triggers when the result is *only* a leading "On … wrote:"
+        # attribution line with no real content above it — the actual reply
+        # sits below the quoted block (issue #3).
+        #
         # We do NOT trigger this for emails whose first non-blank line is a hard
         # separator (e.g. "-----Forwarded-----") — those are forwarded-only
         # emails correctly preserved in full by the has_real_content guard above.
@@ -526,7 +530,15 @@ class MailArchiveXLoader(EmailLoader):
             l for l in top_result.splitlines() if l.strip() and not l.strip().startswith(">")
         ]
         first_real = next((l.strip() for l in lines if l.strip()), "")
-        if not top_nonquoted and first_real.startswith(">"):
+        # Detect attribution-only result: all non-blank content is the lead
+        # "On … wrote:" header (ends with "wrote:" and spans ≤3 non-blank lines).
+        _top_nonempty = [l.strip() for l in top_result.splitlines() if l.strip()]
+        _attribution_only = (
+            bool(_top_nonempty)
+            and bool(_WROTE_END_RE.search(top_result.rstrip()))
+            and len(_top_nonempty) <= 3
+        )
+        if _attribution_only or (not top_nonquoted and first_real.startswith(">")):
             bottom_result = MailArchiveXLoader._extract_bottom_reply(lines)
             if bottom_result:
                 return bottom_result

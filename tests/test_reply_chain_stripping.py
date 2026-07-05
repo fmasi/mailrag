@@ -469,6 +469,90 @@ class TestStripReplyChainBottomPosting(unittest.TestCase):
         self.assertIn("quoted only", result)
 
 
+class TestStripReplyChainLeadingAttribution(unittest.TestCase):
+    """Bug #3: bottom-posted emails that LEAD with an attribution line.
+
+    Structure:
+        On <date>, <Person> wrote:
+        > quoted block
+        > more quoted lines
+
+        Actual reply content here.
+
+    Before the fix, _strip_reply_chain appended the attribution line to
+    result (has_real_content was False so the attribution check was skipped),
+    then broke at the first '>' line — leaving *only* the attribution in
+    top_result.  Because top_nonquoted was non-empty (the attribution line),
+    the bottom-posting fallback never triggered and the real reply was lost.
+
+    After the fix, a result that ends with "wrote:" and has ≤3 non-blank
+    lines is treated as attribution-only, forcing a bottom-extraction pass.
+    """
+
+    def test_leading_attribution_reply_preserved(self):
+        """Core case: leading attribution + quoted block + reply below."""
+        body = (
+            "On 2024-01-15, Alice <alice@example.com> wrote:\n"
+            "> Can you confirm the meeting time?\n"
+            "\n"
+            "Yes, 3 PM works for me."
+        )
+        result = MailArchiveXLoader._strip_reply_chain(body)
+        self.assertIn("Yes, 3 PM works for me.", result)
+        self.assertNotIn("Can you confirm", result)
+
+    def test_leading_attribution_multiline_reply_preserved(self):
+        """Multi-line reply content after attribution + quoted block."""
+        body = (
+            "On 2024-03-01, Bob wrote:\n"
+            "> Please send the report.\n"
+            "> It is urgent.\n"
+            "\n"
+            "Hi Bob,\n"
+            "I have attached the report.\n"
+            "Let me know if you need anything else."
+        )
+        result = MailArchiveXLoader._strip_reply_chain(body)
+        self.assertIn("Hi Bob", result)
+        self.assertIn("I have attached the report.", result)
+        self.assertNotIn("Please send the report.", result)
+
+    def test_leading_attribution_wrapped_across_two_lines(self):
+        """Attribution that wraps: 'On <date>,\\n<Name> wrote:'."""
+        body = (
+            "On 2024-06-10,\n"
+            "Charlie <charlie@example.com> wrote:\n"
+            "> Here is the original question.\n"
+            "\n"
+            "Thanks for reaching out."
+        )
+        result = MailArchiveXLoader._strip_reply_chain(body)
+        self.assertIn("Thanks for reaching out.", result)
+        self.assertNotIn("Here is the original question.", result)
+
+    def test_leading_attribution_no_bottom_reply_returns_full_body(self):
+        """Attribution at top but no real reply below — return full body (no content to lose)."""
+        body = "On 2024-01-15, Alice wrote:\n> Only quoted content here.\n> Nothing below."
+        result = MailArchiveXLoader._strip_reply_chain(body)
+        # No real reply found — full body preserved.
+        self.assertIn("Only quoted content here.", result)
+
+    def test_real_content_above_attribution_not_affected(self):
+        """Existing top-posting case: real content above attribution is unaffected."""
+        body = "My reply is above.\n\nOn 2024-01-15, Alice wrote:\n> quoted original"
+        result = MailArchiveXLoader._strip_reply_chain(body)
+        self.assertIn("My reply is above.", result)
+        self.assertNotIn("quoted original", result)
+
+    def test_attribution_only_result_ends_without_wrote(self):
+        """A non-attribution lead line is not confused with the new trigger."""
+        body = "Forwarded by Dave:\n> Some quoted content\n\nBottom reply here."
+        result = MailArchiveXLoader._strip_reply_chain(body)
+        # "Forwarded by Dave:" does not end in "wrote:" → existing top-posting
+        # path keeps it; real content (the lead line) is preserved.
+        self.assertIn("Forwarded by Dave:", result)
+
+
 class TestHTMLTextExtractor(unittest.TestCase):
     """_HTMLTextExtractor converts email HTML to plain text."""
 
