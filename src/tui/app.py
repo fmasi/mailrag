@@ -490,6 +490,10 @@ class ReviewScreen(WizardScreen):
         self._state = state
         self._personas = registry
         self._persona = registry.get(state.persona_name or "")
+        # Building a handler map is cheap and side-effect-free by design (the
+        # heavy imports live inside the handlers — see runner.build_handlers),
+        # so review builds a throwaway copy just to plan; RunScreen rebuilds
+        # one with the interactive prune confirm bound to its worker bridge.
         handlers = flow.prepare_handlers(
             profile_path=state.profile_path,
             model=state.model,
@@ -558,7 +562,9 @@ def _describe_rule(rule: Dict[str, Any]) -> str:
         return f"{rule['value']} (and subfolders)"
     if rule["type"] == "direct-root-files":
         return f"messages directly in {rule['root']}"
-    return "messages at the mailbox root"
+    if rule["type"] == "container-root":
+        return "messages at the mailbox root"
+    return str(rule)  # unknown rule type: show it raw rather than mislabel it
 
 
 # --- gates (modal dialogs shown during the run) --------------------------------------
@@ -1092,7 +1098,9 @@ def run_tui(
         return 2
     try:
         app = MailragWizardApp(profile_path, model=model, limit=limit, registry=registry)
-    except (OSError, ValueError) as exc:
+    # OSError: unreadable file; ValueError: bad JSON; AttributeError: valid
+    # JSON that isn't an object (CorpusProfile.load calls .items() on it).
+    except (OSError, ValueError, AttributeError) as exc:
         print(f"error: cannot load profile {profile_path!r}: {exc}", file=sys.stderr)
         return 2
     result = app.run()

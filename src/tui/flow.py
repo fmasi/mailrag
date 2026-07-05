@@ -235,8 +235,12 @@ def prepare_handlers(
 class WizardUI(Protocol):
     """What the run loop needs from a front-end (the Textual bridge, or a test fake).
 
-    The three gates block until the user answers; everything else is
-    fire-and-forget progress reporting."""
+    The gates block until the user answers; everything else is fire-and-forget
+    progress reporting.
+
+    Note: the prune confirmation is *not* part of this protocol — it fires
+    inside the prune handler, not in the run loop, so a front-end supplies it
+    as the ``confirm_prune`` callable to :func:`prepare_handlers` instead."""
 
     def on_step_start(self, index: int, step: PlannedStep) -> None: ...
 

@@ -24,6 +24,7 @@ from src.tui.app import (
     RunScreen,
     ScopeScreen,
     WelcomeScreen,
+    _describe_rule,
     run_tui,
 )
 
@@ -367,6 +368,38 @@ class TestRunTuiGuards(unittest.TestCase):
         ):
             rc = run_tui(os.path.join(tempfile.gettempdir(), "no-such-profile.json"))
         self.assertEqual(rc, 2)
+
+    def test_run_tui_reports_profile_of_wrong_shape(self):
+        # Valid JSON that isn't an object -> friendly exit 2, not a traceback.
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            fh.write("[1, 2, 3]")
+            path = fh.name
+        self.addCleanup(os.unlink, path)
+        with (
+            mock.patch("sys.stdin.isatty", return_value=True),
+            mock.patch("sys.stdout.isatty", return_value=True),
+        ):
+            rc = run_tui(path)
+        self.assertEqual(rc, 2)
+
+
+class TestDescribeRule(unittest.TestCase):
+    def test_prefix_rule(self):
+        self.assertEqual(
+            _describe_rule({"type": "prefix", "value": "Inbox/"}), "Inbox/ (and subfolders)"
+        )
+
+    def test_direct_root_files_rule(self):
+        self.assertEqual(
+            _describe_rule({"type": "direct-root-files", "root": "Inbox/"}),
+            "messages directly in Inbox/",
+        )
+
+    def test_container_root_rule(self):
+        self.assertEqual(_describe_rule({"type": "container-root"}), "messages at the mailbox root")
+
+    def test_unknown_rule_type_shown_raw(self):
+        self.assertEqual(_describe_rule({"type": "weird"}), "{'type': 'weird'}")
 
 
 if __name__ == "__main__":
