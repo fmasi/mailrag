@@ -1,0 +1,27 @@
+name: Dependency Review
+
+# Scans dependency-manifest changes (poetry.lock / requirements.txt / pyproject)
+# introduced by a PR and fails if any added dependency carries a known
+# vulnerability at `moderate` severity or higher. Runs only on pull_request —
+# the action diffs the PR base against head and has nothing to compare on push.
+"on":
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "dependency-review-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: moderate
