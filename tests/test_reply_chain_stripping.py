@@ -532,35 +532,21 @@ class TestStripReplyChainLeadingAttribution(unittest.TestCase):
 
     def test_leading_attribution_no_bottom_reply_returns_full_body(self):
         """Attribution at top but no real reply below — return full body (no content to lose)."""
-        body = (
-            "On 2024-01-15, Alice wrote:\n"
-            "> Only quoted content here.\n"
-            "> Nothing below."
-        )
+        body = "On 2024-01-15, Alice wrote:\n> Only quoted content here.\n> Nothing below."
         result = MailArchiveXLoader._strip_reply_chain(body)
         # No real reply found — full body preserved.
         self.assertIn("Only quoted content here.", result)
 
     def test_real_content_above_attribution_not_affected(self):
         """Existing top-posting case: real content above attribution is unaffected."""
-        body = (
-            "My reply is above.\n"
-            "\n"
-            "On 2024-01-15, Alice wrote:\n"
-            "> quoted original"
-        )
+        body = "My reply is above.\n\nOn 2024-01-15, Alice wrote:\n> quoted original"
         result = MailArchiveXLoader._strip_reply_chain(body)
         self.assertIn("My reply is above.", result)
         self.assertNotIn("quoted original", result)
 
     def test_attribution_only_result_ends_without_wrote(self):
         """A non-attribution lead line is not confused with the new trigger."""
-        body = (
-            "Forwarded by Dave:\n"
-            "> Some quoted content\n"
-            "\n"
-            "Bottom reply here."
-        )
+        body = "Forwarded by Dave:\n> Some quoted content\n\nBottom reply here."
         result = MailArchiveXLoader._strip_reply_chain(body)
         # "Forwarded by Dave:" does not end in "wrote:" → existing top-posting
         # path keeps it; real content (the lead line) is preserved.
