@@ -1017,8 +1017,10 @@ class MailragWizardApp(App[int]):
         return self._state
 
     def on_mount(self) -> None:
-        # Curated default look; a user-configured Textual theme wins.
-        if self.theme == "textual-dark":
+        # Curated default look; a user-configured Textual theme wins. (getattr
+        # keeps CI's stub-less mypy from a has-type cycle on the read-then-
+        # assign of an attribute it only knows through Any.)
+        if getattr(self, "theme", "") == "textual-dark":
             self.theme = "tokyo-night"
         self._drive()
 
