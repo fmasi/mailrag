@@ -167,6 +167,21 @@
   </section>
 
   <section>
+    <h2>The guided wizard</h2>
+    <p class="muted" style="margin:0 0 14px"><code>mailrag wizard</code> is a full-screen terminal app
+       (<a href="https://textual.textualize.io/">Textual</a>): pick a cost-ordered persona, scope your
+       folders on a tree, review the exact plan, then watch every step run live. Two human checkpoints —
+       the calibrate gate and confirm-before-spend — keep you in control before any LLM cost.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+      <img src="images/tui/persona.svg" alt="The persona picker: a list of cost-ordered personas on the left and a live preview of the highlighted recipe — every verb with a colour-coded cost badge — on the right" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
+      <img src="images/tui/run.svg" alt="The live run screen: the recipe as a step ladder with tick marks on the left and a streaming log on the right, an overall progress bar beneath" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
+    </div>
+    <p class="muted" style="margin:12px 0 0;font-size:13px">Screenshots are auto-generated from the real
+       app against a synthetic mailbox — see
+       <a href="https://github.com/fmasi/mailrag/blob/main/docs/GUIDE.md#what-to-expect-from-the-wizard">the full walkthrough</a>.</p>
+  </section>
+
+  <section>
     <h2>The compound effect</h2>
     <p class="muted" style="margin:0 0 14px">Stacking the ladder — each technique added one at a time and
        individually measured on 360 real-email questions. <b>recall@5</b> = how often the right email lands

@@ -82,24 +82,36 @@ sequence of screens — a breadcrumb at the top always shows where you are:
 
 1. **Welcome** — the profile you're onboarding (mailbox root, rubric,
    collection) and, if you ran `scan`, its recommended persona. `enter` begins.
+
+   ![Welcome screen — the profile facts and the scan-recommended persona](images/tui/welcome.svg)
 2. **Persona** — the personas on the left, a live preview of the highlighted
    recipe on the right: every verb with a colour-coded cost badge
    (`free` → `gpu`), the `scan` recommendation starred and pre-highlighted.
+
+   ![Persona picker — persona list on the left, the highlighted recipe with cost badges on the right](images/tui/persona.svg)
 3. **Model** — only for LLM personas (and skipped when you passed `--model`):
    the model id your OpenAI-compatible endpoint serves. Blank input is
    rejected inline.
+
+   ![Model screen — an input for the LLM model id served by your OpenAI-compatible endpoint](images/tui/model.svg)
 4. **Scope** — the folder picker as a navigable tree of your mailbox (top-level
    folders, their subfolders, plus "messages directly in …" rows). `space`
    includes/excludes; checking a folder covers all its subfolders (children
    grey out); a rule counter confirms what you've built. `c` continues —
    you can't proceed with nothing selected.
+
+   ![Scope screen — the mailbox folder tree with a checked folder covering its greyed-out subfolders](images/tui/scope.svg)
 5. **Review** — everything on one screen before anything runs: persona, model,
    scope rules, rubric, limit, and the exact planned steps (optional steps that
    will be skipped are marked). `enter` starts, `esc` goes back to change
    anything.
+
+   ![Review screen — the collected configuration on the left, the exact planned steps on the right](images/tui/review.svg)
 6. **Run** — the recipe as a live ladder (`○` pending, `▶` running, `✓` done)
    next to a streaming log, with an overall progress bar. Long steps no longer
    freeze the terminal — the pipeline runs in a worker while the UI stays live.
+
+   ![Run screen — the recipe as a completed step ladder next to a streaming log, with a full progress bar](images/tui/run.svg)
 
 `esc` steps back, `q` quits, and the footer always lists the active keys.
 
@@ -113,6 +125,11 @@ Two human checkpoints interrupt the run as modal dialogs, and keep you in contro
 - **Confirm-before-spend.** Right before the expensive summary pass, mailrag asks
   before spending the LLM. (`prune` likewise shows a sample of what it would
   blacklist before writing anything.)
+
+> The screenshots above are auto-generated from the real app (driven headlessly
+> against a **synthetic** demo mailbox — no real mail, Qdrant, or LLM), so they
+> stay in sync with the code. Regenerate them with
+> `python scripts/gen_tui_screenshots.py`.
 
 Prefer the old line-by-line prompt flow? It's kept as `mailrag wizard --classic`.
 For non-interactive / scripted runs, use the headless equivalent:

@@ -331,6 +331,10 @@ easier for agents to reach, and keep its memory current:
   [`docs/GUIDE.md`](docs/GUIDE.md#what-to-expect-from-the-wizard)). The old prompt flow
   remains as `--classic`; `mailrag run` stays the headless path.
 
+  ![The mailrag wizard persona picker — a cost-ordered persona list on the left and a live preview of the highlighted recipe with colour-coded cost badges on the right](docs/images/tui/persona.svg)
+
+  *The persona picker; the [full six-screen walkthrough](docs/GUIDE.md#what-to-expect-from-the-wizard) lives in the guide. Screenshots are auto-generated via `scripts/gen_tui_screenshots.py`.*
+
 ## Built by Frédéric Masi
 
 I build private, self-hosted context tools for AI agents — software that gives an agent (and me)
