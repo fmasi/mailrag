@@ -85,6 +85,19 @@ class TestResolveConfig(unittest.TestCase):
             self.assertEqual(server.resolve_qdrant_url(), server.DEFAULT_QDRANT_URL)
 
 
+class TestResolveAttachStore(unittest.TestCase):
+    def test_arg_wins(self):
+        self.assertEqual(server.resolve_attach_store("/tmp/store"), "/tmp/store")
+
+    def test_env_override(self):
+        with mock.patch.dict("os.environ", {"RAG_ATTACH_STORE": "/env/store"}, clear=False):
+            self.assertEqual(server.resolve_attach_store(), "/env/store")
+
+    def test_default(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(server.resolve_attach_store(), server.DEFAULT_ATTACH_STORE)
+
+
 class TestGetSearcher(unittest.TestCase):
     def setUp(self):
         server._SEARCHER_CACHE.clear()
@@ -98,6 +111,20 @@ class TestGetSearcher(unittest.TestCase):
         self.assertIs(s1, fake)
         self.assertIs(s2, fake)
         factory.assert_called_once_with("col", mode="hybrid", qdrant_url="http://q:6333")
+
+    def test_mode_is_part_of_cache_key_and_passed_to_factory(self):
+        hybrid, dense = _FakeSearcher([]), _FakeSearcher([])
+        factory = mock.Mock(side_effect=[hybrid, dense])
+        s1 = server.get_searcher("col", "http://q:6333", "hybrid", factory=factory)
+        s2 = server.get_searcher("col", "http://q:6333", "dense", factory=factory)
+        self.assertIs(s1, hybrid)
+        self.assertIs(s2, dense)
+        self.assertEqual(factory.call_count, 2)
+        self.assertEqual(factory.call_args_list[1].kwargs["mode"], "dense")
+
+    def test_invalid_mode_rejected(self):
+        with self.assertRaises(ValueError):
+            server.get_searcher("col", "http://q:6333", "bogus", factory=mock.Mock())
 
 
 class TestSearchEmail(unittest.TestCase):
@@ -135,6 +162,18 @@ class TestSearchEmail(unittest.TestCase):
             rows = server.search_email("q", top_k=1)
         self.assertEqual(len(rows), 1)
 
+    def test_collection_and_mode_flow_to_get_searcher(self):
+        searcher = _FakeSearcher(_threads())
+        with mock.patch(
+            "src.mcp_server.server.get_searcher", return_value=searcher
+        ) as get_searcher:
+            server.search_email("q", collection="work-rag", mode="dense")
+        get_searcher.assert_called_once_with("work-rag", mode="dense")
+
+    def test_invalid_mode_rejected(self):
+        with self.assertRaises(ValueError):
+            server.search_email("q", mode="bogus", searcher=_FakeSearcher([]))
+
 
 class TestAnswerQuestion(unittest.TestCase):
     def test_calls_answer_from_threads_with_top_k(self):
@@ -170,15 +209,264 @@ class TestAnswerQuestion(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.answer_question("q", k=0, searcher=_FakeSearcher([]))
 
+    def test_collection_flows_to_get_searcher(self):
+        searcher = _FakeSearcher(_threads())
+        with (
+            mock.patch("src.mcp_server.server.get_searcher", return_value=searcher) as get_searcher,
+            mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
+        ):
+            server.answer_question("q", collection="work-rag", k=1)
+        get_searcher.assert_called_once_with("work-rag")
+
+
+class _FakeCollDesc:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeCollInfo:
+    def __init__(self, points_count):
+        self.points_count = points_count
+
+
+class _FakeQdrant:
+    """Minimal stand-in for QdrantClient used by list_collections."""
+
+    def __init__(self, names, counts=None, raise_on_get_collections=False, bad_info=()):
+        self._names = names
+        self._counts = counts or {}
+        self._raise = raise_on_get_collections
+        self._bad_info = set(bad_info)
+
+    def get_collections(self):
+        if self._raise:
+            raise ConnectionError("refused")
+        return mock.Mock(collections=[_FakeCollDesc(n) for n in self._names])
+
+    def get_collection(self, name):
+        if name in self._bad_info:
+            raise RuntimeError("no such collection")
+        return _FakeCollInfo(self._counts.get(name))
+
+
+class TestListCollections(unittest.TestCase):
+    def test_maps_rows_and_marks_default(self):
+        client = _FakeQdrant(["work-rag", "personal-rag"], {"work-rag": 12, "personal-rag": 7})
+        with mock.patch.dict("os.environ", {"MAILRAG_COLLECTION": "personal-rag"}, clear=True):
+            rows = server.list_collections(client=client)
+        self.assertEqual(
+            rows,
+            [
+                {"name": "work-rag", "points_count": 12, "is_default": False},
+                {"name": "personal-rag", "points_count": 7, "is_default": True},
+            ],
+        )
+
+    def test_default_falls_back_to_manifest(self):
+        client = _FakeQdrant(["a", "b"], {"a": 1, "b": 2})
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch("src.mcp_server.server.latest_manifest_collection", return_value="b"),
+        ):
+            rows = server.list_collections(client=client)
+        self.assertTrue(rows[1]["is_default"])
+        self.assertFalse(rows[0]["is_default"])
+
+    def test_points_count_none_when_info_fails(self):
+        client = _FakeQdrant(["a"], {"a": 5}, bad_info={"a"})
+        with mock.patch.dict("os.environ", {}, clear=True):
+            rows = server.list_collections(client=client)
+        self.assertIsNone(rows[0]["points_count"])
+
+    def test_unreachable_qdrant_raises_clear_error(self):
+        client = _FakeQdrant([], raise_on_get_collections=True)
+        with self.assertRaises(ValueError) as ctx:
+            server.list_collections(client=client)
+        self.assertIn("cannot list collections", str(ctx.exception))
+
+    def test_builds_client_when_not_injected(self):
+        client = _FakeQdrant(["a"], {"a": 4})
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch("src.config.qdrant.get_qdrant_client", return_value=client) as get_client,
+        ):
+            rows = server.list_collections()
+        get_client.assert_called_once_with(url=server.DEFAULT_QDRANT_URL)
+        self.assertEqual(rows[0]["name"], "a")
+
+    def test_manifest_lookup_failure_degrades_to_no_default(self):
+        client = _FakeQdrant(["a"], {"a": 1})
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch(
+                "src.mcp_server.server.latest_manifest_collection",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            rows = server.list_collections(client=client)
+        self.assertFalse(rows[0]["is_default"])
+
+
+class _FakeMeta:
+    def __init__(self, sha256, filename, mime, size, thread_id, message_id, inline=False):
+        self.sha256 = sha256
+        self.filename = filename
+        self.mime = mime
+        self.size = size
+        self.thread_id = thread_id
+        self.message_id = message_id
+        self.inline = inline
+
+
+class _FakeStore:
+    def __init__(self, metas=None, fetch_result=None, fetch_raises=False):
+        self._metas = metas or []
+        self._fetch_result = fetch_result
+        self._fetch_raises = fetch_raises
+        self.closed = False
+        self.list_calls = []
+        self.fetch_calls = []
+
+    def list_for(self, *, thread_id=None, message_id=None):
+        self.list_calls.append((thread_id, message_id))
+        return self._metas
+
+    def fetch(self, sha256, *, extractor=None, force=False):
+        self.fetch_calls.append((sha256, extractor))
+        if self._fetch_raises:
+            raise KeyError(f"unknown attachment {sha256}")
+        return self._fetch_result
+
+    def close(self):
+        self.closed = True
+
+
+class TestListAttachments(unittest.TestCase):
+    def test_maps_rows_for_thread(self):
+        store = _FakeStore(
+            [_FakeMeta("abc", "report.pdf", "application/pdf", 1024, "t1", "m1", inline=False)]
+        )
+        rows = server.list_attachments(thread_id="t1", store=store)
+        self.assertEqual(store.list_calls, [("t1", None)])
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "sha256": "abc",
+                    "filename": "report.pdf",
+                    "mime": "application/pdf",
+                    "size": 1024,
+                    "thread_id": "t1",
+                    "message_id": "m1",
+                    "inline": False,
+                }
+            ],
+        )
+
+    def test_message_id_passthrough(self):
+        store = _FakeStore([])
+        server.list_attachments(message_id="m9", store=store)
+        self.assertEqual(store.list_calls, [(None, "m9")])
+
+    def test_requires_an_identifier(self):
+        with self.assertRaises(ValueError):
+            server.list_attachments(store=_FakeStore([]))
+
+    def test_builds_and_closes_store_when_not_injected(self):
+        store = _FakeStore([])
+        with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store) as ctor:
+            server.list_attachments(thread_id="t1")
+        ctor.assert_called_once()
+        self.assertTrue(store.closed)
+
+
+class TestGetAttachment(unittest.TestCase):
+    def test_returns_text_and_metadata_no_bytes(self):
+        store = _FakeStore(
+            fetch_result={
+                "sha256": "abc",
+                "filename": "report.pdf",
+                "mime": "application/pdf",
+                "size": 1024,
+                "text": "extracted body",
+                "text_status": "ok",
+                "path": "/blobs/ab/abc",
+            }
+        )
+        out = server.get_attachment("abc", ocr="tesseract", store=store)
+        self.assertEqual(store.fetch_calls, [("abc", "tesseract")])
+        self.assertEqual(
+            out,
+            {
+                "sha256": "abc",
+                "filename": "report.pdf",
+                "mime": "application/pdf",
+                "size": 1024,
+                "text": "extracted body",
+                "text_status": "ok",
+            },
+        )
+        self.assertNotIn("path", out)  # no raw bytes / local path leaked
+
+    def test_unknown_sha_raises_clear_value_error(self):
+        store = _FakeStore(fetch_raises=True)
+        with self.assertRaises(ValueError) as ctx:
+            server.get_attachment("deadbeef", store=store)
+        self.assertIn("unknown attachment", str(ctx.exception))
+
+    def test_blank_sha_rejected(self):
+        with self.assertRaises(ValueError):
+            server.get_attachment("  ", store=_FakeStore())
+
+    def test_builds_and_closes_store_when_not_injected(self):
+        store = _FakeStore(
+            fetch_result={
+                "sha256": "abc",
+                "filename": "f",
+                "mime": "text/plain",
+                "size": 1,
+                "text": "t",
+                "text_status": "ok",
+                "path": "/x",
+            }
+        )
+        with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
+            server.get_attachment("abc")
+        self.assertTrue(store.closed)
+
 
 class TestServerRegistration(unittest.TestCase):
     def test_tools_registered_with_expected_names_and_schema(self):
         srv = server.build_server()
         tools = asyncio.run(srv.list_tools())
         by_name = {t.name: t for t in tools}
-        self.assertEqual(set(by_name), {"search_email", "answer_question"})
-        self.assertEqual(set(by_name["search_email"].inputSchema["properties"]), {"query", "top_k"})
-        self.assertEqual(set(by_name["answer_question"].inputSchema["properties"]), {"query", "k"})
+        self.assertEqual(
+            set(by_name),
+            {
+                "list_collections",
+                "search_email",
+                "answer_question",
+                "list_attachments",
+                "get_attachment",
+            },
+        )
+        self.assertEqual(set(by_name["list_collections"].inputSchema.get("properties", {})), set())
+        self.assertEqual(
+            set(by_name["search_email"].inputSchema["properties"]),
+            {"query", "collection", "top_k", "mode"},
+        )
+        self.assertEqual(
+            set(by_name["answer_question"].inputSchema["properties"]),
+            {"query", "collection", "k"},
+        )
+        self.assertEqual(
+            set(by_name["list_attachments"].inputSchema["properties"]),
+            {"thread_id", "message_id", "collection"},
+        )
+        self.assertEqual(
+            set(by_name["get_attachment"].inputSchema["properties"]),
+            {"sha256", "ocr"},
+        )
 
     def test_call_tool_dispatches_into_search_email(self):
         srv = server.build_server()
@@ -191,6 +479,49 @@ class TestServerRegistration(unittest.TestCase):
         self.assertEqual(rows[0]["thread_id"], "t1")
         # The text content mirrors the same payload.
         self.assertIn("t1", content_blocks[0].text)
+
+    def test_call_tool_dispatches_into_list_collections(self):
+        srv = server.build_server()
+        rows = [{"name": "work-rag", "points_count": 3, "is_default": True}]
+        with mock.patch("src.mcp_server.server.list_collections", return_value=rows):
+            _, structured = asyncio.run(srv.call_tool("list_collections", {}))
+        self.assertEqual(structured["result"][0]["name"], "work-rag")
+
+    def test_call_tool_dispatches_into_answer_question(self):
+        srv = server.build_server()
+        searcher = _FakeSearcher(_threads())
+        with (
+            mock.patch("src.mcp_server.server.get_searcher", return_value=searcher),
+            mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
+        ):
+            _, structured = asyncio.run(
+                srv.call_tool("answer_question", {"query": "when?", "k": 1})
+            )
+        self.assertEqual(structured["result"]["answer"], "A")
+
+    def test_call_tool_dispatches_into_list_attachments(self):
+        srv = server.build_server()
+        store = _FakeStore([_FakeMeta("abc", "f.pdf", "application/pdf", 1, "t1", "m1")])
+        with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
+            _, structured = asyncio.run(srv.call_tool("list_attachments", {"thread_id": "t1"}))
+        self.assertEqual(structured["result"][0]["sha256"], "abc")
+
+    def test_call_tool_dispatches_into_get_attachment(self):
+        srv = server.build_server()
+        store = _FakeStore(
+            fetch_result={
+                "sha256": "abc",
+                "filename": "f.pdf",
+                "mime": "application/pdf",
+                "size": 1,
+                "text": "body",
+                "text_status": "ok",
+                "path": "/x",
+            }
+        )
+        with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
+            _, structured = asyncio.run(srv.call_tool("get_attachment", {"sha256": "abc"}))
+        self.assertEqual(structured["result"]["text"], "body")
 
 
 class TestCliWiring(unittest.TestCase):

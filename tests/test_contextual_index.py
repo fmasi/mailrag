@@ -1,16 +1,16 @@
 """Tests for src/indexing/contextual_index.py — hermetic (mocked embedder + qdrant).
 
-NOTE: `transformers` (AutoTokenizer) is NOT installed in the mailrag-test conda
+NOTE: `transformers` (AutoTokenizer) is NOT installed in the mailrag conda
 env.  We inject a fake ``transformers`` module into ``sys.modules`` at test
 setup time so the lazy ``from transformers import AutoTokenizer`` inside
 ``build_contextual_index`` resolves to our mock without importing the real
 package.  This is an explicit, documented workaround for the env gap — NOT
 silent removal of a real dependency.
 
-CONCERN: ``transformers`` is absent from the mailrag-test conda env.  The
+CONCERN: ``transformers`` is absent from the mailrag conda env.  The
 production path uses ``AutoTokenizer.from_pretrained("BAAI/bge-m3")`` which
 downloads / reads from the HF cache.  This env gap should be fixed by adding
-``transformers`` to the mailrag-test requirements; the workaround here keeps
+``transformers`` to the mailrag requirements; the workaround here keeps
 tests running in the meantime.
 """
 
