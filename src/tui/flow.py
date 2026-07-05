@@ -292,29 +292,30 @@ def execute_plan(
     """Run the planned steps with the two human gates; mirrors the classic wizard.
 
     Returns a process exit code (0 done, 1 user-aborted). The profile is saved
-    on every exit path so partial progress (scope rules, calibration) is kept."""
-    for index, step in enumerate(planned):
-        if step.skipped:
-            ui.on_step_skip(index, step)
-            ui.log(f"skip {step.verb} (optional, not implemented yet)")
-            continue
-        if step.verb == "calibrate":
-            ui.on_step_start(index, step)
-            if run_calibrate_gate(prof, handlers["calibrate"], ui) == "abort":
-                ui.log("aborted at the calibration gate")
-                prof.save(profile_path)
+    on every exit path — including a handler raising — so partial progress
+    (scope rules, calibration) is never discarded."""
+    try:
+        for index, step in enumerate(planned):
+            if step.skipped:
+                ui.on_step_skip(index, step)
+                ui.log(f"skip {step.verb} (optional, not implemented yet)")
+                continue
+            if step.verb == "calibrate":
+                ui.on_step_start(index, step)
+                if run_calibrate_gate(prof, handlers["calibrate"], ui) == "abort":
+                    ui.log("aborted at the calibration gate")
+                    return 1
+                ui.on_step_done(index, step, None)
+                continue
+            if step.verb == "summarize" and not ui.confirm_spend():
+                ui.log("stopped before the LLM summary pass")
                 return 1
-            ui.on_step_done(index, step, None)
-            continue
-        if step.verb == "summarize" and not ui.confirm_spend():
-            ui.log("stopped before the LLM summary pass")
-            prof.save(profile_path)
-            return 1
-        ui.on_step_start(index, step)
-        result = handlers[step.verb](prof, **step.params)
-        ui.on_step_done(index, step, result)
-    prof.save(profile_path)
-    return 0
+            ui.on_step_start(index, step)
+            result = handlers[step.verb](prof, **step.params)
+            ui.on_step_done(index, step, result)
+        return 0
+    finally:
+        prof.save(profile_path)
 
 
 def short_result(result: Any, limit: int = 140) -> str:

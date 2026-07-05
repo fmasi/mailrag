@@ -342,6 +342,21 @@ class TestExecutePlan(unittest.TestCase):
         self.assertNotIn("summarize", calls)
         prof.save.assert_called_once_with("p.json")
 
+    def test_profile_saved_even_when_a_handler_raises(self):
+        ui = FakeUI()
+        handlers = _recording_handlers([])
+
+        def boom(prof, **params):
+            raise RuntimeError("index exploded")
+
+        handlers["index"] = boom
+        persona = self.reg.get("llm-none")
+        planned = flow.plan_steps(persona, handlers, self.reg)
+        prof = _profile()
+        with self.assertRaises(RuntimeError):
+            flow.execute_plan(prof, "p.json", planned, handlers, ui)
+        prof.save.assert_called_once_with("p.json")  # partial progress kept
+
     def test_llm_verify_runs_judge_and_prune(self):
         ui = FakeUI(gates=["proceed"])
         with mock.patch("src.llm.calibration.format_report", return_value="B"):

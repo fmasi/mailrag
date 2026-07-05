@@ -1017,7 +1017,9 @@ class MailragWizardApp(App[int]):
         return self._state
 
     def on_mount(self) -> None:
-        self.theme = "tokyo-night"
+        # Curated default look; a user-configured Textual theme wins.
+        if self.theme == "textual-dark":
+            self.theme = "tokyo-night"
         self._drive()
 
     def _persona(self) -> Optional[Persona]:

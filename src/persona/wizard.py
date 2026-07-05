@@ -45,11 +45,6 @@ def read_recommendation(profile_path: str) -> Optional[str]:
         return None
 
 
-# Historical private name — the wizard body and its tests patch/call this alias,
-# while the full-screen TUI (src/tui/flow.py) imports the public name above.
-_read_recommendation = read_recommendation
-
-
 def _calibrate_gate(prof, handler, reg, q, console) -> str:
     """Run calibrate, show the buckets, and loop on the user's choice.
 
@@ -105,7 +100,7 @@ def run_wizard(
 
         console = Console()
 
-    rec = _read_recommendation(profile_path)
+    rec = read_recommendation(profile_path)
     if rec:
         console.print(f"scan recommends: [bold]{rec}[/bold]")
     for name in reg.names():

@@ -73,7 +73,7 @@ class TestWizard(unittest.TestCase):
                 "src.persona.wizard.build_handlers", return_value=_recording_handlers(calls)
             ),
             mock.patch("src.persona.wizard.CorpusProfile.load", return_value=prof),
-            mock.patch("src.persona.wizard._read_recommendation", return_value=None),
+            mock.patch("src.persona.wizard.read_recommendation", return_value=None),
             prof,
         )
 
@@ -169,7 +169,7 @@ class TestWizard(unittest.TestCase):
         with (
             mock.patch("src.persona.wizard.build_handlers", side_effect=fake_build_handlers),
             mock.patch("src.persona.wizard.CorpusProfile.load", return_value=prof),
-            mock.patch("src.persona.wizard._read_recommendation", return_value=None),
+            mock.patch("src.persona.wizard.read_recommendation", return_value=None),
         ):
             run_wizard("p.json", questionary=q, console=FakeConsole())
         self.assertTrue(callable(captured.get("prune_confirm")))
