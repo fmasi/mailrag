@@ -1,4 +1,5 @@
 """Tests for build_thread_aware_prompt and parse_response (stdlib-only, no network)."""
+
 import unittest
 
 from src.llm.summary import build_thread_aware_prompt, parse_response
@@ -48,10 +49,12 @@ class TestBuildThreadAwarePrompt(unittest.TestCase):
 
 
 class TestParseResponseLenient(unittest.TestCase):
-    NOKIA = ('{"is_noise": false, "confidence": 1.0, "summary": "Darrell Jordan-Smith '
-             'provides a brief "+1" endorsement of the news regarding the signed Nokia '
-             'CRAN R&D collaboration agreement.", "reason": "The email is a genuine human '
-             'response expressing agreement/support in an ongoing business thread."}')
+    NOKIA = (
+        '{"is_noise": false, "confidence": 1.0, "summary": "Darrell Jordan-Smith '
+        'provides a brief "+1" endorsement of the news regarding the signed Nokia '
+        'CRAN R&D collaboration agreement.", "reason": "The email is a genuine human '
+        'response expressing agreement/support in an ongoing business thread."}'
+    )
 
     def test_recovers_unescaped_inner_quotes(self):
         r = parse_response(self.NOKIA)  # must NOT raise

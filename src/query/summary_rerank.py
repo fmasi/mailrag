@@ -6,6 +6,7 @@ causes drift). ``SummaryAwareReranker`` exposes ``postprocess_nodes(nodes, query
 matching LlamaIndex node postprocessors, so HybridSearcher uses it interchangeably with
 FlagEmbeddingReranker. FlagReranker import is lazy.
 """
+
 from typing import List
 
 DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
@@ -33,8 +34,13 @@ class SummaryAwareReranker:
     interface: ``postprocess_nodes(nodes, query_str=...)``. FlagReranker import is lazy;
     pass ``_reranker`` to inject a stub in tests."""
 
-    def __init__(self, model: str = DEFAULT_RERANK_MODEL, top_n: int = 5,
-                 use_fp16: bool = True, _reranker=None):
+    def __init__(
+        self,
+        model: str = DEFAULT_RERANK_MODEL,
+        top_n: int = 5,
+        use_fp16: bool = True,
+        _reranker=None,
+    ):
         self._top_n = top_n
         if _reranker is not None:
             self._reranker = _reranker
@@ -46,8 +52,11 @@ class SummaryAwareReranker:
     def postprocess_nodes(self, nodes, query_str: str = None, query_bundle=None):
         if not nodes:
             return []
-        q = query_str if query_str is not None else (
-            query_bundle.query_str if query_bundle is not None else "")
+        q = (
+            query_str
+            if query_str is not None
+            else (query_bundle.query_str if query_bundle is not None else "")
+        )
         pairs = [[q, build_rerank_text(n)] for n in nodes]
         scores = self._reranker.compute_score(pairs)
         if not isinstance(scores, list):

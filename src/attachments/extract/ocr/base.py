@@ -4,6 +4,7 @@ The one runtime-swappable axis of extraction: turn image bytes (or a scanned PDF
 into text. Implementations: TesseractOcr, LlmVision, (future) cloud. Fallback is
 expressed by composing providers in a ChainedOcr, not by nested try/except.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from src.attachments.extract.result import Status
 @dataclass
 class OcrResult:
     text: str
-    status: str        # extracted | empty | ocr_unavailable | error
+    status: str  # extracted | empty | ocr_unavailable | error
     provider: str
 
 

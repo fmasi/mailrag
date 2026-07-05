@@ -11,23 +11,41 @@ class TestAttachmentsCli(unittest.TestCase):
     def test_build_routes(self):
         prof = mock.Mock(selection_rules=[], blacklist=None)
         prof.resolved_root.return_value = "/root"
-        with mock.patch("src.cli.CorpusProfile.load", return_value=prof), \
-             mock.patch("src.cli.resolve_index_files", return_value=(["/root/a.eml"], [])), \
-             mock.patch("src.cli.AttachmentStore") as store_cls, \
-             mock.patch("src.cli.ingest_eml",
-                        return_value={"emails": 1, "attachments": 2, "skipped": 0}) as ing:
-            rc = cli.main(["attachments", "build", "--profile", "p.json",
-                           "--store", "/tmp/st", "--extractor", "llm"])
+        with (
+            mock.patch("src.cli.CorpusProfile.load", return_value=prof),
+            mock.patch("src.cli.resolve_index_files", return_value=(["/root/a.eml"], [])),
+            mock.patch("src.cli.AttachmentStore") as store_cls,
+            mock.patch(
+                "src.cli.ingest_eml", return_value={"emails": 1, "attachments": 2, "skipped": 0}
+            ) as ing,
+        ):
+            rc = cli.main(
+                [
+                    "attachments",
+                    "build",
+                    "--profile",
+                    "p.json",
+                    "--store",
+                    "/tmp/st",
+                    "--extractor",
+                    "llm",
+                ]
+            )
         self.assertEqual(rc, 0)
         ing.assert_called_once()
         store_cls.assert_called_once_with("/tmp/st")
 
     def test_get_text_routes(self):
         store = mock.Mock()
-        store.fetch.return_value = {"sha256": "ab", "filename": "x.pdf",
-                                    "mime": "application/pdf", "size": 3,
-                                    "text": "hello", "text_status": "extracted",
-                                    "path": "/tmp/st/blobs/ab/abc"}
+        store.fetch.return_value = {
+            "sha256": "ab",
+            "filename": "x.pdf",
+            "mime": "application/pdf",
+            "size": 3,
+            "text": "hello",
+            "text_status": "extracted",
+            "path": "/tmp/st/blobs/ab/abc",
+        }
         with mock.patch("src.cli.AttachmentStore", return_value=store):
             rc = cli.main(["attachments", "get", "abc", "--text", "--store", "/tmp/st"])
         self.assertEqual(rc, 0)
@@ -53,8 +71,10 @@ class TestAttachmentsCli(unittest.TestCase):
         store = mock.Mock()
         store.list_for.return_value = [meta]
         buf = io.StringIO()
-        with mock.patch("src.cli.AttachmentStore", return_value=store), \
-             contextlib.redirect_stdout(buf):
+        with (
+            mock.patch("src.cli.AttachmentStore", return_value=store),
+            contextlib.redirect_stdout(buf),
+        ):
             rc = cli.main(["attachments", "list", "--thread-id", "t1", "--store", "/tmp/st"])
         self.assertEqual(rc, 0)
         output = buf.getvalue()
@@ -63,17 +83,36 @@ class TestAttachmentsCli(unittest.TestCase):
         # The old 12-char truncation must NOT be the entire token shown
         # (i.e. the line must contain more than just the first 12 chars)
         first_line = output.splitlines()[0]
-        self.assertTrue(first_line.startswith(full_sha),
-                        f"line should start with full sha256, got: {first_line!r}")
+        self.assertTrue(
+            first_line.startswith(full_sha),
+            f"line should start with full sha256, got: {first_line!r}",
+        )
 
     def test_get_passes_extractor_and_force(self):
         store = mock.Mock()
-        store.fetch.return_value = {"sha256": "ab", "filename": "x.png",
-                                    "mime": "image/png", "size": 3, "text": "t",
-                                    "text_status": "extracted", "path": "/p"}
+        store.fetch.return_value = {
+            "sha256": "ab",
+            "filename": "x.png",
+            "mime": "image/png",
+            "size": 3,
+            "text": "t",
+            "text_status": "extracted",
+            "path": "/p",
+        }
         with mock.patch("src.cli.AttachmentStore", return_value=store):
-            rc = cli.main(["attachments", "get", "abc", "--text",
-                           "--extractor", "tesseract", "--force", "--store", "/tmp/st"])
+            rc = cli.main(
+                [
+                    "attachments",
+                    "get",
+                    "abc",
+                    "--text",
+                    "--extractor",
+                    "tesseract",
+                    "--force",
+                    "--store",
+                    "/tmp/st",
+                ]
+            )
         self.assertEqual(rc, 0)
         store.fetch.assert_called_once_with("abc", extractor="tesseract", force=True)
 

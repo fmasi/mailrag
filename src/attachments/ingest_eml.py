@@ -11,14 +11,15 @@ payload. (These exports prepend an mbox ``From `` line + a numeric field that br
 a naive ``email`` parse, dropping the Message-ID; the loader strips that preamble.
 Parsing raw here instead silently broke the attachment->thread join. See issue #32.)
 """
+
 from __future__ import annotations
 
 from email import message_from_bytes, policy
 from email.header import decode_header, make_header
 from typing import Dict, Iterable
 
-from src.data.threading import compute_thread_id
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
+from src.data.threading import compute_thread_id
 
 
 def _decode_filename(raw: str | None) -> str:
@@ -42,6 +43,7 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
     if progress:
         try:
             from tqdm import tqdm
+
             bar = tqdm(total=len(paths), unit="eml", desc="attachments")
         except ImportError:
             bar = None
@@ -59,8 +61,9 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
             continue
         e = loaded[0]
         message_id = e.message_id or ""
-        thread_id = compute_thread_id(message_id, e.in_reply_to or "",
-                                      e.references or "", subject=e.subject or "")
+        thread_id = compute_thread_id(
+            message_id, e.in_reply_to or "", e.references or "", subject=e.subject or ""
+        )
         counts["emails"] += 1
 
         # Parts from the same preamble-stripped bytes the loader parsed.
@@ -76,7 +79,7 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
             if part.is_multipart():
                 continue
             filename = _decode_filename(part.get_filename())
-            disp = (part.get_content_disposition() or "")
+            disp = part.get_content_disposition() or ""
             if not filename and disp not in ("attachment", "inline"):
                 continue
             try:
@@ -91,11 +94,17 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
             charset = part.get_content_charset()
             if charset and mime.startswith("text/"):
                 mime = f"{mime}; charset={charset}"
-            store.put(data, message_id=message_id, thread_id=thread_id,
-                      filename=filename or "(unnamed)",
-                      mime=mime, size=len(data),
-                      source_type="eml", source_ref=path,
-                      inline=(disp == "inline"))
+            store.put(
+                data,
+                message_id=message_id,
+                thread_id=thread_id,
+                filename=filename or "(unnamed)",
+                mime=mime,
+                size=len(data),
+                source_type="eml",
+                source_ref=path,
+                inline=(disp == "inline"),
+            )
             counts["attachments"] += 1
         if bar:
             bar.update(1)

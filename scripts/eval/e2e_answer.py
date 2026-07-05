@@ -12,6 +12,7 @@ Run on the HOST (rag env; RAG_LLM_API_BASE + .env key):
     python scripts/eval/e2e_answer.py --contexts eval/out/e2e/contexts.jsonl \
     --tag gemma31b | tee eval/out/e2e_answer_gemma31b.log
 """
+
 import argparse
 import json
 import os
@@ -20,16 +21,18 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
+    from dotenv import load_dotenv
+
+    load_dotenv()
 except ImportError:
     pass
 
-from src.llm.client import make_client, default_model, chat
+from src.llm.client import chat, default_model, make_client
 
 PROMPT = (
     "You answer a question using ONLY the emails provided as context. "
     "If the context does not contain enough information to answer, reply exactly: "
-    "\"I don't know based on the provided emails.\" Be concise and factual.\n\n"
+    '"I don\'t know based on the provided emails." Be concise and factual.\n\n'
     "QUESTION:\n{query}\n\nCONTEXT EMAILS:\n{context}\n\nANSWER:"
 )
 

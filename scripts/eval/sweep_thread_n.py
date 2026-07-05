@@ -11,6 +11,7 @@ Run on the HOST (rag env; QDRANT_URL set):
     python scripts/eval/sweep_thread_n.py --queries eval/out/queries.jsonl \
     | tee eval/out/sweep_thread_n.log
 """
+
 import argparse
 import json
 import os
@@ -33,8 +34,14 @@ def run(queries_path, top_k):
 
     def mk(collection):
         return build_hybrid_searcher(
-            collection, embedder=embedder, mode="hybrid", rerank=False,
-            dense_top_k=max(top_k, 20), sparse_top_k=max(top_k, 20), top_n=top_k)
+            collection,
+            embedder=embedder,
+            mode="hybrid",
+            rerank=False,
+            dense_top_k=max(top_k, 20),
+            sparse_top_k=max(top_k, 20),
+            top_n=top_k,
+        )
 
     searchers = {"C+thread": mk(C), "Cprime+thread": mk(CP)}
 
@@ -63,12 +70,16 @@ def run(queries_path, top_k):
 
     for base in searchers:
         print(f"\n=== {base} — answer-coverage by N (top-N seed threads expanded) ===")
-        print(f'{"N":>4} {"cov(all)":>9} {"terse":>7} {"content":>8} {"spanning":>9} {"avg#emails":>11}')
+        print(
+            f"{'N':>4} {'cov(all)':>9} {'terse':>7} {'content':>8} {'spanning':>9} {'avg#emails':>11}"
+        )
         for N in NS + ["all"]:
             c = cov[base][N]
-            print(f'{str(N):>4} {mean(c["all"]):>9.0%} {mean(c["terse"]):>7.0%} '
-                  f'{mean(c["content"]):>8.0%} {mean(c["spanning"]):>9.0%} '
-                  f'{mean(size[base][N]):>11.1f}')
+            print(
+                f"{str(N):>4} {mean(c['all']):>9.0%} {mean(c['terse']):>7.0%} "
+                f"{mean(c['content']):>8.0%} {mean(c['spanning']):>9.0%} "
+                f"{mean(size[base][N]):>11.1f}"
+            )
 
 
 def main():

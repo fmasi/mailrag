@@ -4,6 +4,7 @@
 Pool-relative recall: `total_relevant` is the count of grade>=rel emails in the
 judged pool for that query, not absolute corpus recall (documented in §3.3).
 """
+
 from __future__ import annotations
 
 import math

@@ -1,16 +1,34 @@
 import unittest
+
 from src.eval.decisions import decide
 
 # Minimal rankings: 1 terse query where thread-aware surfaces the relevant sibling,
 # 1 content query where C-family beats C'.
 RANKINGS = [
-    {"query": "terse-q", "category": "terse", "answer_message_id": "sib",
-     "arms": {"C": ["terse"], "C+rerank": ["terse"],
-              "C+rerank+thread": ["sib", "terse"],
-              "Cprime": ["sib"], "Cprime+rerank": ["sib"]}},
-    {"query": "content-q", "category": "content", "answer_message_id": "doc",
-     "arms": {"C": ["doc"], "C+rerank": ["doc"], "C+rerank+thread": ["doc"],
-              "Cprime": ["off"], "Cprime+rerank": ["off"]}},
+    {
+        "query": "terse-q",
+        "category": "terse",
+        "answer_message_id": "sib",
+        "arms": {
+            "C": ["terse"],
+            "C+rerank": ["terse"],
+            "C+rerank+thread": ["sib", "terse"],
+            "Cprime": ["sib"],
+            "Cprime+rerank": ["sib"],
+        },
+    },
+    {
+        "query": "content-q",
+        "category": "content",
+        "answer_message_id": "doc",
+        "arms": {
+            "C": ["doc"],
+            "C+rerank": ["doc"],
+            "C+rerank+thread": ["doc"],
+            "Cprime": ["off"],
+            "Cprime+rerank": ["off"],
+        },
+    },
 ]
 GRADES = {
     "terse-q": {"terse": 0, "sib": 3},

@@ -7,6 +7,7 @@ LLM (the same abstraction ``Settings.llm`` uses), while keeping a raw-OpenAI
 shim for the inline-image vision path. No network here — the OpenAILike /
 OpenAI boundary is faked.
 """
+
 import os
 import unittest
 from unittest import mock
@@ -139,14 +140,18 @@ class TestMakeClientConfig(unittest.TestCase):
         return str(c.base_url).rstrip("/")
 
     def test_uses_unified_rag_llm_api_base(self):
-        with mock.patch.dict(os.environ, {"RAG_LLM_API_BASE": "http://unified:9999/v1"}, clear=True):
+        with mock.patch.dict(
+            os.environ, {"RAG_LLM_API_BASE": "http://unified:9999/v1"}, clear=True
+        ):
             c = client.make_client()
         self.assertEqual(self._base(c), "http://unified:9999/v1")
 
     def test_api_base_takes_precedence_over_legacy_base_url(self):
-        with mock.patch.dict(os.environ,
-                             {"RAG_LLM_API_BASE": "http://canonical:1/v1",
-                              "RAG_LLM_BASE_URL": "http://legacy:2/v1"}, clear=True):
+        with mock.patch.dict(
+            os.environ,
+            {"RAG_LLM_API_BASE": "http://canonical:1/v1", "RAG_LLM_BASE_URL": "http://legacy:2/v1"},
+            clear=True,
+        ):
             c = client.make_client()
         self.assertEqual(self._base(c), "http://canonical:1/v1")
 
@@ -169,9 +174,11 @@ class TestResolveLlmApiBase(unittest.TestCase):
     RAG_LLM_BASE_URL is honored as a fallback; default is local-first."""
 
     def test_prefers_canonical_over_legacy(self):
-        with mock.patch.dict(os.environ,
-                             {"RAG_LLM_API_BASE": "http://canon:9/v1",
-                              "RAG_LLM_BASE_URL": "http://legacy:2/v1"}, clear=True):
+        with mock.patch.dict(
+            os.environ,
+            {"RAG_LLM_API_BASE": "http://canon:9/v1", "RAG_LLM_BASE_URL": "http://legacy:2/v1"},
+            clear=True,
+        ):
             self.assertEqual(client.resolve_llm_api_base(), "http://canon:9/v1")
 
     def test_legacy_alias_fallback(self):
@@ -185,9 +192,11 @@ class TestResolveLlmApiBase(unittest.TestCase):
     # A whitespace-only value must be treated as unset (fall through to the
     # alias / default), never yielding an empty URL. One scenario per test.
     def test_blank_canonical_falls_through_to_legacy(self):
-        with mock.patch.dict(os.environ,
-                             {"RAG_LLM_API_BASE": "   ",
-                              "RAG_LLM_BASE_URL": "http://legacy:2/v1"}, clear=True):
+        with mock.patch.dict(
+            os.environ,
+            {"RAG_LLM_API_BASE": "   ", "RAG_LLM_BASE_URL": "http://legacy:2/v1"},
+            clear=True,
+        ):
             self.assertEqual(client.resolve_llm_api_base(), "http://legacy:2/v1")
 
     def test_blank_canonical_alone_falls_through_to_default(self):
@@ -199,8 +208,9 @@ class TestResolveLlmApiBase(unittest.TestCase):
             self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
 
     def test_both_blank_falls_through_to_default(self):
-        with mock.patch.dict(os.environ,
-                             {"RAG_LLM_API_BASE": " ", "RAG_LLM_BASE_URL": "  "}, clear=True):
+        with mock.patch.dict(
+            os.environ, {"RAG_LLM_API_BASE": " ", "RAG_LLM_BASE_URL": "  "}, clear=True
+        ):
             self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
 
 

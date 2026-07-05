@@ -2,6 +2,7 @@
 
 Stdlib-only (selection + blacklist), host-runnable.
 """
+
 import os
 import tempfile
 import unittest
@@ -22,11 +23,14 @@ def _make(root, rels):
 class TestResolveIndexFiles(unittest.TestCase):
     def test_selects_files_matching_rules(self):
         with tempfile.TemporaryDirectory() as root:
-            _make(root, [
-                "Inbox/Acme Corp/a.eml",
-                "Inbox/Google/b.eml",
-                "Acme Corp/Archive/c.eml",
-            ])
+            _make(
+                root,
+                [
+                    "Inbox/Acme Corp/a.eml",
+                    "Inbox/Google/b.eml",
+                    "Acme Corp/Archive/c.eml",
+                ],
+            )
             rules = [
                 {"type": "prefix", "value": "Inbox/Acme Corp/"},
                 {"type": "prefix", "value": "Acme Corp/"},

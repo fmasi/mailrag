@@ -4,6 +4,7 @@ The protocol is the seam that the NVIDIA-native (dense-only) embedder will plug
 into later. bge-m3 metadata is class-level so it can be asserted WITHOUT loading
 the heavy FlagEmbedding model (the embedder itself stays an integration component).
 """
+
 import unittest
 from unittest.mock import patch
 

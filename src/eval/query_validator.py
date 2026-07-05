@@ -6,6 +6,7 @@ specific content fact in the answer email, and NOT an artifact/meta question abo
 email/thread/meeting itself. Pure logic (prompt build + verdict parse) lives here so it
 is unit-testable; the LLM call is in scripts/eval/gen_queries.py. Mirrors judge_parse.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,7 @@ def parse_validation(raw: str) -> dict:
     if start == -1 or end == -1 or end <= start:
         return {"keep": False, "reason": "no json object"}
     try:
-        obj = json.loads(s[start:end + 1])
+        obj = json.loads(s[start : end + 1])
     except ValueError:
         return {"keep": False, "reason": "unparseable json"}
     keep = obj.get("keep")

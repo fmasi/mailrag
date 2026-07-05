@@ -40,9 +40,7 @@ class TestBulkHeaderDetection(unittest.TestCase):
     conservative Pass-1 noise filter can act on it downstream."""
 
     def _load_one(self, raw: str) -> NormalizedEmail:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".eml", delete=False, encoding="utf-8"
-        ) as f:
+        with tempfile.NamedTemporaryFile("w", suffix=".eml", delete=False, encoding="utf-8") as f:
             f.write(raw)
             path = f.name
         try:
@@ -95,6 +93,7 @@ class TestLoaderVerbosity(unittest.TestCase):
     def test_quiet_loader_prints_nothing(self):
         import io
         from contextlib import redirect_stdout
+
         path = self._eml()
         try:
             buf = io.StringIO()
@@ -108,6 +107,7 @@ class TestLoaderVerbosity(unittest.TestCase):
     def test_verbose_default_still_prints(self):
         import io
         from contextlib import redirect_stdout
+
         path = self._eml()
         try:
             buf = io.StringIO()

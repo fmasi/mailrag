@@ -4,6 +4,7 @@ Dense-only embedders (e.g. a NVIDIA NIM, produces_sparse=False) need a collectio
 with just the ``dense`` named vector — no ``sparse`` leg — and points without a
 sparse vector. Mirrors the hybrid path's payload indexes.
 """
+
 import unittest
 from unittest import mock
 

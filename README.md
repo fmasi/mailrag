@@ -253,6 +253,27 @@ Programme"), at the cost of extra queries per search.
 | `tests/` | Test suite (pytest) |
 | `docs/` | Architecture, quickstart, preprocessing guides |
 
+## CI / quality gates
+
+Every PR runs the following checks (all pinned to commit-SHA'd actions). Each is
+an independently named status so it can be wired into branch protection:
+
+| Gate | What it enforces | Run locally |
+|------|------------------|-------------|
+| `pytest` | Full test suite + a coverage floor of **85%** (current ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
+| `ruff (lint + format)` | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
+| `mypy (type check)` | Type-checks `src/` (lenient: `ignore_missing_imports`; CI runs deps-free so third-party imports are `Any` and results are deterministic; per-module opt-outs for legacy modules) | `poetry run mypy src/` |
+| `pip-audit (dependency CVEs)` | Known CVEs in the locked deps (OSV) | `poetry run pip-audit --vulnerability-service osv` |
+| `dependency-review` | Blocks PRs that add deps with `moderate`+ advisories | (PR-only; runs on GitHub) |
+
+Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and the workflows
+under `.github/workflows/` (`ci.yml`, `dependency-review.yml`, `test-suite.yml`).
+`ruff check --fix .` and `ruff format .` auto-fix most lint/format findings.
+
+Two transitive advisories with no upstream fix (`nltk` path-traversal, `torch`
+`jit.script` memory corruption) are ignored by ID in `ci.yml` with links; every
+*fixable* advisory was resolved by bumping the lockfile instead.
+
 ## Documentation
 
 Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader journey is

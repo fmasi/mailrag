@@ -7,6 +7,7 @@ Subcommands:
   apply   append noise file-hashes (>= threshold) to the blacklist
   eval    dev-only: compare local Gemma vs a reference model (added later)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,6 +34,7 @@ from src.llm.cache import Pass2Cache  # noqa: E402
 
 def _load_selection(selection_path):
     import json
+
     with open(selection_path) as fh:
         return json.load(fh)
 
@@ -44,26 +46,34 @@ def _make_load_email(body_chars):
     def load_email(path):
         # The loader prints "Loading… Found 1… Loaded 1" per file; silence it so
         # the progress bar stays clean.
-        import contextlib, io
+        import contextlib
+        import io
+
         with contextlib.redirect_stdout(io.StringIO()):
             emails = list(MailArchiveXLoader(eml_files=[path]).load())
         if not emails:
             raise ValueError("no email parsed")
         e = emails[0]
-        return {"sender": e.sender, "subject": e.subject,
-                "date": e.date.isoformat() if e.date else "unknown",
-                "body": e.body, "message_id": e.message_id or ""}
+        return {
+            "sender": e.sender,
+            "subject": e.subject,
+            "date": e.date.isoformat() if e.date else "unknown",
+            "body": e.body,
+            "message_id": e.message_id or "",
+        }
+
     return load_email
 
 
 def cmd_run(args):
     """Thin shim: delegates to src.pipeline.pass2.run."""
-    from src.profile import CorpusProfile
     from src.pipeline import pass2 as pass2_stage
+    from src.profile import CorpusProfile
 
     model = args.model or llm_client.default_model()
     if not model:
-        print("Error: set --model or RAG_LLM_MODEL"); sys.exit(1)
+        print("Error: set --model or RAG_LLM_MODEL")
+        sys.exit(1)
 
     prof = CorpusProfile.load(args.selection)
     prof.pass2_cache = args.cache
@@ -91,7 +101,7 @@ def cmd_report(args):
         shown += 1
         if shown >= args.samples:
             break
-    print(f"\nsample kept summaries:")
+    print("\nsample kept summaries:")
     shown = 0
     for row in cache.iter_kept():
         if row["summary"]:
@@ -110,8 +120,10 @@ def cmd_apply(args):
         print(f"would blacklist {len(shas)} file(s) at conf >= {args.min_confidence}")
         return
     added = append_to_blacklist(args.blacklist, shas)
-    print(f"blacklisted {added} new file-hash(es) (of {len(shas)} candidates) "
-          f"-> {args.blacklist}; rebuild to apply")
+    print(
+        f"blacklisted {added} new file-hash(es) (of {len(shas)} candidates) "
+        f"-> {args.blacklist}; rebuild to apply"
+    )
 
 
 def cmd_eval(args):
@@ -120,7 +132,9 @@ def cmd_eval(args):
     Offline production paths never call this. Requires ANTHROPIC_API_KEY.
     """
     import random
+
     from src.ingest.local_source import resolve_index_files
+
     sel = _load_selection(args.selection)
     kept, _ = resolve_index_files(sel["root"], sel["selection_rules"], args.blacklist)
     random.seed(args.seed)
@@ -130,15 +144,19 @@ def cmd_eval(args):
     cl = llm_client.make_client()
     model = args.model or llm_client.default_model()
     if not model:
-        print("Error: set --model or RAG_LLM_MODEL"); sys.exit(1)
+        print("Error: set --model or RAG_LLM_MODEL")
+        sys.exit(1)
 
     import anthropic
+
     ref = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
 
     def ref_summarize(email):
         msg = ref.messages.create(
-            model=args.reference_model, max_tokens=512,
-            messages=[{"role": "user", "content": summary.build_prompt(email, args.body_chars)}])
+            model=args.reference_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": summary.build_prompt(email, args.body_chars)}],
+        )
         return summary.parse_response(msg.content[0].text)
 
     local_j, ref_j = {}, {}
@@ -146,18 +164,22 @@ def cmd_eval(args):
         email = load_email(path)
         try:
             lr = summary.parse_response(
-                llm_client.chat(cl, model, summary.build_prompt(email, args.body_chars)))
+                llm_client.chat(cl, model, summary.build_prompt(email, args.body_chars))
+            )
             rr = ref_summarize(email)
         except Exception as exc:
-            print(f"  skip {path}: {exc}"); continue
+            print(f"  skip {path}: {exc}")
+            continue
         local_j[path], ref_j[path] = lr["is_noise"], rr["is_noise"]
         flag = "" if lr["is_noise"] == rr["is_noise"] else "  <-- DISAGREE"
         print(f"\n{os.path.basename(path)}{flag}")
         print(f"  gemma : noise={lr['is_noise']} ({lr['confidence']:.2f}) {lr['summary'][:80]}")
         print(f"  ref   : noise={rr['is_noise']} ({rr['confidence']:.2f}) {rr['summary'][:80]}")
 
-    print(f"\nagreement on is_noise: {pass2.agreement_rate(local_j, ref_j):.0%} "
-          f"over {len(local_j)} email(s)")
+    print(
+        f"\nagreement on is_noise: {pass2.agreement_rate(local_j, ref_j):.0%} "
+        f"over {len(local_j)} email(s)"
+    )
 
 
 def main(argv=None):
@@ -170,15 +192,23 @@ def main(argv=None):
     pr.add_argument("--blacklist", default=None)
     pr.add_argument("--model", default=None)
     pr.add_argument("--body-chars", type=int, default=4000)
-    pr.add_argument("--limit", type=int, default=None,
-                    help="process the first N resolved files (in order)")
-    pr.add_argument("--sample", type=int, default=None,
-                    help="randomly sample N of the resolved files (representative spot-check)")
+    pr.add_argument(
+        "--limit", type=int, default=None, help="process the first N resolved files (in order)"
+    )
+    pr.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="randomly sample N of the resolved files (representative spot-check)",
+    )
     pr.add_argument("--seed", type=int, default=0, help="random seed for --sample")
-    pr.add_argument("--no-progress", action="store_true",
-                    help="disable the tqdm progress bar")
-    pr.add_argument("--workers", type=int, default=1,
-                    help="parallel in-flight LLM requests (cache writes stay serial)")
+    pr.add_argument("--no-progress", action="store_true", help="disable the tqdm progress bar")
+    pr.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="parallel in-flight LLM requests (cache writes stay serial)",
+    )
     pr.set_defaults(func=cmd_run)
 
     rp = sub.add_parser("report", help="Dry-run report from the cache")

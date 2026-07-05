@@ -10,6 +10,7 @@ Deliberately lean: only stdlib plus a lazy ``qdrant_client`` import, so the
 lightweight offline query env can import it without pulling heavy llama-index
 integrations (see the note in ``src/query/hybrid.py``).
 """
+
 from __future__ import annotations
 
 import os
@@ -40,8 +41,6 @@ def get_qdrant_client(url=None, api_key=None, prefer_grpc=None):
     api_key = (api_key or "").strip() or None
 
     if prefer_grpc is None:
-        prefer_grpc = (
-            os.environ.get("QDRANT_PREFER_GRPC") or ""
-        ).strip().lower() in _TRUTHY
+        prefer_grpc = (os.environ.get("QDRANT_PREFER_GRPC") or "").strip().lower() in _TRUTHY
 
     return QdrantClient(url=url, api_key=api_key, prefer_grpc=prefer_grpc)

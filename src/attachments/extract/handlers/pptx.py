@@ -1,4 +1,5 @@
 """PPTX handler (python-pptx)."""
+
 from __future__ import annotations
 
 import io
@@ -8,7 +9,9 @@ from src.attachments.extract.result import ExtractResult, Status, ok
 
 class PptxHandler:
     def can_handle(self, mime: str, filename: str) -> bool:
-        return (filename or "").lower().endswith(".pptx") or "presentationml" in (mime or "").lower()
+        return (filename or "").lower().endswith(".pptx") or "presentationml" in (
+            mime or ""
+        ).lower()
 
     def extract(self, data: bytes, mime: str, filename: str) -> ExtractResult:
         try:

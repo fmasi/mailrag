@@ -9,7 +9,6 @@ This script demonstrates how to use all the modules together:
 Run this file to test the full pipeline.
 """
 
-import os
 from dotenv import load_dotenv
 
 from src.indexing.contextual_index import build_contextual_index
@@ -27,24 +26,28 @@ def _init_settings():
     in the ``rag`` conda environment.
     """
     from dotenv import load_dotenv
+
     load_dotenv()
 
 
 def _load_demo_emails(num_samples):
     """Load NormalizedEmail objects from the Enron dataset."""
     from src.data.loaders.enron import EnronDatasetLoader
+
     return EnronDatasetLoader().load(num_samples=num_samples)
 
 
 def _make_embedder():
     """Construct the BGE-M3 embedder (lazy import: avoids FlagEmbedding at import time)."""
     from src.ingest.embedder import BgeM3Embedder
+
     return BgeM3Embedder(use_fp16=True)
 
 
 def _require_qdrant(url="http://localhost:6333"):
     """Raise SystemExit if Qdrant is not reachable."""
     from src.ingest import hybrid_qdrant as hq
+
     try:
         hq.get_client(url).get_collections()
     except Exception as e:
@@ -52,7 +55,6 @@ def _require_qdrant(url="http://localhost:6333"):
             f"Qdrant not reachable at {url}. Start it with `make demo` or "
             f"`docker compose up -d qdrant`. ({e})"
         )
-
 
 
 def run_demo(
@@ -69,6 +71,7 @@ def run_demo(
     emails = _load_demo_emails(num_samples)
     from src.data.threading import assign_subject_fallback_thread_ids
     from src.llm.answer import answer_from_threads
+
     assign_subject_fallback_thread_ids(emails)
     print(f"Loaded {len(emails)} Enron emails; generating thread-aware summaries (LLM)...")
     summaries = generate_thread_summaries(emails)

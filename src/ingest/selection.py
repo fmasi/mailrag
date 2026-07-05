@@ -35,7 +35,7 @@ def matches_rule(name: str, rule: dict) -> bool:
         root = rule["root"]
         if not name.startswith(root):
             return False
-        remainder = name[len(root):]
+        remainder = name[len(root) :]
         return bool(remainder) and "/" not in remainder
     if rule_type == "container-root":
         return "/" not in name
@@ -56,9 +56,7 @@ def discover_structure(names) -> Tuple[Dict[str, dict], bool]:
             has_container_root_files = True
             continue
         root = f"{parts[0]}/"
-        entry = folder_tree.setdefault(
-            root, {"children": set(), "has_direct_files": False}
-        )
+        entry = folder_tree.setdefault(root, {"children": set(), "has_direct_files": False})
         if len(parts) == 2:
             entry["has_direct_files"] = True
             continue

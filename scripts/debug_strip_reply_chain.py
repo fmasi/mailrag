@@ -46,13 +46,15 @@ def _load_raw_bodies(loader: MailArchiveXLoader) -> list[dict]:
             msg = email.message_from_bytes(raw, policy=policy.compat32)
             raw_body = loader._extract_email_body_from_message(msg)
             stripped_body = loader._strip_reply_chain(raw_body)
-            results.append({
-                "path": eml_path,
-                "raw_tokens": _rough_token_count(raw_body),
-                "stripped_tokens": _rough_token_count(stripped_body),
-                "raw_body": raw_body,
-                "stripped_body": stripped_body,
-            })
+            results.append(
+                {
+                    "path": eml_path,
+                    "raw_tokens": _rough_token_count(raw_body),
+                    "stripped_tokens": _rough_token_count(stripped_body),
+                    "raw_body": raw_body,
+                    "stripped_body": stripped_body,
+                }
+            )
         except Exception as e:
             print(f"  Error on {eml_path}: {e}")
 
@@ -66,27 +68,32 @@ def _first_line_of_quote(raw_body: str) -> str:
         _REPLY_SEPARATOR_RE,
         _WROTE_END_RE,
     )
+
     lines = raw_body.splitlines()
     for i, line in enumerate(lines):
         s = line.strip()
         if _REPLY_SEPARATOR_RE.match(s):
-            return f"line {i+1}: {repr(s[:120])}"
+            return f"line {i + 1}: {repr(s[:120])}"
         if _ON_WROTE_RE.match(s):
             lookahead = " ".join(lines[j].strip() for j in range(i, min(i + 3, len(lines))))
             if _WROTE_END_RE.search(lookahead):
-                return f"line {i+1}: {repr(s[:120])}"
+                return f"line {i + 1}: {repr(s[:120])}"
     return "none found — stripping had no effect"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--sample", type=int, default=300,
-                        help="Number of blobs to download (default: 300)")
-    parser.add_argument("--show", type=int, default=5,
-                        help="Number of worst-case emails to inspect (default: 5)")
-    parser.add_argument("--preview", type=int, default=800,
-                        help="Characters of raw body to show (default: 800)")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--sample", type=int, default=300, help="Number of blobs to download (default: 300)"
+    )
+    parser.add_argument(
+        "--show", type=int, default=5, help="Number of worst-case emails to inspect (default: 5)"
+    )
+    parser.add_argument(
+        "--preview", type=int, default=800, help="Characters of raw body to show (default: 800)"
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -137,15 +144,17 @@ def main() -> None:
     reduced = len(results) - unchanged
     pct_saved = 100.0 * (total_raw - total_stripped) / total_raw if total_raw else 0
 
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Stripping summary  (n={len(results)})")
-    print(f"{'='*60}")
-    print(f"  Emails where stripping changed body : {reduced} ({100*reduced//len(results)}%)")
-    print(f"  Emails unchanged (no pattern found) : {unchanged} ({100*unchanged//len(results)}%)")
+    print(f"{'=' * 60}")
+    print(f"  Emails where stripping changed body : {reduced} ({100 * reduced // len(results)}%)")
+    print(
+        f"  Emails unchanged (no pattern found) : {unchanged} ({100 * unchanged // len(results)}%)"
+    )
     print(f"  Total tokens before : {total_raw:,}")
     print(f"  Total tokens after  : {total_stripped:,}")
     print(f"  Tokens removed      : {total_raw - total_stripped:,}  ({pct_saved:.1f}% reduction)")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # ------------------------------------------------------------------ #
     # Invariant validation                                                #
@@ -196,9 +205,9 @@ def main() -> None:
             suspicious.append({**r, "issues": issues})
 
     if suspicious:
-        print(f"{'!'*60}")
+        print(f"{'!' * 60}")
         print(f"  VALIDATION FAILURES — {len(suspicious)} suspicious email(s)")
-        print(f"{'!'*60}\n")
+        print(f"{'!' * 60}\n")
         for r in suspicious:
             print(f"  {os.path.basename(r['path'])}")
             for issue in r["issues"]:
@@ -217,8 +226,10 @@ def main() -> None:
         trigger = _first_line_of_quote(r["raw_body"])
 
         print(f"  [{i}] {os.path.basename(r['path'])}")
-        print(f"      raw={r['raw_tokens']:,} tokens  stripped={r['stripped_tokens']:,} tokens  "
-              f"removed={reduction:,} ({pct:.0f}%)")
+        print(
+            f"      raw={r['raw_tokens']:,} tokens  stripped={r['stripped_tokens']:,} tokens  "
+            f"removed={reduction:,} ({pct:.0f}%)"
+        )
         print(f"      First quote marker → {trigger}")
         print(f"\n      --- raw body (first {args.preview} chars) ---")
         print(r["raw_body"][: args.preview].replace("\n", "\n      "))

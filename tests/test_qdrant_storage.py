@@ -157,9 +157,7 @@ class TestQdrantStorage(unittest.TestCase):
                 vector_store=vector_store,
             )
 
-            results = index.as_retriever(similarity_top_k=1).retrieve(
-                "meeting schedule"
-            )
+            results = index.as_retriever(similarity_top_k=1).retrieve("meeting schedule")
 
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0].metadata.get("subject"), "Meeting")

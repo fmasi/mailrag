@@ -14,12 +14,11 @@ This approach significantly improves efficiency for development and deployment.
 import os
 import shutil
 import time
-from typing import Optional
 
 from llama_index.core import (
-    VectorStoreIndex,
-    StorageContext,
     Settings,
+    StorageContext,
+    VectorStoreIndex,
     load_index_from_storage,
 )
 from llama_index.core.vector_stores import SimpleVectorStore
@@ -29,8 +28,8 @@ from src.config.settings import RAGConfig
 
 def _get_pinecone_vector_store():
     """Lazy import to avoid requiring pinecone when using SimpleVectorStore."""
-    from pinecone import Pinecone
     from llama_index.vector_stores.pinecone import PineconeVectorStore
+    from pinecone import Pinecone
 
     api_key = os.environ.get("PINECONE_API_KEY")
     index_name = os.environ.get("PINECONE_INDEX_NAME")
@@ -93,9 +92,10 @@ def _ingest_to_qdrant(documents, vector_store, verbose: bool) -> dict[str, float
     request is in-flight at any moment, preventing LM Studio's queue from flooding.
     """
     import contextlib
-    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
+
     from llama_index.core.node_parser import SentenceSplitter
     from llama_index.core.schema import MetadataMode
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
     # Stage 1: chunk — iterate per-document so we can drive our own Rich bar.
     splitter = SentenceSplitter(
@@ -126,9 +126,7 @@ def _ingest_to_qdrant(documents, vector_store, verbose: bool) -> dict[str, float
     from src.data.dedup import dedup_by_content
 
     _before = len(nodes)
-    nodes = dedup_by_content(
-        nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE)
-    )
+    nodes = dedup_by_content(nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE))
     if verbose and len(nodes) != _before:
         print(f"  → deduped {_before - len(nodes)} duplicate chunk(s); {len(nodes)} remain")
 
@@ -165,9 +163,7 @@ def _ingest_to_qdrant(documents, vector_store, verbose: bool) -> dict[str, float
             texts = [n.get_content(metadata_mode=MetadataMode.EMBED) for n in batch]
 
             t_embed = time.monotonic()
-            embeddings = Settings.embed_model.get_text_embedding_batch(
-                texts, show_progress=False
-            )
+            embeddings = Settings.embed_model.get_text_embedding_batch(texts, show_progress=False)
             embed_secs = time.monotonic() - t_embed
             total_embed_secs += embed_secs
 
@@ -208,21 +204,21 @@ def _ingest_to_qdrant(documents, vector_store, verbose: bool) -> dict[str, float
 class StorageManager:
     """
     Manages persistence of the LlamaIndex VectorStoreIndex.
-    
+
     This class encapsulates all storage/loading logic, making it easy to:
     - Swap storage backends (e.g., from SimpleVectorStore to Pinecone)
     - Manage storage directories
     - Handle index versioning if needed in the future
     """
-    
+
     @staticmethod
     def index_exists() -> bool:
         """
         Check if a valid index already exists in storage.
-        
+
         Returns:
             True if index exists and is valid, False otherwise.
-            
+
         Why this check:
             - We need to know if we should load an existing index or create a new one
             - Checking for the storage directory isn't enough; we verify structure
@@ -255,31 +251,31 @@ class StorageManager:
             return (points_count or 0) > 0
 
         storage_dir = RAGConfig.get_storage_dir()
-        
+
         # Check if storage directory exists
         if not os.path.exists(storage_dir):
             return False
-        
+
         # Check for required index files
         # SimpleVectorStore saves to 'default__vector_store.json'
         index_file = os.path.join(storage_dir, "default__vector_store.json")
-        
+
         # Also check for the metadata file
         has_vector_store = os.path.exists(index_file)
-        
+
         return has_vector_store
-    
+
     @staticmethod
     def load_index() -> VectorStoreIndex:
         """
         Load an existing index from disk (or Pinecone when configured).
-        
+
         Returns:
             VectorStoreIndex loaded from storage.
-            
+
         Raises:
             ValueError: If no index exists on disk.
-            
+
         Why this approach:
             - We use StorageContext to manage all stored data
             - SimpleVectorStore loads vector embeddings from disk
@@ -298,29 +294,29 @@ class StorageManager:
             return index
 
         storage_dir = RAGConfig.get_storage_dir()
-        
+
         if not StorageManager.index_exists():
             raise ValueError(
                 f"No index found in {storage_dir}. "
                 "Please create an index first using StorageManager.create_and_save_index()"
             )
-        
+
         print(f"Loading existing index from {storage_dir}...")
-        
+
         # Create a StorageContext that loads from disk
         # SimpleVectorStore will load all embeddings from the saved JSON file
         storage_context = StorageContext.from_defaults(
             persist_dir=storage_dir,
             vector_store=SimpleVectorStore(),
         )
-        
+
         # Load the index using the storage context
         index = load_index_from_storage(storage_context)
-        
+
         print(f"✓ Index loaded successfully. Contains {len(index.docstore.docs)} documents")
-        
+
         return index
-    
+
     @staticmethod
     def create_and_save_index(
         documents,
@@ -329,14 +325,14 @@ class StorageManager:
     ) -> VectorStoreIndex | tuple[VectorStoreIndex, dict[str, float] | None]:
         """
         Create a new index from documents and save it to disk (or Pinecone).
-        
+
         Args:
             documents: List of LlamaIndex Document objects
             verbose: Whether to print progress information
-        
+
         Returns:
             The created VectorStoreIndex
-            
+
         Why this approach:
             - VectorStoreIndex automatically embeds all documents
             - We use SimpleVectorStore (local, no dependencies)
@@ -373,17 +369,17 @@ class StorageManager:
             return index
 
         storage_dir = RAGConfig.get_storage_dir()
-        
+
         if verbose:
             print(f"\nCreating index from {len(documents)} documents...")
-            print(f"This may take a few minutes as we embed all documents...")
-        
+            print("This may take a few minutes as we embed all documents...")
+
         # Initialize storage context with SimpleVectorStore
         # This will try to load existing if available, otherwise creates new
         storage_context = StorageContext.from_defaults(
             vector_store=SimpleVectorStore(),
         )
-        
+
         # Create the index
         # This step:
         # 1. Uses the global Settings.embed_model to embed all documents
@@ -395,50 +391,50 @@ class StorageManager:
             storage_context=storage_context,
             show_progress=verbose,
         )
-        
+
         if verbose:
             print(f"✓ Index created with {len(index.docstore.docs)} documents")
             print(f"Saving index to {storage_dir}...")
-        
+
         # Save the index to disk
         # This persists:
         # - Vector embeddings (in default__vector_store.json)
         # - Document metadata
         # - Index structure
         storage_context.persist(persist_dir=storage_dir)
-        
+
         if verbose:
             print(f"✓ Index saved to {storage_dir}")
-            print(f"  Future runs will load from disk (much faster!)")
+            print("  Future runs will load from disk (much faster!)")
 
         if return_stats:
             return index, None
-        
+
         return index
-    
+
     @staticmethod
     def get_or_create_index(documents=None, force_recreate: bool = False) -> VectorStoreIndex:
         """
         Get existing index from disk, or create a new one if it doesn't exist.
-        
+
         This is the main entry point for loading/creating indexes.
-        
+
         Args:
             documents: List of Document objects (required if index doesn't exist)
             force_recreate: If True, always create a fresh index (ignores existing)
-        
+
         Returns:
             VectorStoreIndex ready for querying
-            
+
         Why this approach:
             - Encapsulates the common workflow: "load if exists, else create"
             - Provides a single point for this decision
             - Makes it easy to add caching strategies in the future
-            
+
         Example usage:
             # First time: creates and saves
             index = StorageManager.get_or_create_index(documents=docs)
-            
+
             # Second time: loads from disk (fast!)
             index = StorageManager.get_or_create_index()
         """
@@ -448,34 +444,34 @@ class StorageManager:
             if os.path.exists(storage_dir):
                 shutil.rmtree(storage_dir)
                 os.makedirs(storage_dir)
-        
+
         # Try to load existing index
         if StorageManager.index_exists():
             return StorageManager.load_index()
-        
+
         # If no index exists, create one
         if documents is None:
             raise ValueError(
                 "No existing index found, and documents were not provided. "
                 "Please provide documents to create a new index."
             )
-        
+
         return StorageManager.create_and_save_index(documents)
-    
+
     @staticmethod
     def clear_storage() -> None:
         """
         Clear all stored indexes and data.
-        
+
         Useful for testing or if you want a fresh start.
-        
+
         Why this method:
             - Safe way to reset without manual file deletion
             - Useful for development/testing
             - Prevents accidental data loss (requires explicit call)
         """
         storage_dir = RAGConfig.get_storage_dir()
-        
+
         if os.path.exists(storage_dir):
             print(f"Clearing storage at {storage_dir}...")
             shutil.rmtree(storage_dir)

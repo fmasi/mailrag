@@ -7,6 +7,7 @@ only custom pieces are the bge-m3 adapters (src/query/bge_m3_embedding.py) and t
 RRF callback (src/query/fusion.py). FlagEmbedding/reranker imports are lazy so this
 module imports cleanly in the unit-test env.
 """
+
 from typing import List
 
 from llama_index.core import VectorStoreIndex
@@ -23,7 +24,7 @@ from src.query.thread_expand import assemble_threads
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
 DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
-NIM_RERANK_MODEL = "nvidia/rerank-qa-mistral-4b"      # the only hosted NVIDIA reranker
+NIM_RERANK_MODEL = "nvidia/rerank-qa-mistral-4b"  # the only hosted NVIDIA reranker
 NIM_RERANK_BASE_URL = "https://ai.api.nvidia.com/v1"  # reranking is on a separate host
 
 
@@ -51,8 +52,9 @@ def _make_reranker(model: str = DEFAULT_RERANK_MODEL, top_n: int = 5, use_fp16: 
     return FlagEmbeddingReranker(model=model, top_n=top_n, use_fp16=use_fp16)
 
 
-def make_nim_reranker(model: str = NIM_RERANK_MODEL, top_n: int = 5,
-                      api_key=None, base_url: str = NIM_RERANK_BASE_URL):
+def make_nim_reranker(
+    model: str = NIM_RERANK_MODEL, top_n: int = 5, api_key=None, base_url: str = NIM_RERANK_BASE_URL
+):
     """Lazy-construct the NVIDIA reranking-NIM node-postprocessor.
 
     The only hosted NVIDIA reranker is ``rerank-qa-mistral-4b`` on the separate
@@ -60,6 +62,7 @@ def make_nim_reranker(model: str = NIM_RERANK_MODEL, top_n: int = 5,
     the key from ``NVIDIA_API_KEY`` when not passed. Patchable in tests.
     """
     import os
+
     from llama_index.postprocessor.nvidia_rerank import NVIDIARerank
 
     key = api_key or os.environ.get("NVIDIA_API_KEY")
@@ -84,9 +87,7 @@ class HybridSearcher:
     def search_threads(self, query: str):
         """Search, then expand the hits into attributed ThreadContexts."""
         if self._client is None or self._collection is None:
-            raise ValueError(
-                "search_threads requires a Qdrant client and collection"
-            )
+            raise ValueError("search_threads requires a Qdrant client and collection")
         nodes = self.search(query)
         return assemble_threads(nodes, self._client, self._collection)
 

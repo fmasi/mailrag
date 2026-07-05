@@ -1,18 +1,21 @@
 import unittest
-from src.pipeline import pass1
+
 from src.data.models import NormalizedEmail
 from src.data.noise_filter import NoiseFilter, _CategoryRule
+from src.pipeline import pass1
 
 
 def _email(sender, is_bulk=False):
-    return NormalizedEmail(sender=sender, subject="s", date=None, body="b",
-                           source="t", source_id="t0", is_bulk=is_bulk)
+    return NormalizedEmail(
+        sender=sender, subject="s", date=None, body="b", source="t", source_id="t0", is_bulk=is_bulk
+    )
 
 
 class TestPass1(unittest.TestCase):
     def setUp(self):
-        self.nf = NoiseFilter([_CategoryRule(name="junk", description="",
-                                             sender_domains=["junk.example"])])
+        self.nf = NoiseFilter(
+            [_CategoryRule(name="junk", description="", sender_domains=["junk.example"])]
+        )
 
     def test_tags_matches_and_drops_nothing(self):
         emails = [_email("a@junk.example"), _email("b@real.example"), _email("c@junk.example")]

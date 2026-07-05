@@ -16,6 +16,7 @@ Run on the HOST (rag env; LM Studio loaded with the summary model):
     --slice eval/out/spike_slice.txt --mode thread --out ~/rag_pass2/spike_A.db \\
     | tee eval/out/gen_thread_summaries.log
 """
+
 import argparse
 import json
 import os
@@ -25,7 +26,9 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
+    from dotenv import load_dotenv
+
+    load_dotenv()
 except ImportError:
     pass
 
@@ -33,9 +36,12 @@ from src.data.blacklist import file_sha256
 from src.data.identity import email_identity
 from src.data.threading import compute_thread_id
 from src.llm.cache import Pass2Cache
-from src.llm.client import make_client, chat, default_model
+from src.llm.client import chat, default_model, make_client
 from src.llm.summary import (
-    build_prompt, build_thread_aware_prompt, build_whole_thread_prompt, parse_response,
+    build_prompt,
+    build_thread_aware_prompt,
+    build_whole_thread_prompt,
+    parse_response,
 )
 
 
@@ -118,6 +124,7 @@ def run(slice_path, out_path, mode, model):
 
     try:
         from tqdm import tqdm
+
         bar = tqdm(total=len(emails), unit="email", desc=f"summ-{mode}", smoothing=0.05)
     except ImportError:
         bar = None
@@ -136,7 +143,7 @@ def run(slice_path, out_path, mode, model):
             if cache.has(sha):
                 counts["cached"] += 1
             else:
-                others = thread_dicts[:idx] + thread_dicts[idx + 1:]
+                others = thread_dicts[:idx] + thread_dicts[idx + 1 :]
                 prompt = _build_prompt_for(mode, ed, preceding, others)
                 raw = None
                 try:
@@ -150,7 +157,8 @@ def run(slice_path, out_path, mode, model):
                         message_id=ed["message_id"],
                     )
                     cache.put(
-                        sha, record,
+                        sha,
+                        record,
                         model=model,
                         message_id=mid,
                         content_sha256=chash,
@@ -185,13 +193,21 @@ def main():
     ap = argparse.ArgumentParser(
         description="Generate Pass-2 summaries over the spike slice (thread-aware or isolated)."
     )
-    ap.add_argument("--slice", default="eval/out/spike_slice.txt",
-                    help="Newline-delimited list of .eml paths (from select_spike_slice.py)")
-    ap.add_argument("--out", required=True,
-                    help="Pass2Cache sqlite path (e.g. ~/rag_pass2/spike_A.db)")
-    ap.add_argument("--mode", choices=["thread", "whole", "isolated"], default="thread",
-                    help="thread = preceding-only (causal); whole = full-thread "
-                         "(bidirectional) context; isolated = no thread context (control)")
+    ap.add_argument(
+        "--slice",
+        default="eval/out/spike_slice.txt",
+        help="Newline-delimited list of .eml paths (from select_spike_slice.py)",
+    )
+    ap.add_argument(
+        "--out", required=True, help="Pass2Cache sqlite path (e.g. ~/rag_pass2/spike_A.db)"
+    )
+    ap.add_argument(
+        "--mode",
+        choices=["thread", "whole", "isolated"],
+        default="thread",
+        help="thread = preceding-only (causal); whole = full-thread "
+        "(bidirectional) context; isolated = no thread context (control)",
+    )
     args = ap.parse_args()
     model = os.getenv("RAG_SUMMARY_MODEL", "").strip() or default_model()
     run(os.path.expanduser(args.slice), os.path.expanduser(args.out), args.mode, model)

@@ -6,8 +6,8 @@ Covers:
 - _fmt_duration      — human-readable duration formatting
 """
 
-import sys
 import os
+import sys
 import unittest
 
 # The script lives in scripts/ which is not a package; add it to sys.path.

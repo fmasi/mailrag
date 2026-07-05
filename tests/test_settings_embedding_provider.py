@@ -46,9 +46,7 @@ class TestEmbeddingProviderSettings(unittest.TestCase):
     )
     @patch("src.config.settings.Settings")
     @patch("llama_index.embeddings.openai.OpenAIEmbedding")
-    def test_lmstudio_embedding_does_not_require_openai_key(
-        self, mock_embedding, _mock_settings
-    ):
+    def test_lmstudio_embedding_does_not_require_openai_key(self, mock_embedding, _mock_settings):
         """LM Studio mode should initialize embeddings without OPENAI_API_KEY."""
         RAGConfig.initialize_settings(include_llm=False)
 

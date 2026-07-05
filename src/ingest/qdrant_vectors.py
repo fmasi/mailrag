@@ -4,6 +4,7 @@ Used by the `explore` verb to reuse already-embedded vectors when the profile's
 collection exists. Integration-adjacent (needs a live Qdrant in real use) but the
 pure pooling logic is unit-tested with a fake client.
 """
+
 from __future__ import annotations
 
 from typing import Dict
@@ -27,8 +28,12 @@ def read_thread_vectors(client, collection: str, *, batch: int = 256) -> Dict[st
     offset = None
     while True:
         records, offset = client.scroll(
-            collection_name=collection, with_vectors=[DENSE],
-            with_payload=["thread_id"], limit=batch, offset=offset)
+            collection_name=collection,
+            with_vectors=[DENSE],
+            with_payload=["thread_id"],
+            limit=batch,
+            offset=offset,
+        )
         for rec in records:
             tid = (rec.payload or {}).get("thread_id")
             dv = _dense(rec.vector)

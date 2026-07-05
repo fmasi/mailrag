@@ -29,8 +29,9 @@ RECOMMENDATION FOR TASK 6 — option (b): subject-based grouping as fallback:
      300 samples using the subject-slug fallback.
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import re
@@ -45,7 +46,7 @@ def _extract_field(email_text: str, field_name: str) -> str:
     lines = email_text.split("\n")
     for line in lines:
         if line.lower().startswith(field_name.lower() + ":"):
-            return line[len(field_name) + 1:].strip()
+            return line[len(field_name) + 1 :].strip()
     return ""
 
 
@@ -88,9 +89,9 @@ by_tid_subject: dict = {}
 
 for record in ds_sample:
     email_text = record.get("email", "")
-    msg_id  = _extract_field(email_text, "Message-ID")
-    irt     = _extract_field(email_text, "In-Reply-To")
-    refs    = _extract_field(email_text, "References")
+    msg_id = _extract_field(email_text, "Message-ID")
+    irt = _extract_field(email_text, "In-Reply-To")
+    refs = _extract_field(email_text, "References")
     subject = _extract_field(email_text, "Subject")
 
     if msg_id:
@@ -123,19 +124,19 @@ print(f"emails_with_reply_headers (irt|refs): {has_any_reply}/{n}")
 # RFC 5322 thread stats
 sizes_rfc = Counter(by_tid_rfc.values())
 multi_rfc = sum(1 for v in by_tid_rfc.values() if v > 1)
-print(f"\n--- Thread stats: RFC 5322 headers only ---")
+print("\n--- Thread stats: RFC 5322 headers only ---")
 print("thread-size -> #threads:", dict(sorted(sizes_rfc.items())))
 print(f"threads={len(by_tid_rfc)} emails={n} multi_email_threads={multi_rfc}")
 
 # Subject-slug fallback thread stats
 sizes_subj = Counter(by_tid_subject.values())
 multi_subj = sum(1 for v in by_tid_subject.values() if v > 1)
-print(f"\n--- Thread stats: RFC 5322 + subject-slug fallback ---")
+print("\n--- Thread stats: RFC 5322 + subject-slug fallback ---")
 print("thread-size -> #threads:", dict(sorted(sizes_subj.items())))
 print(f"threads={len(by_tid_subject)} emails={n} multi_email_threads={multi_subj}")
 
 # Show a few example subject-grouped threads
-print(f"\n--- Sample multi-email threads (subject-slug) ---")
+print("\n--- Sample multi-email threads (subject-slug) ---")
 shown = 0
 for tid, count in sorted(by_tid_subject.items(), key=lambda x: -x[1]):
     if count > 1:

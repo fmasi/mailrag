@@ -22,12 +22,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def fetch_points(collection: str, limit: int, url: str, api_key: str | None):
     """Scroll the Qdrant collection and return up to `limit` payloads."""
@@ -45,7 +47,7 @@ def fetch_points(collection: str, limit: int, url: str, api_key: str | None):
             limit=batch_size,
             offset=offset,
             with_payload=True,
-            with_vectors=False,   # no need to pull vectors for metadata analysis
+            with_vectors=False,  # no need to pull vectors for metadata analysis
         )
         for point in results:
             payloads.append(point.payload or {})
@@ -59,17 +61,60 @@ def fetch_points(collection: str, limit: int, url: str, api_key: str | None):
 
 def strip_re_fwd(subject: str) -> str:
     """Remove Re:/Fwd:/FW: prefixes to normalise subjects."""
-    return re.sub(r'^(re|fwd?|fw)\s*:\s*', '', subject.strip(), flags=re.IGNORECASE).strip()
+    return re.sub(r"^(re|fwd?|fw)\s*:\s*", "", subject.strip(), flags=re.IGNORECASE).strip()
 
 
 def keyword_counts(subjects: list[str], top_n: int) -> list[tuple[str, int]]:
     """Return the most common individual words from subjects (excluding stopwords)."""
     stopwords = {
-        "the", "a", "an", "of", "to", "in", "for", "and", "or", "is", "be",
-        "on", "at", "with", "from", "by", "as", "your", "our", "my", "this",
-        "that", "are", "was", "it", "we", "you", "i", "not", "re", "fw", "fwd",
-        "no", "new", "up", "have", "", "about", "has", "can", "will", "please",
-        "hi", "hello", "dear", "hey", "thank", "thanks",
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "for",
+        "and",
+        "or",
+        "is",
+        "be",
+        "on",
+        "at",
+        "with",
+        "from",
+        "by",
+        "as",
+        "your",
+        "our",
+        "my",
+        "this",
+        "that",
+        "are",
+        "was",
+        "it",
+        "we",
+        "you",
+        "i",
+        "not",
+        "re",
+        "fw",
+        "fwd",
+        "no",
+        "new",
+        "up",
+        "have",
+        "",
+        "about",
+        "has",
+        "can",
+        "will",
+        "please",
+        "hi",
+        "hello",
+        "dear",
+        "hey",
+        "thank",
+        "thanks",
     }
     words = []
     for s in subjects:
@@ -122,11 +167,18 @@ Format your answer as a numbered list."""
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="Explore top topics in indexed emails")
-    parser.add_argument("--sample", type=int, default=1000, help="Number of Qdrant points to fetch (default: 1000)")
-    parser.add_argument("--top", type=int, default=10, help="Number of top topics to report (default: 10)")
-    parser.add_argument("--no-llm", action="store_true", help="Skip LLM synthesis, just show keyword stats")
+    parser.add_argument(
+        "--sample", type=int, default=1000, help="Number of Qdrant points to fetch (default: 1000)"
+    )
+    parser.add_argument(
+        "--top", type=int, default=10, help="Number of top topics to report (default: 10)"
+    )
+    parser.add_argument(
+        "--no-llm", action="store_true", help="Skip LLM synthesis, just show keyword stats"
+    )
     args = parser.parse_args()
 
     qdrant_url = os.getenv("QDRANT_URL", "http://host.docker.internal:6333").strip()
@@ -134,7 +186,7 @@ def main():
     collection = os.getenv("QDRANT_COLLECTION_NAME", "email-rag").strip()
 
     print(f"\n{'=' * 60}")
-    print(f"  Email Topic Explorer")
+    print("  Email Topic Explorer")
     print(f"{'=' * 60}")
     print(f"  Collection : {collection}")
     print(f"  Qdrant URL : {qdrant_url}")
@@ -159,6 +211,7 @@ def main():
         print("Note: 'subject' key not found in payloads. Checking for nested metadata...")
         # LlamaIndex stores metadata in _node_content (JSON string) or metadata dict
         import json
+
         for p in payloads[:5]:
             nc = p.get("_node_content", "")
             if nc:
@@ -203,7 +256,7 @@ def main():
 
     # --- Keyword frequency ---
     top_kw = keyword_counts(subjects_clean, top_n=30)
-    print(f"\n--- Top keywords in subjects ---")
+    print("\n--- Top keywords in subjects ---")
     for word, count in top_kw[:20]:
         bar = "#" * min(count // max(1, len(subjects_clean) // 50), 40)
         print(f"  {word:<20} {count:4}  {bar}")

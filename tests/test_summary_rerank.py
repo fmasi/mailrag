@@ -1,4 +1,5 @@
 """Tests for summary-aware rerank helpers."""
+
 import unittest
 
 from src.query.summary_rerank import build_rerank_text, rerank_by_scores
@@ -39,6 +40,7 @@ class TestRerankByScores(unittest.TestCase):
 
 
 from unittest.mock import MagicMock
+
 from src.query.summary_rerank import SummaryAwareReranker
 
 

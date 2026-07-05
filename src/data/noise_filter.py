@@ -82,9 +82,7 @@ class NoiseFilter:
     reported under the category ``bulk_unsubscribe``.
     """
 
-    def __init__(
-        self, rules: list[_CategoryRule], bulk: "_BulkRule | None" = None
-    ) -> None:
+    def __init__(self, rules: list[_CategoryRule], bulk: "_BulkRule | None" = None) -> None:
         self._rules = rules
         self._bulk = bulk
 
@@ -113,16 +111,12 @@ class NoiseFilter:
                 _CategoryRule(
                     name=category_name,
                     description=cfg.get("description", ""),
-                    sender_domains=[
-                        d.lower() for d in (cfg.get("sender_domains") or [])
-                    ],
+                    sender_domains=[d.lower() for d in (cfg.get("sender_domains") or [])],
                     sender_patterns=[
-                        re.compile(p, re.IGNORECASE)
-                        for p in (cfg.get("sender_patterns") or [])
+                        re.compile(p, re.IGNORECASE) for p in (cfg.get("sender_patterns") or [])
                     ],
                     subject_patterns=[
-                        re.compile(p, re.IGNORECASE)
-                        for p in (cfg.get("subject_patterns") or [])
+                        re.compile(p, re.IGNORECASE) for p in (cfg.get("subject_patterns") or [])
                     ],
                 )
             )
@@ -130,19 +124,17 @@ class NoiseFilter:
         bulk = None
         bcfg = data.get("bulk_filter")
         if isinstance(bcfg, dict):
-            keep_domains = [
-                d.lower() for d in (bcfg.get("keep_freemail_domains") or [])
-            ] + [d.lower() for d in (bcfg.get("keep_domains") or [])]
+            keep_domains = [d.lower() for d in (bcfg.get("keep_freemail_domains") or [])] + [
+                d.lower() for d in (bcfg.get("keep_domains") or [])
+            ]
             bulk = _BulkRule(
                 name=bcfg.get("category_name", "bulk_unsubscribe"),
                 keep_domains=keep_domains,
                 keep_sender_patterns=[
-                    re.compile(p, re.IGNORECASE)
-                    for p in (bcfg.get("keep_sender_patterns") or [])
+                    re.compile(p, re.IGNORECASE) for p in (bcfg.get("keep_sender_patterns") or [])
                 ],
                 keep_subject_patterns=[
-                    re.compile(p, re.IGNORECASE)
-                    for p in (bcfg.get("keep_subject_patterns") or [])
+                    re.compile(p, re.IGNORECASE) for p in (bcfg.get("keep_subject_patterns") or [])
                 ],
             )
         return cls(rules, bulk=bulk)
@@ -161,16 +153,12 @@ class NoiseFilter:
 
     def is_noise(self, email: "NormalizedEmail") -> bool:
         """Return True if the email matches any noise rule."""
-        matched, _ = self._evaluate(
-            email.sender, email.subject, getattr(email, "is_bulk", False)
-        )
+        matched, _ = self._evaluate(email.sender, email.subject, getattr(email, "is_bulk", False))
         return matched
 
     def matched_category(self, email: "NormalizedEmail") -> str | None:
         """Return the first matching category name, or None."""
-        _, category = self._evaluate(
-            email.sender, email.subject, getattr(email, "is_bulk", False)
-        )
+        _, category = self._evaluate(email.sender, email.subject, getattr(email, "is_bulk", False))
         return category
 
     def match_payload(self, payload: dict) -> tuple[bool, str | None]:
@@ -206,8 +194,7 @@ class NoiseFilter:
         # Accepts:  user@linkedin.com   user@sub.linkedin.com
         # Rejects:  user@notlinkedin.com  "linkedin.com info" <other@host>
         return any(
-            f"@{domain}" in sender_lower or f".{domain}" in sender_lower
-            for domain in domains
+            f"@{domain}" in sender_lower or f".{domain}" in sender_lower for domain in domains
         )
 
     def _bulk_kept(self, sender_lower: str, subject: str) -> bool:
@@ -234,10 +221,6 @@ class NoiseFilter:
                 return True, rule.name
         # Bulk-header rule is evaluated last so an explicit category match always
         # wins and names the reason. Conservative: kept unless no guard spares it.
-        if (
-            is_bulk
-            and self._bulk is not None
-            and not self._bulk_kept(sender_lower, subject)
-        ):
+        if is_bulk and self._bulk is not None and not self._bulk_kept(sender_lower, subject):
             return True, self._bulk.name
         return False, None

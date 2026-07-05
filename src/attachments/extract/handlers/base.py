@@ -1,4 +1,5 @@
 """Handler protocol: each content-type extractor declares what it handles and how."""
+
 from __future__ import annotations
 
 from typing import Protocol
