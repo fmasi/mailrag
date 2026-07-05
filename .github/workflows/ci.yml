@@ -1,0 +1,106 @@
+name: CI Quality Gates
+
+# Lint / format / type-check / dependency-audit gates. Kept separate from the
+# `pytest` required check (test-suite.yml) so each gate is an independently
+# named status that can be wired into branch protection later.
+"on":
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  ruff:
+    name: ruff (lint + format)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # Ruff is a standalone binary; no need to install the full project deps.
+      - name: Install ruff
+        run: python -m pip install --upgrade pip "ruff==0.15.20"
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+  mypy:
+    name: mypy (type check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Poetry
+        run: python -m pip install --upgrade pip poetry
+
+      # Full deps so mypy resolves real (not just stubbed) library signatures.
+      - name: Install dependencies
+        run: poetry install --with dev --all-extras --no-interaction --no-root
+
+      - name: Run mypy
+        run: poetry run mypy src/
+
+  pip-audit:
+    name: pip-audit (dependency CVEs)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Poetry
+        run: python -m pip install --upgrade pip poetry
+
+      # Install the exact locked dependency set (deterministic, matches ship).
+      - name: Install dependencies
+        run: poetry install --with dev --all-extras --no-interaction --no-root
+
+      - name: Install pip-audit
+        run: poetry run pip install pip-audit
+
+      # Audit the resolved environment against the OSV database. The four
+      # --ignore-vuln entries below are transitive advisories with NO upstream
+      # fix release yet; every fixable advisory was already resolved by bumping
+      # the lockfile (cryptography 49.0.0, pypdf 6.14.2, tornado 6.5.7). Revisit
+      # these ignores whenever the packages cut a patched release.
+      #   nltk 3.9.4 — path traversal in nltk.data (no fixed version):
+      #     https://github.com/advisories/GHSA-p4gq-832x-fm9v  (alias PYSEC-2026-597)
+      #   torch 2.10.0 — torch.jit.script memory corruption (no fixed version):
+      #     https://github.com/advisories/GHSA-rrmf-rvhw-rf47  (alias PYSEC-2026-139)
+      - name: Run pip-audit
+        run: >
+          poetry run pip-audit
+          --vulnerability-service osv
+          --ignore-vuln GHSA-p4gq-832x-fm9v
+          --ignore-vuln PYSEC-2026-597
+          --ignore-vuln GHSA-rrmf-rvhw-rf47
+          --ignore-vuln PYSEC-2026-139
