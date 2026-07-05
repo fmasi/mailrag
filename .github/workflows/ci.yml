@@ -88,20 +88,17 @@ jobs:
       - name: Install pip-audit
         run: poetry run pip install pip-audit
 
-      # Audit the resolved environment against the OSV database. The four
+      # Audit the resolved environment against the OSV database. The two
       # --ignore-vuln entries below are transitive advisories with NO upstream
       # fix release yet; every fixable advisory was already resolved by bumping
-      # the lockfile (cryptography 49.0.0, pypdf 6.14.2, tornado 6.5.7). Revisit
+      # the lockfile (cryptography 49.0.0, pypdf 6.14.2, tornado 6.5.7, and
+      # torch 2.12.1 which moved us out of GHSA-rrmf-rvhw-rf47's range). Revisit
       # these ignores whenever the packages cut a patched release.
       #   nltk 3.9.4 — path traversal in nltk.data (no fixed version):
       #     https://github.com/advisories/GHSA-p4gq-832x-fm9v  (alias PYSEC-2026-597)
-      #   torch 2.10.0 — torch.jit.script memory corruption (no fixed version):
-      #     https://github.com/advisories/GHSA-rrmf-rvhw-rf47  (alias PYSEC-2026-139)
       - name: Run pip-audit
         run: >
           poetry run pip-audit
           --vulnerability-service osv
           --ignore-vuln GHSA-p4gq-832x-fm9v
           --ignore-vuln PYSEC-2026-597
-          --ignore-vuln GHSA-rrmf-rvhw-rf47
-          --ignore-vuln PYSEC-2026-139
