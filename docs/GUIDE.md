@@ -72,47 +72,52 @@ The bigger that share, the more a budget persona saves you.
 
 ## What to expect from the wizard
 
-`mailrag wizard --profile mybox.profile.json` walks you through it:
+`mailrag wizard --profile mybox.profile.json` opens a **full-screen TUI**
+([Textual](https://textual.textualize.io/)) that walks the whole pipeline as a
+sequence of screens — a breadcrumb at the top always shows where you are:
 
 ```text
-scan recommends: llm-all
-  llm-none  — Body-only (no LLM): fast, no LLM at all; body-only index
-  llm-verify — Verified trim: a cheap LLM confirms drops on the obvious pockets
-  llm-all   — Full (LLM on everything): one LLM call per email, then index drops noise
-? Choose a persona:  (Use arrow keys)
- » llm-all
-   llm-verify
-   llm-none
-
-  ▶ scope — choose which folders/accounts are in play
-  ▶ measure — measure corpus, suggest chunk size
-  ▶ calibrate — sample-gate the rubric before any full run
-
-  rubric 'personal' — sample n=200   noise rate 61%
-  [FALSE-NOISE suspects: record-ish but flagged noise] 12
-    - bank statement Q3 …            (flagged noise: "promotional")
-  [FALSE-KEEP suspects: promo-ish but kept] 3
-    - 50% off this weekend …
-
-? Calibration done. What next?
- » proceed to the LLM pass
-   re-tune (pick another rubric and re-calibrate)
-   abort
-
-? Run the LLM summary pass over the keep set?  (y/N)   ← confirm-before-spend
-  ▶ summarize — LLM summary + noise verdict on keepers
-  ▶ index — embed (BGE-M3) + store in Qdrant
-persona 'llm-all' complete -> mybox.profile.json
+✓ Welcome  ✓ Persona  ✓ Model  [ Scope ]  Review  Run
 ```
 
-Two human checkpoints keep you in control:
+1. **Welcome** — the profile you're onboarding (mailbox root, rubric,
+   collection) and, if you ran `scan`, its recommended persona. `enter` begins.
+2. **Persona** — the personas on the left, a live preview of the highlighted
+   recipe on the right: every verb with a colour-coded cost badge
+   (`free` → `gpu`), the `scan` recommendation starred and pre-highlighted.
+3. **Model** — only for LLM personas (and skipped when you passed `--model`):
+   the model id your OpenAI-compatible endpoint serves. Blank input is
+   rejected inline.
+4. **Scope** — the folder picker as a navigable tree of your mailbox (top-level
+   folders, their subfolders, plus "messages directly in …" rows). `space`
+   includes/excludes; checking a folder covers all its subfolders (children
+   grey out); a rule counter confirms what you've built. `c` continues —
+   you can't proceed with nothing selected.
+5. **Review** — everything on one screen before anything runs: persona, model,
+   scope rules, rubric, limit, and the exact planned steps (optional steps that
+   will be skipped are marked). `enter` starts, `esc` goes back to change
+   anything.
+6. **Run** — the recipe as a live ladder (`○` pending, `▶` running, `✓` done)
+   next to a streaming log, with an overall progress bar. Long steps no longer
+   freeze the terminal — the pipeline runs in a worker while the UI stays live.
+
+`esc` steps back, `q` quits, and the footer always lists the active keys.
+
+Two human checkpoints interrupt the run as modal dialogs, and keep you in control:
 
 - **The calibrate gate.** Before any full LLM run, you see a *sample* of what the
   rubric would flag — the suspected over-/under-drops. If it looks wrong, **re-tune**
-  (try another rubric) and re-check; only **proceed** when you trust it. (This exists
-  because a mis-tuned rubric once cost ~8 hours of LLM on the wrong call.)
+  (`r`: pick another rubric, re-calibrate) and re-check; only **proceed** (`p`) when
+  you trust it. (This exists because a mis-tuned rubric once cost ~8 hours of LLM on
+  the wrong call.)
 - **Confirm-before-spend.** Right before the expensive summary pass, mailrag asks
-  before spending the LLM.
+  before spending the LLM. (`prune` likewise shows a sample of what it would
+  blacklist before writing anything.)
+
+Prefer the old line-by-line prompt flow? It's kept as `mailrag wizard --classic`.
+For non-interactive / scripted runs, use the headless equivalent:
+`mailrag run --profile … --persona <name> [--model <m>]` — same recipes, same
+handlers, no prompts.
 
 ## Quick start
 
