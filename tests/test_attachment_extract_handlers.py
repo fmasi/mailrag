@@ -3,13 +3,14 @@ import unittest
 from unittest import mock
 
 import pytest
-from src.attachments.extract.handlers.plaintext import PlaintextHandler
-from src.attachments.extract.handlers.html import HtmlHandler
+
 from src.attachments.extract.handlers.docx import DocxHandler
-from src.attachments.extract.handlers.xlsx import XlsxHandler
-from src.attachments.extract.handlers.pptx import PptxHandler
-from src.attachments.extract.handlers.pdf import PdfHandler
+from src.attachments.extract.handlers.html import HtmlHandler
 from src.attachments.extract.handlers.image import ImageHandler
+from src.attachments.extract.handlers.pdf import PdfHandler
+from src.attachments.extract.handlers.plaintext import PlaintextHandler
+from src.attachments.extract.handlers.pptx import PptxHandler
+from src.attachments.extract.handlers.xlsx import XlsxHandler
 from src.attachments.extract.ocr.base import OcrResult
 from src.attachments.extract.result import Status
 
@@ -52,28 +53,39 @@ class TestOfficeHandlers(unittest.TestCase):
         # Office parsers are optional; skip (don't error) when absent so the
         # suite passes out of the box on a minimal install (#53, #44).
         docx = pytest.importorskip("docx")
-        d = docx.Document(); d.add_paragraph("Quarterly report up 12%")
-        b = io.BytesIO(); d.save(b)
+        d = docx.Document()
+        d.add_paragraph("Quarterly report up 12%")
+        b = io.BytesIO()
+        d.save(b)
         h = DocxHandler()
-        self.assertTrue(h.can_handle(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "r.docx"))
+        self.assertTrue(
+            h.can_handle(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "r.docx"
+            )
+        )
         r = h.extract(b.getvalue(), "application/octet-stream", "r.docx")
         self.assertEqual(r.status, Status.EXTRACTED)
         self.assertIn("Quarterly report", r.text)
 
     def test_xlsx(self):
         openpyxl = pytest.importorskip("openpyxl")
-        wb = openpyxl.Workbook(); ws = wb.active; ws.append(["Item", "Cost"]); ws.append(["Widget", 42])
-        b = io.BytesIO(); wb.save(b)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Item", "Cost"])
+        ws.append(["Widget", 42])
+        b = io.BytesIO()
+        wb.save(b)
         r = XlsxHandler().extract(b.getvalue(), "application/octet-stream", "s.xlsx")
         self.assertEqual(r.status, Status.EXTRACTED)
         self.assertIn("Widget", r.text)
 
     def test_pptx(self):
         pptx = pytest.importorskip("pptx")
-        p = pptx.Presentation(); s = p.slides.add_slide(p.slide_layouts[5])
+        p = pptx.Presentation()
+        s = p.slides.add_slide(p.slide_layouts[5])
         s.shapes.title.text = "Roadmap 2026"
-        b = io.BytesIO(); p.save(b)
+        b = io.BytesIO()
+        p.save(b)
         r = PptxHandler().extract(b.getvalue(), "application/octet-stream", "d.pptx")
         self.assertEqual(r.status, Status.EXTRACTED)
         self.assertIn("Roadmap", r.text)
@@ -94,10 +106,17 @@ class TestOfficeHandlers(unittest.TestCase):
         self.assertEqual(r.status, Status.BINARY)
 
     def test_can_handle_xlsx_pptx_by_mime(self):
-        self.assertTrue(XlsxHandler().can_handle(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "s.xlsx"))
-        self.assertTrue(PptxHandler().can_handle(
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation", "d.pptx"))
+        self.assertTrue(
+            XlsxHandler().can_handle(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "s.xlsx"
+            )
+        )
+        self.assertTrue(
+            PptxHandler().can_handle(
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "d.pptx",
+            )
+        )
         self.assertFalse(XlsxHandler().can_handle("text/plain", "a.txt"))
 
 
@@ -177,6 +196,7 @@ class TestCharsetHandling(unittest.TestCase):
 
     def test_decode_text_is_public(self):
         from src.attachments.extract.handlers.plaintext import decode_text
+
         self.assertEqual(decode_text("café".encode("utf-8")), "café")
         self.assertEqual(decode_text("é".encode("latin-1")), "é")
         self.assertEqual(decode_text("é".encode("latin-1"), charset="iso-8859-1"), "é")

@@ -5,7 +5,9 @@ Run (rag env, with QDRANT_URL set):
   QDRANT_URL=http://localhost:6333 conda run -n rag --no-capture-output \
     python scripts/probe_threads.py --collection work-rag --query "when did we agree to meet"
 """
+
 import argparse
+
 from src.query.hybrid import build_hybrid_searcher
 
 

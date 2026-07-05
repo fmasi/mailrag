@@ -3,6 +3,7 @@
 
 Dependency-free (no numpy/scipy) so it runs in the lightweight test env.
 """
+
 from __future__ import annotations
 
 from typing import Dict, List

@@ -6,7 +6,6 @@ import email
 import email.header
 import os
 import re
-from datetime import datetime
 from email import policy
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
@@ -14,21 +13,21 @@ from typing import Any, Dict, List, Optional
 
 # Matches lines that definitively start a quoted/forwarded block.
 _REPLY_SEPARATOR_RE = re.compile(
-    r'^('
-    r'>[ >]?'                               # "> " or ">>" quoted lines
-    r'|-----\s*original message\s*-----'    # Outlook "-----Original Message-----"
-    r'|-----\s*forwarded'                   # "-----Forwarded message-----"
-    r'|_{10,}'                              # Outlook "________________________"
-    r'|[-*_]{10,}'                          # any long divider line
-    r'|-{3,}\s*$'                           # line of only dashes (Globex "---------")
-    r'|.*\boriginal\s+message\b'            # "Original Message ---------" on its own line
-    r')',
+    r"^("
+    r">[ >]?"  # "> " or ">>" quoted lines
+    r"|-----\s*original message\s*-----"  # Outlook "-----Original Message-----"
+    r"|-----\s*forwarded"  # "-----Forwarded message-----"
+    r"|_{10,}"  # Outlook "________________________"
+    r"|[-*_]{10,}"  # any long divider line
+    r"|-{3,}\s*$"  # line of only dashes (Globex "---------")
+    r"|.*\boriginal\s+message\b"  # "Original Message ---------" on its own line
+    r")",
     re.IGNORECASE,
 )
 
 # "On <date/name> ... wrote:" reply attribution — may span up to 3 lines.
-_ON_WROTE_RE = re.compile(r'^on\s', re.IGNORECASE)
-_WROTE_END_RE = re.compile(r'wrote:\s*$', re.IGNORECASE)
+_ON_WROTE_RE = re.compile(r"^on\s", re.IGNORECASE)
+_WROTE_END_RE = re.compile(r"wrote:\s*$", re.IGNORECASE)
 
 # Outlook inline reply header — English and Korean variants.
 # English: "From: Name\nDate: ...\nTo: ...\nSubject: ..."
@@ -39,31 +38,31 @@ _WROTE_END_RE = re.compile(r'wrote:\s*$', re.IGNORECASE)
 # Only fires mid-body (result non-empty) so first-line false positives
 # are impossible.  Requires ≥2 continuation header matches (see below).
 _OUTLOOK_FROM_RE = re.compile(
-    r'^('
-    r'from:\s+\S'   # English
-    r'|보낸 사람:'    # Korean   (보낸 사람 = Sent by)
-    r'|差出人:'       # Japanese (差出人 = Sender)
-    r'|发件人:'       # Chinese Simplified
-    r'|寄件人:'       # Chinese Traditional
-    r'|จาก:'         # Thai
-    r'|Từ:'          # Vietnamese
-    r'|Dari:'        # Indonesian / Malay
-    r')',
+    r"^("
+    r"from:\s+\S"  # English
+    r"|보낸 사람:"  # Korean   (보낸 사람 = Sent by)
+    r"|差出人:"  # Japanese (差出人 = Sender)
+    r"|发件人:"  # Chinese Simplified
+    r"|寄件人:"  # Chinese Traditional
+    r"|จาก:"  # Thai
+    r"|Từ:"  # Vietnamese
+    r"|Dari:"  # Indonesian / Malay
+    r")",
     re.IGNORECASE,
 )
 
 # Continuation headers that follow the "From" line.  Two or more matches
 # within the next 5 lines confirm this is a reply header block, not prose.
 _OUTLOOK_CONTINUATION_RE = re.compile(
-    r'^('
-    r'date|to|subject|sent'                      # English
-    r'|날짜|받는 사람|참조|주제'                   # Korean
-    r'|日付|宛先|件名'                             # Japanese
-    r'|日期|收件人|收件者|抄送|副本|主题|主旨'       # Chinese Simplified / Traditional
-    r'|วันที่|ถึง|สำเนา|หัวเรื่อง'               # Thai
-    r'|Ngày|Tới|Chủ đề|Đã gửi'                  # Vietnamese
-    r'|Tanggal|Kepada|Perihal|Subjek'             # Indonesian / Malay
-    r'):\s',
+    r"^("
+    r"date|to|subject|sent"  # English
+    r"|날짜|받는 사람|참조|주제"  # Korean
+    r"|日付|宛先|件名"  # Japanese
+    r"|日期|收件人|收件者|抄送|副本|主题|主旨"  # Chinese Simplified / Traditional
+    r"|วันที่|ถึง|สำเนา|หัวเรื่อง"  # Thai
+    r"|Ngày|Tới|Chủ đề|Đã gửi"  # Vietnamese
+    r"|Tanggal|Kepada|Perihal|Subjek"  # Indonesian / Malay
+    r"):\s",
     re.IGNORECASE,
 )
 
@@ -72,10 +71,23 @@ class _HTMLTextExtractor(HTMLParser):
     """Minimal HTML-to-text converter using only the stdlib."""
 
     # Tags that should introduce a line break in the output.
-    _BLOCK_TAGS = frozenset({
-        "p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
-        "blockquote", "pre",
-    })
+    _BLOCK_TAGS = frozenset(
+        {
+            "p",
+            "div",
+            "br",
+            "tr",
+            "li",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "blockquote",
+            "pre",
+        }
+    )
     # Tags whose content we skip entirely (not readable prose).
     _SKIP_TAGS = frozenset({"style", "script", "head"})
 
@@ -107,11 +119,12 @@ class _HTMLTextExtractor(HTMLParser):
     def get_text(self) -> str:
         raw = "".join(self._parts)
         # Collapse runs of blank lines to at most two.
-        return re.sub(r'\n{3,}', '\n\n', raw).strip()
+        return re.sub(r"\n{3,}", "\n\n", raw).strip()
 
+
+from src.data import calendar_summary
 from src.data.loaders.base import EmailLoader
 from src.data.models import NormalizedEmail
-from src.data import calendar_summary
 
 
 class MailArchiveXLoader(EmailLoader):
@@ -156,9 +169,7 @@ class MailArchiveXLoader(EmailLoader):
     def load(self, num_samples: Optional[int] = None) -> List[NormalizedEmail]:
         """Load Mail Archive X backup and normalize each email."""
         source_desc = (
-            self.backup_dir
-            if self.eml_files is None
-            else f"{len(self.eml_files)} selected file(s)"
+            self.backup_dir if self.eml_files is None else f"{len(self.eml_files)} selected file(s)"
         )
         if self.verbose:
             print(f"Loading Mail Archive X from {source_desc}...")
@@ -246,7 +257,7 @@ class MailArchiveXLoader(EmailLoader):
         header lines (i.e. lines that neither start with ``HeaderName:`` nor are
         continuation lines beginning with whitespace).
         """
-        _HEADER_RE = re.compile(rb'^[A-Za-z][A-Za-z0-9\-]*\s*:')
+        _HEADER_RE = re.compile(rb"^[A-Za-z][A-Za-z0-9\-]*\s*:")
         lines = data.splitlines(keepends=True)
         for i, line in enumerate(lines):
             if _HEADER_RE.match(line):
@@ -297,10 +308,7 @@ class MailArchiveXLoader(EmailLoader):
         # marketing / newsletter mail carries these, human mail essentially
         # never does. Surfaced so the conservative Pass-1 noise filter can act.
         precedence = str(msg.get("Precedence") or "").strip().lower()
-        is_bulk = (
-            msg.get("List-Unsubscribe") is not None
-            or precedence in ("bulk", "list")
-        )
+        is_bulk = msg.get("List-Unsubscribe") is not None or precedence in ("bulk", "list")
 
         # Parse date to datetime if possible.
         date_obj = None
@@ -483,21 +491,15 @@ class MailArchiveXLoader(EmailLoader):
                 # Check each line individually: joining them would include quoted
                 # text from the line AFTER "wrote:", breaking the end-of-line match.
                 if _ON_WROTE_RE.match(stripped):
-                    lookahead_lines = [
-                        lines[j].strip() for j in range(i, min(i + 3, len(lines)))
-                    ]
+                    lookahead_lines = [lines[j].strip() for j in range(i, min(i + 3, len(lines)))]
                     if any(_WROTE_END_RE.search(ln) for ln in lookahead_lines):
                         break
 
             # Outlook inline reply header: "From: Name\nDate: ...\nTo/Subject: ..."
             # Only trigger mid-body (result non-empty) to avoid false positives.
             if result and _OUTLOOK_FROM_RE.match(stripped):
-                lookahead_lines = [
-                    lines[j].strip() for j in range(i + 1, min(i + 5, len(lines)))
-                ]
-                matches = sum(
-                    1 for ln in lookahead_lines if _OUTLOOK_CONTINUATION_RE.match(ln)
-                )
+                lookahead_lines = [lines[j].strip() for j in range(i + 1, min(i + 5, len(lines)))]
+                matches = sum(1 for ln in lookahead_lines if _OUTLOOK_CONTINUATION_RE.match(ln))
                 if matches >= 2:
                     break
 
@@ -520,7 +522,9 @@ class MailArchiveXLoader(EmailLoader):
         # We do NOT trigger this for emails whose first non-blank line is a hard
         # separator (e.g. "-----Forwarded-----") — those are forwarded-only
         # emails correctly preserved in full by the has_real_content guard above.
-        top_nonquoted = [l for l in top_result.splitlines() if l.strip() and not l.strip().startswith(">")]
+        top_nonquoted = [
+            l for l in top_result.splitlines() if l.strip() and not l.strip().startswith(">")
+        ]
         first_real = next((l.strip() for l in lines if l.strip()), "")
         if not top_nonquoted and first_real.startswith(">"):
             bottom_result = MailArchiveXLoader._extract_bottom_reply(lines)

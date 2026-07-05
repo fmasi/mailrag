@@ -46,9 +46,7 @@ _discover_blob_structure = selection.discover_structure
 _require_questionary = selection._require_questionary
 _prompt_guided_selection = selection.prompt_guided_selection
 
-CHECKPOINT_FILE = os.path.join(
-    os.path.dirname(__file__), ".vector_batch_checkpoint.txt"
-)
+CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), ".vector_batch_checkpoint.txt")
 CHECKPOINT_VERSION = 2
 
 
@@ -80,9 +78,7 @@ def _parse_time_limit(value: str) -> float:
         )
 
 
-def _time_budget_exhausted(
-    elapsed: float, batch_times: list, limit_secs: float
-) -> bool:
+def _time_budget_exhausted(elapsed: float, batch_times: list, limit_secs: float) -> bool:
     """Return True if starting another batch would likely exceed the time limit.
 
     The estimate uses the mean of all completed batch durations.  When no
@@ -131,19 +127,11 @@ def _selection_lookup(
     selection_rules: list[dict],
 ) -> tuple[set[str], set[str], bool]:
     """Return lookup sets for selected prefixes and direct-file rules."""
-    selected_prefixes = {
-        rule["value"]
-        for rule in selection_rules
-        if rule["type"] == "prefix"
-    }
+    selected_prefixes = {rule["value"] for rule in selection_rules if rule["type"] == "prefix"}
     selected_direct_roots = {
-        rule["root"]
-        for rule in selection_rules
-        if rule["type"] == "direct-root-files"
+        rule["root"] for rule in selection_rules if rule["type"] == "direct-root-files"
     }
-    include_container_root = any(
-        rule["type"] == "container-root" for rule in selection_rules
-    )
+    include_container_root = any(rule["type"] == "container-root" for rule in selection_rules)
     return selected_prefixes, selected_direct_roots, include_container_root
 
 
@@ -153,8 +141,8 @@ def _render_selection_tree(
     selection_rules: list[dict],
 ) -> list[str]:
     """Render a tree-style selection summary for guided mode."""
-    selected_prefixes, selected_direct_roots, include_container_root = (
-        _selection_lookup(selection_rules)
+    selected_prefixes, selected_direct_roots, include_container_root = _selection_lookup(
+        selection_rules
     )
     lines = ["  [x] selected  [~] partial  [ ] skipped"]
 
@@ -303,11 +291,7 @@ def _purge_noise_source_blobs(container_client, noise_emails: list) -> tuple[int
 
     Returns (purged, errors).
     """
-    blob_paths = [
-        re.sub(r"^/tmp/[^/]+/", "", e.source_id)
-        for e in noise_emails
-        if e.source_id
-    ]
+    blob_paths = [re.sub(r"^/tmp/[^/]+/", "", e.source_id) for e in noise_emails if e.source_id]
     errors = 0
     for path in blob_paths:
         try:
@@ -389,6 +373,7 @@ def main() -> None:
 
     # Lazy imports so the script fails fast on missing env vars above
     from azure.storage.blob import BlobServiceClient
+
     from src.storage.persist import StorageManager
 
     connection_string = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
@@ -399,11 +384,7 @@ def main() -> None:
     service_client = BlobServiceClient.from_connection_string(connection_string)
     container_client = service_client.get_container_client(container_name)
 
-    container_blobs = [
-        b
-        for b in container_client.list_blobs()
-        if b.name.endswith(".eml")
-    ]
+    container_blobs = [b for b in container_client.list_blobs() if b.name.endswith(".eml")]
     blob_names = [blob.name for blob in container_blobs]
     folder_tree: dict[str, dict] = {}
     has_container_root_files = False
@@ -420,7 +401,9 @@ def main() -> None:
     if checkpoint_state:
         checkpoint = checkpoint_state.get("last_blob_name", "")
         if checkpoint_state.get("version") == 1:
-            legacy_prefix = _normalize_prefix(args.prefix or os.environ.get("AZURE_BLOB_PREFIX", ""))
+            legacy_prefix = _normalize_prefix(
+                args.prefix or os.environ.get("AZURE_BLOB_PREFIX", "")
+            )
             mode = "prefix"
             selection_rules = [{"type": "prefix", "value": legacy_prefix}]
         else:
@@ -541,10 +524,7 @@ def main() -> None:
                 break
 
         batch_blobs = all_blobs[batch_start : batch_start + batch_size]
-        print(
-            f"\nBatch {batch_number}/{total_batches}: "
-            f"downloading {len(batch_blobs)} blobs..."
-        )
+        print(f"\nBatch {batch_number}/{total_batches}: downloading {len(batch_blobs)} blobs...")
 
         batch_wall_start = time.monotonic()
 
@@ -626,10 +606,7 @@ def main() -> None:
             )
         print(progress)
 
-    print(
-        f"\nDone — {indexed}/{total} documents indexed to "
-        f"{RAGConfig.VECTOR_STORE_PROVIDER}."
-    )
+    print(f"\nDone — {indexed}/{total} documents indexed to {RAGConfig.VECTOR_STORE_PROVIDER}.")
     if indexed == total:
         _remove_checkpoint()
 

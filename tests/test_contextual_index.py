@@ -13,10 +13,12 @@ downloads / reads from the HF cache.  This env gap should be fixed by adding
 ``transformers`` to the mailrag-test requirements; the workaround here keeps
 tests running in the meantime.
 """
+
 import sys
 import types
 import unittest
 from unittest import mock
+
 
 # ---------------------------------------------------------------------------
 # Inject a fake `transformers` stub into sys.modules so the lazy import
@@ -38,8 +40,8 @@ def _install_fake_transformers():
 _TRANSFORMERS_STUB, _FAKE_TOKENIZER, _FAKE_TOKENIZER_CLS = _install_fake_transformers()
 
 # Now it's safe to import the module under test.
-from src.indexing.contextual_index import build_contextual_index  # noqa: E402
 from src.data.models import NormalizedEmail  # noqa: E402
+from src.indexing.contextual_index import build_contextual_index  # noqa: E402
 
 
 def _email(body, subject="Re: plan", mid="<a@x>"):
@@ -64,13 +66,20 @@ class TestBuildContextualIndex(unittest.TestCase):
         fake_embedder = mock.Mock()
         fake_embedder.encode.return_value = ([[0.1] * 1024], [{"7": 0.9}])
         fake_qdrant = mock.MagicMock()
-        with mock.patch("src.indexing.contextual_index.hq.get_client", return_value=fake_qdrant), \
-             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure, \
-             mock.patch("src.indexing.contextual_index.hq.upsert") as upsert:
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client", return_value=fake_qdrant),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure,
+            mock.patch("src.indexing.contextual_index.hq.upsert") as upsert,
+        ):
             res = build_contextual_index(
-                emails, collection="t", embedder=fake_embedder,
+                emails,
+                collection="t",
+                embedder=fake_embedder,
                 summaries={emails[0].message_id: "SUM about the plan"},
-                embed_summary=True, recreate=True, qdrant_url="http://x")
+                embed_summary=True,
+                recreate=True,
+                qdrant_url="http://x",
+            )
         ensure.assert_called_once()
         self.assertTrue(upsert.called)
         self.assertGreaterEqual(res.chunks, 1)
@@ -82,23 +91,22 @@ class TestBuildContextualIndex(unittest.TestCase):
         """A hermetic NoiseFilter that flags one sender domain (independent of
         the gitignored project rules), patched in for deterministic tests."""
         from src.data.noise_filter import NoiseFilter, _CategoryRule
-        return NoiseFilter(
-            [_CategoryRule(name="x", description="", sender_domains=[domain])]
-        )
+
+        return NoiseFilter([_CategoryRule(name="x", description="", sender_domains=[domain])])
 
     def _build_one(self, email, **kwargs):
         fake_embedder = mock.Mock()
         fake_embedder.encode.return_value = ([], [])
-        with mock.patch("src.indexing.contextual_index.hq.get_client"), \
-             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"), \
-             mock.patch("src.indexing.contextual_index.hq.upsert"), \
-             mock.patch(
-                 "src.indexing.contextual_index.NoiseFilter.from_project_rules",
-                 return_value=self._noise_filter_flagging("spammy.example"),
-             ):
-            return build_contextual_index(
-                [email], collection="t", embedder=fake_embedder, **kwargs
-            )
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.upsert"),
+            mock.patch(
+                "src.indexing.contextual_index.NoiseFilter.from_project_rules",
+                return_value=self._noise_filter_flagging("spammy.example"),
+            ),
+        ):
+            return build_contextual_index([email], collection="t", embedder=fake_embedder, **kwargs)
 
     def test_noise_filtered_emails_dropped(self):
         noise = _email("Unsubscribe digest", mid="<n@x>")
@@ -121,11 +129,18 @@ class TestBuildContextualIndex(unittest.TestCase):
         fake_embedder = mock.Mock()
         fake_embedder.dim = 2048
         fake_embedder.encode.return_value = ([[0.0] * 2048], [{"7": 0.9}])
-        with mock.patch("src.indexing.contextual_index.hq.get_client"), \
-             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure, \
-             mock.patch("src.indexing.contextual_index.hq.upsert"):
-            build_contextual_index([email], collection="t", embedder=fake_embedder,
-                                   apply_noise_filter=False, qdrant_url="http://x")
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure,
+            mock.patch("src.indexing.contextual_index.hq.upsert"),
+        ):
+            build_contextual_index(
+                [email],
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+            )
         self.assertEqual(ensure.call_args.kwargs.get("dim"), 2048)
 
     def test_identical_bodies_are_deduplicated(self):
@@ -135,11 +150,18 @@ class TestBuildContextualIndex(unittest.TestCase):
         fake_embedder = mock.Mock()
         fake_embedder.dim = 1024
         fake_embedder.encode.return_value = ([[0.0] * 1024], [{"7": 0.9}])
-        with mock.patch("src.indexing.contextual_index.hq.get_client"), \
-             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"), \
-             mock.patch("src.indexing.contextual_index.hq.upsert"):
-            res = build_contextual_index([e1, e2], collection="t", embedder=fake_embedder,
-                                         apply_noise_filter=False, qdrant_url="http://x")
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.upsert"),
+        ):
+            res = build_contextual_index(
+                [e1, e2],
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+            )
         self.assertEqual(res.chunks, 1)
         self.assertEqual(len(fake_embedder.encode.call_args[0][0]), 1)
 
@@ -151,14 +173,21 @@ class TestBuildContextualIndex(unittest.TestCase):
         fake.produces_sparse = False
         fake.dim = 1024
         fake.encode.return_value = ([[0.0] * 1024], [{}])
-        with mock.patch("src.indexing.contextual_index.hq.get_client"), \
-             mock.patch("src.indexing.contextual_index.hq.ensure_dense_collection") as ed, \
-             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as eh, \
-             mock.patch("src.indexing.contextual_index.hq.make_dense_point") as mdp, \
-             mock.patch("src.indexing.contextual_index.hq.make_point") as mp, \
-             mock.patch("src.indexing.contextual_index.hq.upsert"):
-            build_contextual_index([email], collection="t", embedder=fake,
-                                   apply_noise_filter=False, qdrant_url="http://x")
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_dense_collection") as ed,
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as eh,
+            mock.patch("src.indexing.contextual_index.hq.make_dense_point") as mdp,
+            mock.patch("src.indexing.contextual_index.hq.make_point") as mp,
+            mock.patch("src.indexing.contextual_index.hq.upsert"),
+        ):
+            build_contextual_index(
+                [email],
+                collection="t",
+                embedder=fake,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+            )
         ed.assert_called_once()
         eh.assert_not_called()
         self.assertTrue(mdp.called)
@@ -168,11 +197,18 @@ class TestBuildContextualIndex(unittest.TestCase):
         """Empty input returns a zero BuildResult and never touches Qdrant or the embedder."""
         fake_embedder = mock.Mock()
         fake_embedder.dim = 1024
-        with mock.patch("src.indexing.contextual_index.hq.get_client") as gc, \
-             mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure, \
-             mock.patch("src.indexing.contextual_index.hq.upsert") as upsert:
-            res = build_contextual_index([], collection="t", embedder=fake_embedder,
-                                         apply_noise_filter=False, qdrant_url="http://x")
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client") as gc,
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure,
+            mock.patch("src.indexing.contextual_index.hq.upsert") as upsert,
+        ):
+            res = build_contextual_index(
+                [],
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+            )
         self.assertEqual((res.kept_emails, res.chunks), (0, 0))
         gc.assert_not_called()
         ensure.assert_not_called()

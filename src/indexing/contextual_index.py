@@ -4,6 +4,7 @@ Shared by scripts/build_local_eml_rag.py and the main.py demo. Mirrors the origi
 build-mode of build_local_eml_rag.py but takes already-loaded emails + an embedder +
 an optional {message_id: summary} map (so callers choose live vs cached summaries).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -115,6 +116,7 @@ def build_contextual_index(
     # Tests that reach this code must patch 'transformers.AutoTokenizer' or
     # install transformers in the test env.
     from transformers import AutoTokenizer  # noqa: PLC0415  (lazy import by design)
+
     tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")
     encode_len = lambda text: tok.encode(text, add_special_tokens=False)  # noqa: E731
     splitter = SentenceSplitter(
@@ -125,9 +127,7 @@ def build_contextual_index(
     nodes = splitter.get_nodes_from_documents(docs, show_progress=False)
 
     # 5. Exact-content deduplication
-    nodes = dedup_by_content(
-        nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE)
-    )
+    nodes = dedup_by_content(nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE))
     if not nodes:
         return BuildResult(collection=collection, kept_emails=kept_emails, chunks=0)
 
@@ -144,9 +144,7 @@ def build_contextual_index(
     else:
         hq.ensure_dense_collection(client, collection, dim=dim, recreate=recreate)
 
-    enc_max_len = embed_max_length(
-        chunk_size, embed_summary, override=embed_max_length_override
-    )
+    enc_max_len = embed_max_length(chunk_size, embed_summary, override=embed_max_length_override)
 
     # 7. Embed in upsert_batch-sized batches and upsert
     done = 0
@@ -158,9 +156,7 @@ def build_contextual_index(
             if embed_summary:
                 t = prepend_summary(t, n.metadata.get("summary"))
             embed_texts.append(t)
-        dense, sparse = embedder.encode(
-            embed_texts, batch_size=embed_batch, max_length=enc_max_len
-        )
+        dense, sparse = embedder.encode(embed_texts, batch_size=embed_batch, max_length=enc_max_len)
         points = []
         for n, dv, lw in zip(batch, dense, sparse):
             payload = dict(n.metadata)

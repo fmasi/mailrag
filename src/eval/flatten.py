@@ -6,6 +6,7 @@ common unit — one EmailHit per message_id, in rank order — so a single judge
 label per (query, message_id) scores every arm fairly. Dependency-free: operates
 on duck-typed objects so it imports in the lightweight test env.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -46,12 +47,14 @@ def flatten_nodes(nodes) -> List[EmailHit]:
         if not mid or mid in seen:
             continue
         seen.add(mid)
-        out.append(EmailHit(
-            message_id=mid,
-            subject=md.get("subject") or "",
-            body=_content(node),
-            summary=md.get("summary") or "",
-        ))
+        out.append(
+            EmailHit(
+                message_id=mid,
+                subject=md.get("subject") or "",
+                body=_content(node),
+                summary=md.get("summary") or "",
+            )
+        )
     return out
 
 
@@ -64,10 +67,12 @@ def flatten_threads(contexts) -> List[EmailHit]:
             if not e.message_id or e.message_id in seen:
                 continue
             seen.add(e.message_id)
-            out.append(EmailHit(
-                message_id=e.message_id,
-                subject=e.subject or "",
-                body=e.body or "",
-                summary=getattr(e, "summary", "") or "",
-            ))
+            out.append(
+                EmailHit(
+                    message_id=e.message_id,
+                    subject=e.subject or "",
+                    body=e.body or "",
+                    summary=getattr(e, "summary", "") or "",
+                )
+            )
     return out

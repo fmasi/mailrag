@@ -4,6 +4,7 @@ The hybrid collection stores two named vectors per chunk: ``dense``
 (bge-m3 1024-d, cosine) and ``sparse`` (bge-m3 lexical weights). Integration
 component — requires qdrant-client + a running Qdrant.
 """
+
 from typing import List
 
 from qdrant_client import QdrantClient, models
@@ -36,10 +37,14 @@ def _payload_indexes():
 
 def _create_payload_indexes(client: QdrantClient, name: str) -> None:
     for field_name, schema in _payload_indexes():
-        client.create_payload_index(collection_name=name, field_name=field_name, field_schema=schema)
+        client.create_payload_index(
+            collection_name=name, field_name=field_name, field_schema=schema
+        )
 
 
-def ensure_hybrid_collection(client: QdrantClient, name: str, dim: int = 1024, recreate: bool = False) -> None:
+def ensure_hybrid_collection(
+    client: QdrantClient, name: str, dim: int = 1024, recreate: bool = False
+) -> None:
     """Create the dense+sparse collection if missing (or recreate it)."""
     if recreate and client.collection_exists(name):
         client.delete_collection(name)
@@ -52,7 +57,9 @@ def ensure_hybrid_collection(client: QdrantClient, name: str, dim: int = 1024, r
         _create_payload_indexes(client, name)
 
 
-def ensure_dense_collection(client: QdrantClient, name: str, dim: int = 1024, recreate: bool = False) -> None:
+def ensure_dense_collection(
+    client: QdrantClient, name: str, dim: int = 1024, recreate: bool = False
+) -> None:
     """Create a dense-only collection (no sparse leg) if missing (or recreate it).
 
     For dense-only embedders (e.g. a NVIDIA NIM, ``produces_sparse=False``) whose

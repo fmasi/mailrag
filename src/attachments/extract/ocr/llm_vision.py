@@ -5,6 +5,7 @@ bound vision tokens; scanned PDFs are rendered to images (page-capped, truncatio
 logged). If the model/endpoint is unavailable the result signals OCR_UNAVAILABLE so a
 ChainedOcr falls through to tesseract.
 """
+
 from __future__ import annotations
 
 import io
@@ -20,15 +21,17 @@ _PROMPT = (
     "You are reading an email attachment image. Reply in EXACTLY this format:\n"
     "DESCRIPTION: <one or two factual sentences describing the image>\n"
     "TEXT:\n"
-    "<verbatim transcription of all readable text, or \"(none)\" if there is none>"
+    '<verbatim transcription of all readable text, or "(none)" if there is none>'
 )
 
 
 def _downscale_png(data: bytes) -> bytes:
     from PIL import Image
+
     im = Image.open(io.BytesIO(data))
     im.thumbnail((_MAX_EDGE, _MAX_EDGE))
-    out = io.BytesIO(); im.convert("RGB").save(out, format="PNG")
+    out = io.BytesIO()
+    im.convert("RGB").save(out, format="PNG")
     return out.getvalue()
 
 
@@ -38,9 +41,10 @@ class LlmVision:
         self._model = model
         if chat_vision is None:
             from src.llm.client import chat_vision as _cv
+
             chat_vision = _cv
         self._chat_vision = chat_vision
-        self._log = log or LOGGER.warning   # truncation must never be silent
+        self._log = log or LOGGER.warning  # truncation must never be silent
 
     def read(self, data: bytes, mime: str, filename: str) -> OcrResult:
         if not self._model:
@@ -53,8 +57,9 @@ class LlmVision:
         except Exception:
             return OcrResult("", Status.OCR_UNAVAILABLE, _NAME)  # libs (PIL/poppler) missing
         try:
-            chunks = [self._chat_vision(self._client, self._model, _PROMPT, p, "image/png")
-                      for p in pages]
+            chunks = [
+                self._chat_vision(self._client, self._model, _PROMPT, p, "image/png") for p in pages
+            ]
         except Exception:
             # endpoint down / connection / model error -> let the chain fall through
             return OcrResult("", Status.OCR_UNAVAILABLE, _NAME)
@@ -66,6 +71,7 @@ class LlmVision:
         for im in render_pdf_pages(data, self._log):
             im = im.convert("RGB")
             im.thumbnail((_MAX_EDGE, _MAX_EDGE))
-            buf = io.BytesIO(); im.save(buf, format="PNG")
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
             out.append(buf.getvalue())
         return out

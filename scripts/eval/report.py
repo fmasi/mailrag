@@ -7,6 +7,7 @@ Run:
   conda run -n rag --no-capture-output \
     python scripts/eval/report.py --outdir eval/out | tee eval/out/report.txt
 """
+
 import argparse
 import json
 import os
@@ -14,9 +15,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.eval.metrics import ndcg_at_k, precision_at_k, recall_at_k, mrr, success_at_k, aggregate
-from src.eval.pooling import total_relevant
 from src.eval.decisions import decide
+from src.eval.metrics import aggregate, mrr, ndcg_at_k, precision_at_k, recall_at_k, success_at_k
+from src.eval.pooling import total_relevant
 
 ARMS = ["C", "C+rerank", "C+rerank+thread", "Cprime", "Cprime+rerank"]
 REL = 2
@@ -29,13 +30,18 @@ def _rows_for_arm(rankings, grades, arm):
         ids = r["arms"].get(arm, [])
         g = [grades.get(q, {}).get(mid, 0) for mid in ids]
         tr = total_relevant(grades.get(q, {}), REL)
-        rows.append({
-            "category": r["category"],
-            "ndcg@10": ndcg_at_k(g, 10), "ndcg@5": ndcg_at_k(g, 5),
-            "p@10": precision_at_k(g, 10, REL), "p@5": precision_at_k(g, 5, REL),
-            "recall@10": recall_at_k(g, 10, REL, tr), "mrr": mrr(g, REL),
-            "success@10": success_at_k(ids, r["answer_message_id"], 10),
-        })
+        rows.append(
+            {
+                "category": r["category"],
+                "ndcg@10": ndcg_at_k(g, 10),
+                "ndcg@5": ndcg_at_k(g, 5),
+                "p@10": precision_at_k(g, 10, REL),
+                "p@5": precision_at_k(g, 5, REL),
+                "recall@10": recall_at_k(g, 10, REL, tr),
+                "mrr": mrr(g, REL),
+                "success@10": success_at_k(ids, r["answer_message_id"], 10),
+            }
+        )
     return rows
 
 
@@ -52,12 +58,13 @@ def run(outdir):
         for grp in ("overall", "terse", "content", "spanning"):
             if grp in agg:
                 m = agg[grp]
-                print(f"  {grp:8s} (n={m['n']:>2}): " +
-                      "  ".join(f"{k}={m[k]:.3f}" for k in keys))
+                print(f"  {grp:8s} (n={m['n']:>2}): " + "  ".join(f"{k}={m[k]:.3f}" for k in keys))
 
     sizes = [t["tokens"] for b in bounding for t in b["threads"]]
-    pct = {b: round(100 * sum(1 for s in sizes if s > b) / len(sizes), 1) if sizes else 0
-           for b in (4000, 8000, 16000)}
+    pct = {
+        b: round(100 * sum(1 for s in sizes if s > b) / len(sizes), 1) if sizes else 0
+        for b in (4000, 8000, 16000)
+    }
     print(f"\n=== bounding (retrieved threads, n={len(sizes)}) ===\n  pct over budget: {pct}")
 
     decisions = decide(rankings, grades, pct_over_8k=pct[8000])

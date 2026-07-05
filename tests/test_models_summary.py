@@ -1,13 +1,15 @@
 # tests/test_models_summary.py
 """The optional summary is stored in payload but excluded from embedding."""
+
 import unittest
 
 from src.data.models import NormalizedEmail
 
 
 def _email(**kw):
-    base = dict(sender="a@x.com", subject="S", date=None, body="B",
-                source="local", source_id="/p/a.eml")
+    base = dict(
+        sender="a@x.com", subject="S", date=None, body="B", source="local", source_id="/p/a.eml"
+    )
     base.update(kw)
     return NormalizedEmail(**base)
 

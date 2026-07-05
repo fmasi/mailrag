@@ -13,10 +13,8 @@ class TestRubrics(unittest.TestCase):
         self.assertEqual(rubrics.load_rubric("work").template, summary._PROMPT_TEMPLATE)
 
     def test_build_prompt_work_matches_summary_build_prompt(self):
-        email = {"sender": "a@x.com", "subject": "Hi", "date": "2024-01-01",
-                 "body": "hello world"}
-        self.assertEqual(rubrics.build_prompt("work", email),
-                         summary.build_prompt(email))
+        email = {"sender": "a@x.com", "subject": "Hi", "date": "2024-01-01", "body": "hello world"}
+        self.assertEqual(rubrics.build_prompt("work", email), summary.build_prompt(email))
 
     def test_build_prompt_truncates_body_like_summary(self):
         email = {"sender": "s", "subject": "j", "date": "d", "body": "x" * 50}
@@ -34,11 +32,11 @@ class TestRubrics(unittest.TestCase):
             shipped = Path(d)
             local.mkdir()
             (shipped / "x.yaml").write_text(
-                "name: x\ntemplate: |-\n  SHIPPED {sender}{date}{subject}{body}\n",
-                encoding="utf-8")
+                "name: x\ntemplate: |-\n  SHIPPED {sender}{date}{subject}{body}\n", encoding="utf-8"
+            )
             (local / "x.yaml").write_text(
-                "name: x\ntemplate: |-\n  LOCAL {sender}{date}{subject}{body}\n",
-                encoding="utf-8")
+                "name: x\ntemplate: |-\n  LOCAL {sender}{date}{subject}{body}\n", encoding="utf-8"
+            )
             with mock.patch.object(rubrics, "_SEARCH_DIRS", (local, shipped)):
                 self.assertTrue(rubrics.load_rubric("x").template.startswith("LOCAL"))
 
@@ -46,7 +44,8 @@ class TestRubrics(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             shipped = Path(d)
             (shipped / "bad.yaml").write_text(
-                "name: bad\ntemplate: |-\n  no placeholders here\n", encoding="utf-8")
+                "name: bad\ntemplate: |-\n  no placeholders here\n", encoding="utf-8"
+            )
             with mock.patch.object(rubrics, "_SEARCH_DIRS", (shipped,)):
                 with self.assertRaises(ValueError) as ctx:
                     rubrics.load_rubric("bad")

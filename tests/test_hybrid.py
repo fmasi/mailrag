@@ -1,4 +1,5 @@
 """Tests for build_hybrid_searcher wiring + opt-in rerank."""
+
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -19,8 +20,13 @@ class TestBuildHybridSearcher(unittest.TestCase):
         with p_vs as VS, p_idx as IDX, p_rr as RR:
             client, embedder = MagicMock(), MagicMock()
             searcher = hybrid.build_hybrid_searcher(
-                "work-rag", client=client, embedder=embedder,
-                mode="hybrid", rerank=False, dense_top_k=20, sparse_top_k=20,
+                "work-rag",
+                client=client,
+                embedder=embedder,
+                mode="hybrid",
+                rerank=False,
+                dense_top_k=20,
+                sparse_top_k=20,
             )
             _, kwargs = VS.call_args
             self.assertTrue(kwargs["enable_hybrid"])
@@ -42,7 +48,10 @@ class TestBuildHybridSearcher(unittest.TestCase):
         p_vs, p_idx, p_rr = self._patches()
         with p_vs, p_idx as IDX, p_rr:
             hybrid.build_hybrid_searcher(
-                "work-rag", client=MagicMock(), embedder=MagicMock(), mode="dense",
+                "work-rag",
+                client=MagicMock(),
+                embedder=MagicMock(),
+                mode="dense",
             )
             retr_kwargs = IDX.from_vector_store.return_value.as_retriever.call_args.kwargs
             self.assertEqual(retr_kwargs["vector_store_query_mode"], "default")
@@ -51,7 +60,10 @@ class TestBuildHybridSearcher(unittest.TestCase):
         p_vs, p_idx, p_rr = self._patches()
         with p_vs, p_idx as IDX, p_rr:
             hybrid.build_hybrid_searcher(
-                "work-rag", client=MagicMock(), embedder=MagicMock(), mode="sparse",
+                "work-rag",
+                client=MagicMock(),
+                embedder=MagicMock(),
+                mode="sparse",
             )
             retr_kwargs = IDX.from_vector_store.return_value.as_retriever.call_args.kwargs
             self.assertEqual(retr_kwargs["vector_store_query_mode"], "sparse")
@@ -61,8 +73,11 @@ class TestBuildHybridSearcher(unittest.TestCase):
         with p_vs as VS, p_idx, p_rr:
             sentinel = object()
             hybrid.build_hybrid_searcher(
-                "work-rag", client=MagicMock(), embedder=MagicMock(),
-                mode="hybrid", fusion_fn=sentinel,
+                "work-rag",
+                client=MagicMock(),
+                embedder=MagicMock(),
+                mode="hybrid",
+                fusion_fn=sentinel,
             )
             _, kwargs = VS.call_args
             self.assertIs(kwargs["hybrid_fusion_fn"], sentinel)
@@ -71,7 +86,10 @@ class TestBuildHybridSearcher(unittest.TestCase):
         p_vs, p_idx, p_rr = self._patches()
         with p_vs as VS, p_idx, p_rr:
             hybrid.build_hybrid_searcher(
-                "work-rag", client=MagicMock(), embedder=MagicMock(), mode="hybrid",
+                "work-rag",
+                client=MagicMock(),
+                embedder=MagicMock(),
+                mode="hybrid",
             )
             _, kwargs = VS.call_args
             self.assertIs(kwargs["hybrid_fusion_fn"], hybrid.reciprocal_rank_fusion)
@@ -81,58 +99,75 @@ class TestBuildHybridSearcher(unittest.TestCase):
         with p_vs, p_idx, p_rr as RR:
             RR.return_value = MagicMock(name="reranker")
             searcher = hybrid.build_hybrid_searcher(
-                "work-rag", client=MagicMock(), embedder=MagicMock(),
-                mode="hybrid", rerank=True, top_n=5,
+                "work-rag",
+                client=MagicMock(),
+                embedder=MagicMock(),
+                mode="hybrid",
+                rerank=True,
+                top_n=5,
             )
             RR.assert_called_once_with(top_n=5)
             self.assertIs(searcher._reranker, RR.return_value)
 
     def test_rerank_with_summary_attaches_summary_reranker(self):
-        with patch("src.query.hybrid.QdrantVectorStore"), \
-             patch("src.query.hybrid.VectorStoreIndex"), \
-             patch("src.query.hybrid.make_summary_reranker") as MSR, \
-             patch("src.query.hybrid._make_reranker") as MR:
+        with (
+            patch("src.query.hybrid.QdrantVectorStore"),
+            patch("src.query.hybrid.VectorStoreIndex"),
+            patch("src.query.hybrid.make_summary_reranker") as MSR,
+            patch("src.query.hybrid._make_reranker") as MR,
+        ):
             MSR.return_value = MagicMock(name="sumrr")
             searcher = hybrid.build_hybrid_searcher(
-                "work-rag", client=MagicMock(), embedder=MagicMock(),
-                rerank_with_summary=True, top_n=10,
+                "work-rag",
+                client=MagicMock(),
+                embedder=MagicMock(),
+                rerank_with_summary=True,
+                top_n=10,
             )
             MSR.assert_called_once_with(top_n=10)
             MR.assert_not_called()
             self.assertIs(searcher._reranker, MSR.return_value)
 
     def test_builds_client_and_embedder_when_not_injected(self):
-        with patch("src.query.hybrid.QdrantVectorStore"), \
-             patch("src.query.hybrid.VectorStoreIndex"), \
-             patch("src.query.hybrid._make_reranker"), \
-             patch("src.query.hybrid._qdrant_client") as QC, \
-             patch("src.ingest.embedder.BgeM3Embedder") as EMB:
+        with (
+            patch("src.query.hybrid.QdrantVectorStore"),
+            patch("src.query.hybrid.VectorStoreIndex"),
+            patch("src.query.hybrid._make_reranker"),
+            patch("src.query.hybrid._qdrant_client") as QC,
+            patch("src.ingest.embedder.BgeM3Embedder") as EMB,
+        ):
             hybrid.build_hybrid_searcher("work-rag", mode="hybrid")
             QC.assert_called_once()
             EMB.assert_called_once()
 
     def test_threads_explicit_qdrant_url_to_client(self):
-        with patch("src.query.hybrid.QdrantVectorStore"), \
-             patch("src.query.hybrid.VectorStoreIndex"), \
-             patch("src.query.hybrid._make_reranker"), \
-             patch("src.query.hybrid._qdrant_client") as QC, \
-             patch("src.ingest.embedder.BgeM3Embedder"):
+        with (
+            patch("src.query.hybrid.QdrantVectorStore"),
+            patch("src.query.hybrid.VectorStoreIndex"),
+            patch("src.query.hybrid._make_reranker"),
+            patch("src.query.hybrid._qdrant_client") as QC,
+            patch("src.ingest.embedder.BgeM3Embedder"),
+        ):
             hybrid.build_hybrid_searcher(
-                "work-rag", mode="hybrid", qdrant_url="http://localhost:6333")
+                "work-rag", mode="hybrid", qdrant_url="http://localhost:6333"
+            )
             QC.assert_called_once_with("http://localhost:6333")
 
 
 class TestQdrantClient(unittest.TestCase):
     def test_explicit_url_overrides_env(self):
-        with patch("qdrant_client.QdrantClient") as QClient, \
-             patch.dict(os.environ,
-                        {"QDRANT_URL": "http://host.docker.internal:6333"}):
+        with (
+            patch("qdrant_client.QdrantClient") as QClient,
+            patch.dict(os.environ, {"QDRANT_URL": "http://host.docker.internal:6333"}),
+        ):
             hybrid._qdrant_client("http://localhost:6333")
             self.assertEqual(QClient.call_args.kwargs["url"], "http://localhost:6333")
 
     def test_falls_back_to_env_when_no_arg(self):
-        with patch("qdrant_client.QdrantClient") as QClient, \
-             patch.dict(os.environ, {"QDRANT_URL": "http://env-host:6333"}):
+        with (
+            patch("qdrant_client.QdrantClient") as QClient,
+            patch.dict(os.environ, {"QDRANT_URL": "http://env-host:6333"}),
+        ):
             hybrid._qdrant_client()
             self.assertEqual(QClient.call_args.kwargs["url"], "http://env-host:6333")
 
@@ -162,7 +197,10 @@ class TestThreadExpansion(unittest.TestCase):
         retriever.retrieve.return_value = ["n1"]
         client = MagicMock()
         searcher = hybrid.HybridSearcher(
-            retriever, reranker=None, client=client, collection="work-rag",
+            retriever,
+            reranker=None,
+            client=client,
+            collection="work-rag",
         )
         with patch("src.query.hybrid.assemble_threads") as AT:
             AT.return_value = ["ctx1"]
@@ -176,12 +214,17 @@ class TestThreadExpansion(unittest.TestCase):
             searcher.search_threads("q")
 
     def test_build_searcher_passes_client_and_collection(self):
-        with patch("src.query.hybrid.QdrantVectorStore"), \
-             patch("src.query.hybrid.VectorStoreIndex"), \
-             patch("src.query.hybrid._make_reranker"):
+        with (
+            patch("src.query.hybrid.QdrantVectorStore"),
+            patch("src.query.hybrid.VectorStoreIndex"),
+            patch("src.query.hybrid._make_reranker"),
+        ):
             client = MagicMock()
             searcher = hybrid.build_hybrid_searcher(
-                "work-rag", client=client, embedder=MagicMock(), mode="hybrid",
+                "work-rag",
+                client=client,
+                embedder=MagicMock(),
+                mode="hybrid",
             )
             self.assertIs(searcher._client, client)
             self.assertEqual(searcher._collection, "work-rag")

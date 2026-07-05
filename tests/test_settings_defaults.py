@@ -1,5 +1,6 @@
-import unittest, importlib
-from unittest.mock import patch, MagicMock
+import importlib
+import unittest
+from unittest.mock import MagicMock, patch
 
 
 class TestDefaults(unittest.TestCase):
@@ -7,22 +8,33 @@ class TestDefaults(unittest.TestCase):
     # load_from_env() so we can restore them in tearDown and avoid
     # polluting subsequent tests.
     _RAGCONFIG_ATTRS = (
-        "LLM_PROVIDER", "LLM_MODEL", "LLM_TEMPERATURE", "LLM_API_BASE",
-        "LLM_API_KEY", "EMBEDDING_PROVIDER", "EMBEDDING_MODEL",
-        "EMBEDDING_API_BASE", "EMBEDDING_API_KEY", "CHUNK_SIZE", "CHUNK_OVERLAP",
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "LLM_TEMPERATURE",
+        "LLM_API_BASE",
+        "LLM_API_KEY",
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_API_BASE",
+        "EMBEDDING_API_KEY",
+        "CHUNK_SIZE",
+        "CHUNK_OVERLAP",
     )
 
     def setUp(self):
         from src.config.settings import RAGConfig
+
         self._ragconfig_snapshot = {k: getattr(RAGConfig, k) for k in self._RAGCONFIG_ATTRS}
 
     def tearDown(self):
         from src.config.settings import RAGConfig
+
         for k, v in self._ragconfig_snapshot.items():
             setattr(RAGConfig, k, v)
 
     def test_default_collection_is_demo(self):
         from src.config import settings
+
         importlib.reload(settings)
         self.assertEqual(settings.RAGConfig.QDRANT_COLLECTION_NAME, "mailrag-demo")
 
@@ -54,9 +66,11 @@ class TestDefaults(unittest.TestCase):
 
         # clear=True: prevent load_from_env() from reading RAG_LLM_API_KEY etc.
         # from the real environment (loaded from .env by other imported modules).
-        with patch("src.config.settings.Settings", _FakeSettings()), \
-             patch.dict("os.environ", {}, clear=True), \
-             patch.dict("sys.modules", {"llama_index.embeddings.openai": fake_embed_module}):
+        with (
+            patch("src.config.settings.Settings", _FakeSettings()),
+            patch.dict("os.environ", {}, clear=True),
+            patch.dict("sys.modules", {"llama_index.embeddings.openai": fake_embed_module}),
+        ):
             RAGConfig.initialize_settings(include_llm=False, include_embeddings=False)
 
         # embed_model must never have been assigned on Settings
@@ -90,13 +104,15 @@ class TestDefaults(unittest.TestCase):
 
         # clear=True: isolate from the real process environment so load_from_env()
         # inside initialize_settings cannot read RAG_LLM_API_KEY etc. from .env.
-        with patch("src.config.settings.Settings", _FakeSettings()), \
-             patch.dict(
-                 "os.environ",
-                 {"OPENAI_API_KEY": "test-key", "RAG_EMBEDDING_PROVIDER": "openai"},
-                 clear=True,
-             ), \
-             patch.dict("sys.modules", {"llama_index.embeddings.openai": fake_embed_module}):
+        with (
+            patch("src.config.settings.Settings", _FakeSettings()),
+            patch.dict(
+                "os.environ",
+                {"OPENAI_API_KEY": "test-key", "RAG_EMBEDDING_PROVIDER": "openai"},
+                clear=True,
+            ),
+            patch.dict("sys.modules", {"llama_index.embeddings.openai": fake_embed_module}),
+        ):
             RAGConfig.initialize_settings(include_llm=False, include_embeddings=True)
 
         # embed_model must have been assigned

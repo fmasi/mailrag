@@ -5,6 +5,7 @@ unlike build_thread_aware_prompt (PRECEDING-only / causal), it conditions the
 per-email summary on ALL other messages in the thread (before AND after the target),
 mirroring Anthropic-style whole-document contextual retrieval.
 """
+
 import unittest
 
 from src.llm.summary import build_whole_thread_prompt, parse_response
@@ -56,8 +57,9 @@ class TestBuildWholeThreadPrompt(unittest.TestCase):
 
     def test_response_parses_with_shared_schema(self):
         # sanity: the schema this prompt asks for round-trips through parse_response
-        rec = parse_response('{"is_noise": false, "confidence": 0.9, '
-                             '"summary": "s", "reason": "r"}')
+        rec = parse_response(
+            '{"is_noise": false, "confidence": 0.9, "summary": "s", "reason": "r"}'
+        )
         self.assertFalse(rec["is_noise"])
         self.assertEqual(rec["summary"], "s")
 

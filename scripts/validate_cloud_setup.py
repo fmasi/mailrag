@@ -10,10 +10,10 @@ Usage:
     python scripts/validate_cloud_setup.py --quick   # skip retrieval query test
 """
 
+import argparse
 import os
 import sys
 import time
-import argparse
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -46,18 +46,14 @@ def _result(ok: bool, message: str) -> bool:
 def _get_vector_provider() -> str:
     provider = os.environ.get("VECTOR_STORE_PROVIDER", "qdrant").strip().lower()
     if provider not in {"qdrant", "pinecone"}:
-        raise ValueError(
-            "VECTOR_STORE_PROVIDER must be 'qdrant' or 'pinecone' for this validator"
-        )
+        raise ValueError("VECTOR_STORE_PROVIDER must be 'qdrant' or 'pinecone' for this validator")
     return provider
 
 
 def _get_embedding_provider() -> str:
     provider = os.environ.get("RAG_EMBEDDING_PROVIDER", "openai").strip().lower()
     if provider not in {"openai", "lmstudio"}:
-        raise ValueError(
-            "RAG_EMBEDDING_PROVIDER must be 'openai' or 'lmstudio'"
-        )
+        raise ValueError("RAG_EMBEDDING_PROVIDER must be 'openai' or 'lmstudio'")
     return provider
 
 
@@ -67,8 +63,7 @@ def check_embedding_smoke(embedding_provider: str) -> Optional[bool]:
 
     if embedding_provider != "lmstudio":
         print(
-            f"  {INFO}  Embedding provider is '{embedding_provider}', "
-            "skipping LM Studio smoke test"
+            f"  {INFO}  Embedding provider is '{embedding_provider}', skipping LM Studio smoke test"
         )
         return None
 
@@ -86,6 +81,7 @@ def check_embedding_smoke(embedding_provider: str) -> Optional[bool]:
 # ---------------------------------------------------------------------------
 # Test 1 — Environment variables
 # ---------------------------------------------------------------------------
+
 
 def check_env_vars(vector_provider: str, embedding_provider: str) -> bool:
     _header("Test 1: Environment Variables")
@@ -132,6 +128,7 @@ def check_env_vars(vector_provider: str, embedding_provider: str) -> bool:
 # Test 2 — Azure Blob connectivity & blob count
 # ---------------------------------------------------------------------------
 
+
 def check_azure_blob() -> tuple[bool, int]:
     """Return (success, blob_count)."""
     _header("Test 2: Azure Blob Storage Connectivity")
@@ -147,7 +144,8 @@ def check_azure_blob() -> tuple[bool, int]:
 
         # List blobs
         blobs = [
-            b for b in container_client.list_blobs(name_starts_with=prefix or None)
+            b
+            for b in container_client.list_blobs(name_starts_with=prefix or None)
             if b.name.endswith(".eml")
         ]
         blob_count = len(blobs)
@@ -174,6 +172,7 @@ def check_azure_blob() -> tuple[bool, int]:
 # Test 3 — Vector store connectivity & vector count
 # ---------------------------------------------------------------------------
 
+
 def check_pinecone() -> tuple[bool, int, Optional[int]]:
     """Return (success, vector_count, dimension)."""
     _header("Test 3: Pinecone Connectivity")
@@ -194,7 +193,9 @@ def check_pinecone() -> tuple[bool, int, Optional[int]]:
 
         _result(True, f"Connected to index '{index_name}'")
         _result(vector_count > 0, f"Index contains {vector_count:,} vectors")
-        _result(dimension == 1536, f"Dimension = {dimension} (expected 1536 for text-embedding-3-small)")
+        _result(
+            dimension == 1536, f"Dimension = {dimension} (expected 1536 for text-embedding-3-small)"
+        )
 
         # Per-namespace breakdown if present
         if hasattr(stats, "namespaces") and stats.namespaces:
@@ -220,7 +221,10 @@ def check_qdrant() -> tuple[bool, int, Optional[int]]:
         collection = os.environ.get("QDRANT_COLLECTION_NAME", "email-rag")
         api_key = os.environ.get("QDRANT_API_KEY", "").strip() or None
         prefer_grpc = os.environ.get("QDRANT_PREFER_GRPC", "false").strip().lower() in {
-            "1", "true", "yes", "on"
+            "1",
+            "true",
+            "yes",
+            "on",
         }
 
         print(f"  {INFO}  Resolved Qdrant collection: {collection}")
@@ -264,6 +268,7 @@ def check_qdrant() -> tuple[bool, int, Optional[int]]:
 # Test 4 — Index completeness (blob count vs vector count)
 # ---------------------------------------------------------------------------
 
+
 def check_completeness(blob_count: int, vector_count: int, provider_label: str) -> bool:
     _header("Test 4: Index Completeness")
 
@@ -280,19 +285,26 @@ def check_completeness(blob_count: int, vector_count: int, provider_label: str) 
     print(f"  {INFO}  Ratio (vecs/blobs): {ratio:.2f}")
 
     if ratio >= 1.0:
-        _result(True, "Vector count ≥ blob count — index looks complete (chunking may explain ratio > 1)")
+        _result(
+            True,
+            "Vector count ≥ blob count — index looks complete (chunking may explain ratio > 1)",
+        )
         return True
     elif ratio >= 0.95:
         print(f"  {WARN}  Ratio ≥ 0.95 — nearly complete. Batch job may still be running.")
         return True
     else:
-        _result(False, f"Only {ratio:.0%} of blobs appear indexed. Re-run batch_index_to_vector_store.py to resume.")
+        _result(
+            False,
+            f"Only {ratio:.0%} of blobs appear indexed. Re-run batch_index_to_vector_store.py to resume.",
+        )
         return False
 
 
 # ---------------------------------------------------------------------------
 # Test 5 — Load a small sample from Azure Blob via the loader
 # ---------------------------------------------------------------------------
+
 
 def check_azure_loader() -> bool:
     _header("Test 5: AzureBlobEmailLoader (load 5 emails)")
@@ -322,6 +334,7 @@ def check_azure_loader() -> bool:
 # Test 6 — Query against Pinecone-backed index
 # ---------------------------------------------------------------------------
 
+
 def check_vector_store_query(vector_provider: str) -> bool:
     provider_title = "Qdrant" if vector_provider == "qdrant" else "Pinecone"
     _header(f"Test 6: End-to-End Query via {provider_title}")
@@ -341,12 +354,14 @@ def check_vector_store_query(vector_provider: str) -> bool:
         retriever = index.as_retriever(similarity_top_k=3)
         results = retriever.retrieve("meeting schedule")
 
-        _result(len(results) > 0, f"Retrieval returned {len(results)} results for 'meeting schedule'")
+        _result(
+            len(results) > 0, f"Retrieval returned {len(results)} results for 'meeting schedule'"
+        )
 
         for i, r in enumerate(results):
             score = f"{r.score:.3f}" if hasattr(r, "score") and r.score else "n/a"
             snippet = r.text[:80].replace("\n", " ") if r.text else ""
-            print(f"       [{i+1}] score={score}  {snippet}…")
+            print(f"       [{i + 1}] score={score}  {snippet}…")
 
         return len(results) > 0
 
@@ -358,6 +373,7 @@ def check_vector_store_query(vector_provider: str) -> bool:
 # ---------------------------------------------------------------------------
 # Test 7 — Unit tests (existing mocked tests)
 # ---------------------------------------------------------------------------
+
 
 def check_unit_tests() -> bool:
     _header("Test 7: Existing Unit Tests (mocked)")
@@ -384,6 +400,7 @@ def check_unit_tests() -> bool:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate cloud storage setup")
     parser.add_argument(
@@ -408,8 +425,7 @@ def main() -> None:
     print(f"Using embedding provider: {embedding_provider}")
     if vector_provider == "qdrant":
         print(
-            "Resolved target collection: "
-            f"{os.environ.get('QDRANT_COLLECTION_NAME', 'email-rag')}"
+            f"Resolved target collection: {os.environ.get('QDRANT_COLLECTION_NAME', 'email-rag')}"
         )
     else:
         print(
@@ -466,20 +482,11 @@ def main() -> None:
     _header("Summary")
     if vector_provider == "qdrant":
         print("  Target provider: qdrant")
-        print(
-            "  Target collection: "
-            f"{os.environ.get('QDRANT_COLLECTION_NAME', 'email-rag')}"
-        )
-        print(
-            "  Target url: "
-            f"{os.environ.get('QDRANT_URL', '').strip() or '<missing>'}"
-        )
+        print(f"  Target collection: {os.environ.get('QDRANT_COLLECTION_NAME', 'email-rag')}")
+        print(f"  Target url: {os.environ.get('QDRANT_URL', '').strip() or '<missing>'}")
     else:
         print("  Target provider: pinecone")
-        print(
-            "  Target index: "
-            f"{os.environ.get('PINECONE_INDEX_NAME', '').strip() or '<missing>'}"
-        )
+        print(f"  Target index: {os.environ.get('PINECONE_INDEX_NAME', '').strip() or '<missing>'}")
 
     total = 0
     passed = 0
@@ -495,9 +502,9 @@ def main() -> None:
     print(f"\n  {passed}/{total} checks passed")
 
     if passed == total:
-        print(f"\n🎉  All checks passed — your cloud setup is fully operational!\n")
+        print("\n🎉  All checks passed — your cloud setup is fully operational!\n")
     else:
-        print(f"\n⚠️  Some checks failed — review the output above for details.\n")
+        print("\n⚠️  Some checks failed — review the output above for details.\n")
 
     sys.exit(0 if passed == total else 1)
 

@@ -1,6 +1,7 @@
 # tests/eval/test_judge_parse.py
 import unittest
-from src.eval.judge_parse import build_judge_prompt, parse_grade, RUBRIC, build_answer_judge_prompt
+
+from src.eval.judge_parse import RUBRIC, build_answer_judge_prompt, build_judge_prompt, parse_grade
 
 
 class BuildPromptTest(unittest.TestCase):

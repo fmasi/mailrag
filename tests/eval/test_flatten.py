@@ -2,13 +2,15 @@
 import unittest
 from dataclasses import dataclass
 from typing import List
-from src.eval.flatten import EmailHit, flatten_nodes, flatten_threads
+
+from src.eval.flatten import flatten_nodes, flatten_threads
 
 
 class _Inner:
     def __init__(self, metadata, text):
         self.metadata = metadata
         self._text = text
+
     def get_content(self, *a, **k):
         return self._text
 
@@ -46,8 +48,10 @@ class FlattenNodesTest(unittest.TestCase):
         self.assertEqual(hits[0].summary, "sumA")
 
     def test_skips_missing_message_id(self):
-        nodes = [_Node({"subject": "no-id"}, "x"),
-                 _Node({"message_id": "z", "subject": "Z"}, "z-body")]
+        nodes = [
+            _Node({"subject": "no-id"}, "x"),
+            _Node({"message_id": "z", "subject": "Z"}, "z-body"),
+        ]
         hits = flatten_nodes(nodes)
         self.assertEqual([h.message_id for h in hits], ["z"])
 

@@ -3,6 +3,7 @@ them as embed-excluded metadata (incl. a computed thread_id).
 
 Imports llama_index (via models/loader), so this runs in the devcontainer.
 """
+
 import os
 import tempfile
 import unittest
@@ -34,9 +35,7 @@ class TestLoaderCapturesThreadHeaders(unittest.TestCase):
         email = emails[0]
         self.assertEqual(email.message_id, "<reply@example.com>")
         self.assertEqual(email.in_reply_to, "<root@example.com>")
-        self.assertEqual(
-            email.references, "<root@example.com> <mid@example.com>"
-        )
+        self.assertEqual(email.references, "<root@example.com> <mid@example.com>")
 
 
 class TestToDocumentThreadMetadata(unittest.TestCase):
@@ -71,9 +70,7 @@ class TestToDocumentThreadMetadata(unittest.TestCase):
             self.assertIn(key, doc.excluded_llm_metadata_keys)
 
     def test_recipients_kept_in_payload_but_excluded_from_embedding(self):
-        email = self._email(
-            recipients="bob@initech.com, carol@example.com", cc="dave@umbrella.com"
-        )
+        email = self._email(recipients="bob@initech.com, carol@example.com", cc="dave@umbrella.com")
         doc = email.to_document(doc_id="x")
         # still available as payload metadata (for "involving person X" filters)
         self.assertIn("to", doc.metadata)

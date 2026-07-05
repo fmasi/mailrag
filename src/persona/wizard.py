@@ -13,16 +13,17 @@ plain `run` verb does not have:
 Heavy work is delegated to the same handler map the headless `run` verb uses.
 See docs/VERBS.md.
 """
+
 from __future__ import annotations
 
 import json
 import os
 from typing import Any, Optional
 
-from src.profile import CorpusProfile
-from src.persona.registry import load_registry
 from src.persona.executor import missing_handlers
+from src.persona.registry import load_registry
 from src.persona.runner import build_handlers
+from src.profile import CorpusProfile
 
 # Verbs that consume the LLM (so the wizard knows to ask for a model first).
 _LLM_STEPS = {"calibrate", "summarize", "judge"}
@@ -46,14 +47,18 @@ def _calibrate_gate(prof, handler, reg, q, console) -> str:
     Returns "proceed" or "abort"."""
     from src.llm import calibration as calibration_lib
     from src.llm import rubrics
+
     while True:
-        report = handler(prof)                      # runs calibrate, records on prof
+        report = handler(prof)  # runs calibrate, records on prof
         console.print(calibration_lib.format_report(report))
         choice = q.select(
             "Calibration done. What next?",
-            choices=["proceed to the LLM pass",
-                     "re-tune (pick another rubric and re-calibrate)",
-                     "abort"]).ask()
+            choices=[
+                "proceed to the LLM pass",
+                "re-tune (pick another rubric and re-calibrate)",
+                "abort",
+            ],
+        ).ask()
         if choice is None or choice.startswith("abort"):
             return "abort"
         if choice.startswith("proceed"):
@@ -66,9 +71,15 @@ def _calibrate_gate(prof, handler, reg, q, console) -> str:
             console.print(f"rubric -> {new}; re-calibrating")
 
 
-def run_wizard(profile_path: str, *, questionary: Any = None, registry: Any = None,
-               model: Optional[str] = None, console: Any = None,
-               limit: Optional[int] = None) -> int:
+def run_wizard(
+    profile_path: str,
+    *,
+    questionary: Any = None,
+    registry: Any = None,
+    model: Optional[str] = None,
+    console: Any = None,
+    limit: Optional[int] = None,
+) -> int:
     """Drive the interactive persona flow. Returns a process exit code.
 
     ``limit`` caps the corpus the scan/summarize/index steps touch — pass a small
@@ -79,6 +90,7 @@ def run_wizard(profile_path: str, *, questionary: Any = None, registry: Any = No
     reg = registry or load_registry()
     if console is None:
         from rich.console import Console
+
         console = Console()
 
     rec = _read_recommendation(profile_path)
@@ -88,8 +100,9 @@ def run_wizard(profile_path: str, *, questionary: Any = None, registry: Any = No
         p = reg.get(name)
         console.print(f"  [bold]{name}[/bold] — {p.label}: {p.advisor_hint}")
 
-    chosen = q.select("Choose a persona:", choices=reg.names(),
-                      default=rec if rec in reg.names() else None).ask()
+    chosen = q.select(
+        "Choose a persona:", choices=reg.names(), default=rec if rec in reg.names() else None
+    ).ask()
     if not chosen:
         return 1
     persona = reg.get(chosen)
@@ -107,17 +120,20 @@ def run_wizard(profile_path: str, *, questionary: Any = None, registry: Any = No
             console.print(f"    {line}")
         return q.confirm("Blacklist these as noise?").ask()
 
-    handlers = build_handlers(profile_path=profile_path, model=model,
-                              prune_confirm=_prune_confirm, limit=limit)
+    handlers = build_handlers(
+        profile_path=profile_path, model=model, prune_confirm=_prune_confirm, limit=limit
+    )
     missing = missing_handlers(persona, handlers)
     if missing:
-        console.print(f"persona '{persona.name}' needs verb(s) not yet implemented: "
-                      f"{', '.join(missing)} — try 'llm-none' or 'llm-all'.")
+        console.print(
+            f"persona '{persona.name}' needs verb(s) not yet implemented: "
+            f"{', '.join(missing)} — try 'llm-none' or 'llm-all'."
+        )
         return 2
 
     prof = CorpusProfile.load(profile_path)
     for step in persona.steps:
-        if step.verb not in handlers:           # optional + unimplemented -> skip
+        if step.verb not in handlers:  # optional + unimplemented -> skip
             console.print(f"  – skip {step.verb} (optional)")
             continue
         if step.verb == "calibrate":

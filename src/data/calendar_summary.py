@@ -81,9 +81,7 @@ def summarize_calendar(subject: str, source_text: str = "") -> str:
     the summary falls back to the subject.
     """
     fields = (
-        extract_vcalendar_fields(source_text)
-        if "BEGIN:VCALENDAR" in (source_text or "")
-        else {}
+        extract_vcalendar_fields(source_text) if "BEGIN:VCALENDAR" in (source_text or "") else {}
     )
     title = fields.get("summary") or subject
     parts = [f"[Calendar] {title}"]

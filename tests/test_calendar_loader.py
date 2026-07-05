@@ -1,6 +1,7 @@
 """Loader integration: calendar invites collapse to a one-line summary,
 ordinary mail is left untouched. Imports the loader, so runs in the devcontainer.
 """
+
 import os
 import tempfile
 import unittest

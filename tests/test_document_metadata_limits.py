@@ -164,9 +164,7 @@ class TestMetadataFitsChunkSize(unittest.TestCase):
 
     def test_many_recipients_metadata_under_chunk(self):
         """Simulate an email sent to 200+ recipients (common in mailing lists)."""
-        recipients = ", ".join(
-            f"user{i}@company.example.com" for i in range(200)
-        )
+        recipients = ", ".join(f"user{i}@company.example.com" for i in range(200))
         email = _make_email(recipients=recipients)
         doc = email.to_document(doc_id="test_3")
         self.assertLess(
@@ -221,8 +219,7 @@ class TestMetadataFitsPineconeLimit(unittest.TestCase):
     def test_huge_recipient_list_under_pinecone_limit(self):
         """Simulate a mass-mailing with 500+ recipients."""
         recipients = ", ".join(
-            f'"User Number {i}" <user{i}@very-long-domain-name.example.com>'
-            for i in range(500)
+            f'"User Number {i}" <user{i}@very-long-domain-name.example.com>' for i in range(500)
         )
         email = _make_email(recipients=recipients)
         doc = email.to_document(doc_id="test_1")
@@ -233,10 +230,7 @@ class TestMetadataFitsPineconeLimit(unittest.TestCase):
         )
 
     def test_huge_cc_list_under_pinecone_limit(self):
-        cc = ", ".join(
-            f'"CC Person {i}" <cc{i}@long-domain.example.com>'
-            for i in range(500)
-        )
+        cc = ", ".join(f'"CC Person {i}" <cc{i}@long-domain.example.com>' for i in range(500))
         email = _make_email(cc=cc)
         doc = email.to_document(doc_id="test_2")
         self.assertLess(
@@ -250,13 +244,9 @@ class TestMetadataFitsPineconeLimit(unittest.TestCase):
             sender="s" * 1000,
             subject="j" * 2000,
             recipients=", ".join(
-                f'"Recipient {i}" <r{i}@long-domain.example.com>'
-                for i in range(500)
+                f'"Recipient {i}" <r{i}@long-domain.example.com>' for i in range(500)
             ),
-            cc=", ".join(
-                f'"CC {i}" <c{i}@long-domain.example.com>'
-                for i in range(500)
-            ),
+            cc=", ".join(f'"CC {i}" <c{i}@long-domain.example.com>' for i in range(500)),
             source_id="p" * 5000,
         )
         doc = email.to_document(doc_id="test_3")
@@ -275,9 +265,7 @@ class TestExcludedMetadataKeys(unittest.TestCase):
     """Ensure bulky keys are excluded from embedding/LLM context."""
 
     def test_excluded_embed_keys(self):
-        doc = _make_email(recipients="a@b.com", cc="c@d.com").to_document(
-            doc_id="test_0"
-        )
+        doc = _make_email(recipients="a@b.com", cc="c@d.com").to_document(doc_id="test_0")
         for key in ("source_id", "to_full", "cc_full"):
             self.assertIn(key, doc.excluded_embed_metadata_keys)
             self.assertIn(key, doc.excluded_llm_metadata_keys)

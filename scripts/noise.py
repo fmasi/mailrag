@@ -50,34 +50,52 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-_RULES_PATH     = Path(__file__).resolve().parent.parent / "config" / "noise_rules.yaml"
+_RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "noise_rules.yaml"
 _WHITELIST_PATH = Path(__file__).resolve().parent.parent / "config" / "whitelist_domains.yaml"
 
 # Domains shared by real people and businesses — blanket domain rules here
 # cause massive false positives.  The LLM is asked for narrow patterns instead.
-_GENERAL_PURPOSE_DOMAINS = frozenset({
-    "gmail.com", "googlemail.com",
-    "outlook.com", "hotmail.com", "hotmail.fr", "hotmail.co.uk",
-    "live.com", "live.fr", "live.co.uk",
-    "yahoo.com", "yahoo.fr", "yahoo.co.uk", "yahoo.ca", "yahoo.de",
-    "microsoft.com",
-    "icloud.com", "me.com", "mac.com",
-    "protonmail.com", "pm.me",
-    "aol.com", "msn.com",
-})
+_GENERAL_PURPOSE_DOMAINS = frozenset(
+    {
+        "gmail.com",
+        "googlemail.com",
+        "outlook.com",
+        "hotmail.com",
+        "hotmail.fr",
+        "hotmail.co.uk",
+        "live.com",
+        "live.fr",
+        "live.co.uk",
+        "yahoo.com",
+        "yahoo.fr",
+        "yahoo.co.uk",
+        "yahoo.ca",
+        "yahoo.de",
+        "microsoft.com",
+        "icloud.com",
+        "me.com",
+        "mac.com",
+        "protonmail.com",
+        "pm.me",
+        "aol.com",
+        "msn.com",
+    }
+)
 
-_DISCOVER_MIN_EMAILS  = 10   # default minimum unique emails to consider a domain
-_DEEP_CLEAN_BATCH     = 10   # emails per LLM classification call
-_LLM_BODY_CHARS       = int(os.getenv("NOISE_LLM_BODY_CHARS", "800"))  # chars sent to LLM per email
-_MIN_EMAILS_FOR_RULE  = 5    # minimum noise emails before attempting rule extraction
+_DISCOVER_MIN_EMAILS = 10  # default minimum unique emails to consider a domain
+_DEEP_CLEAN_BATCH = 10  # emails per LLM classification call
+_LLM_BODY_CHARS = int(os.getenv("NOISE_LLM_BODY_CHARS", "800"))  # chars sent to LLM per email
+_MIN_EMAILS_FOR_RULE = 5  # minimum noise emails before attempting rule extraction
 _DEFAULT_INSPECT_COUNT = 10  # emails fetched for interactive deep-inspect / read
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
+
 
 def _extract_domain(sender: str) -> str | None:
     m = re.search(r"@([\w.\-]+)", sender.lower())
@@ -125,9 +143,11 @@ def _confirm(prompt: str) -> bool:
 
 # ── Whitelist helpers ─────────────────────────────────────────────────────────
 
+
 def _load_whitelist() -> frozenset:
     """Return the set of domains in config/whitelist_domains.yaml."""
     import yaml
+
     try:
         with open(_WHITELIST_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
@@ -142,6 +162,7 @@ def _load_whitelist() -> frozenset:
 def _save_whitelist_domain(domain: str) -> None:
     """Append a domain to config/whitelist_domains.yaml (idempotent)."""
     import yaml
+
     try:
         try:
             with open(_WHITELIST_PATH, encoding="utf-8") as f:
@@ -163,9 +184,11 @@ def _save_whitelist_domain(domain: str) -> None:
 
 # ── YAML state ────────────────────────────────────────────────────────────────
 
+
 def _load_existing_state() -> tuple[set, set]:
     """Return (category_keys, sender_domains) currently in noise_rules.yaml."""
     import yaml
+
     try:
         with open(_RULES_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
@@ -227,13 +250,17 @@ def _merge_rules_to_yaml(new_rules: list) -> int:
 
 # ── Qdrant helpers ────────────────────────────────────────────────────────────
 
+
 def _scroll_all(qdrant, collection: str):
     """Yield (point_id, payload) for every point in the collection."""
     offset = None
     while True:
         results, next_offset = qdrant.scroll(
-            collection_name=collection, limit=256, offset=offset,
-            with_payload=True, with_vectors=False,
+            collection_name=collection,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
         )
         for point in results:
             yield point.id, (point.payload or {})
@@ -244,15 +271,22 @@ def _scroll_all(qdrant, collection: str):
 
 def _scroll_sender_stats(qdrant, collection: str) -> dict:
     """Return per-domain stats across the full collection."""
-    stats: dict = defaultdict(lambda: {
-        "unique_emails": set(), "sample_senders": [], "sample_subjects": [],
-    })
+    stats: dict = defaultdict(
+        lambda: {
+            "unique_emails": set(),
+            "sample_senders": [],
+            "sample_subjects": [],
+        }
+    )
     offset = None
     total = 0
     while True:
         results, next_offset = qdrant.scroll(
-            collection_name=collection, limit=256, offset=offset,
-            with_payload=["sender", "subject", "source_id"], with_vectors=False,
+            collection_name=collection,
+            limit=256,
+            offset=offset,
+            with_payload=["sender", "subject", "source_id"],
+            with_vectors=False,
         )
         for point in results:
             p = point.payload or {}
@@ -296,8 +330,11 @@ def _fetch_domain_email_sample(qdrant, collection: str, domain: str, n: int) -> 
     offset = None
     while True:
         results, next_offset = qdrant.scroll(
-            collection_name=collection, limit=256, offset=offset,
-            with_payload=True, with_vectors=False,
+            collection_name=collection,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
         )
         for point in results:
             p = point.payload or {}
@@ -326,15 +363,25 @@ def _scroll_domain_emails(qdrant, collection: str, target_domains: set) -> dict:
     Scroll and group chunks by source_id for the given domains.
     Returns {domain: {source_id: {sender, subject, body, point_ids}}}.
     """
-    emails: dict = defaultdict(lambda: defaultdict(lambda: {
-        "sender": "", "subject": "", "body": "", "point_ids": [],
-    }))
+    emails: dict = defaultdict(
+        lambda: defaultdict(
+            lambda: {
+                "sender": "",
+                "subject": "",
+                "body": "",
+                "point_ids": [],
+            }
+        )
+    )
     offset = None
     total = 0
     while True:
         results, next_offset = qdrant.scroll(
-            collection_name=collection, limit=256, offset=offset,
-            with_payload=True, with_vectors=False,
+            collection_name=collection,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
         )
         for point in results:
             p = point.payload or {}
@@ -365,9 +412,10 @@ def _scroll_domain_emails(qdrant, collection: str, target_domains: set) -> dict:
 
 def _delete_qdrant_points(qdrant, collection: str, point_ids: list) -> int:
     from qdrant_client.models import PointIdsList
+
     deleted = 0
     for start in range(0, len(point_ids), 1000):
-        batch = point_ids[start: start + 1000]
+        batch = point_ids[start : start + 1000]
         qdrant.delete(collection_name=collection, points_selector=PointIdsList(points=batch))
         deleted += len(batch)
         print(f"  Deleted {deleted}/{len(point_ids)} vectors...", end="\r")
@@ -377,6 +425,7 @@ def _delete_qdrant_points(qdrant, collection: str, point_ids: list) -> int:
 
 def _delete_blobs(connection_string: str, container: str, blob_paths: list) -> int:
     from azure.storage.blob import BlobServiceClient
+
     cc = BlobServiceClient.from_connection_string(connection_string).get_container_client(container)
     deleted = errors = 0
     for i, path in enumerate(blob_paths, 1):
@@ -396,10 +445,13 @@ def _delete_blobs(connection_string: str, container: str, blob_paths: list) -> i
 
 # ── LLM helpers ───────────────────────────────────────────────────────────────
 
+
 def _call_llm(client, model: str, prompt: str):
     try:
         response = client.chat.completions.create(
-            model=model, messages=[{"role": "user", "content": prompt}], temperature=0,
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
         )
         text = response.choices[0].message.content.strip()
         text = re.sub(r"^```[a-z]*\n?", "", text)
@@ -410,7 +462,9 @@ def _call_llm(client, model: str, prompt: str):
         return None
 
 
-def _llm_classify_dedicated(client, model: str, domain: str, subjects: list, count: int) -> dict | None:
+def _llm_classify_dedicated(
+    client, model: str, domain: str, subjects: list, count: int
+) -> dict | None:
     subjects_block = "\n".join(f"- {s[:100]}" for s in subjects)
     prompt = f"""Classify whether all emails from '{domain}' are noise for a business RAG system.
 
@@ -426,8 +480,9 @@ Answer ONLY with JSON (no markdown):
     return _call_llm(client, model, prompt)
 
 
-def _llm_classify_general_domain(client, model: str, domain: str,
-                                  senders: list, subjects: list, count: int) -> dict | None:
+def _llm_classify_general_domain(
+    client, model: str, domain: str, senders: list, subjects: list, count: int
+) -> dict | None:
     senders_block = "\n".join(f"- {s[:120]}" for s in senders)
     subjects_block = "\n".join(f"- {s[:100]}" for s in subjects)
     prompt = f"""Emails from '{domain}' may include real business emails — DO NOT suggest blocking the whole domain.
@@ -453,7 +508,9 @@ def _llm_classify_email_batch(client, model: str, domain: str, batch: list) -> l
     lines = []
     for i, e in enumerate(batch, 1):
         preview = e["body"][:_LLM_BODY_CHARS].replace("\n", " ").strip()
-        lines.append(f'Email {i}:\n  Sender: {e["sender"][:100]}\n  Subject: {e["subject"][:100]}\n  Body: {preview}')
+        lines.append(
+            f"Email {i}:\n  Sender: {e['sender'][:100]}\n  Subject: {e['subject'][:100]}\n  Body: {preview}"
+        )
     prompt = f"""Classify each email from '{domain}' as noise or legitimate for a business RAG system.
 
 Noise = newsletters, automated notifications, marketing, social media, calendar spam,
@@ -471,8 +528,7 @@ Example for 3 emails: [true, false, true]"""
 
 def _llm_extract_rule(client, model: str, domain: str, noise_emails: list) -> dict | None:
     examples = "\n".join(
-        f'- Sender: {e["sender"][:100]}  |  Subject: {e["subject"][:80]}'
-        for e in noise_emails[:20]
+        f"- Sender: {e['sender'][:100]}  |  Subject: {e['subject'][:80]}" for e in noise_emails[:20]
     )
     prompt = f"""These emails from '{domain}' were confirmed noise for a business RAG system:
 
@@ -488,20 +544,21 @@ Answer ONLY with JSON (no markdown):
 
 # ── Interactive discover helpers ──────────────────────────────────────────────
 
+
 def _result_to_rule(domain: str, result: dict | None, is_general: bool) -> dict | None:
     """
     Convert an LLM classification result into a rule dict for _merge_rules_to_yaml.
     Returns None when no rule can be built (e.g. general-purpose domain with no patterns).
     """
     if is_general:
-        patterns_s   = (result or {}).get("sender_patterns") or []
+        patterns_s = (result or {}).get("sender_patterns") or []
         patterns_sub = (result or {}).get("subject_patterns") or []
         if not patterns_s and not patterns_sub:
             return None
         return {
             "domain": domain,
             "description": (result or {}).get("description") or f"Noise patterns from {domain}",
-            "sender_patterns":  patterns_s,
+            "sender_patterns": patterns_s,
             "subject_patterns": patterns_sub,
         }
     else:
@@ -527,8 +584,8 @@ def _interactive_domain_prompt(
     Show the interactive menu for a single candidate domain.
     Returns: 'rule' | 'skip' | 'whitelist'
     """
-    deep_inspect_summary = None   # (noise_n, total_n, noise_subjects, clean_subjects)
-    sample_emails: list | None = None   # fetched lazily on [2] or [3]
+    deep_inspect_summary = None  # (noise_n, total_n, noise_subjects, clean_subjects)
+    sample_emails: list | None = None  # fetched lazily on [2] or [3]
     read_index = 0
 
     while True:
@@ -556,13 +613,13 @@ def _interactive_domain_prompt(
                 for s in clean_subjs[1:3]:
                     print(f"           {s[:65]}")
 
-        print(f"\n  Sample subjects:")
+        print("\n  Sample subjects:")
         for subj in entry["sample_subjects"][:5]:
             print(f"    - {subj[:72]}")
 
         print()
-        print(f"  [y] Add noise rule    [n] Skip (this run)    [w] Whitelist (never re-propose)")
-        print(f"  [2] Deep inspect      [3] Read an email")
+        print("  [y] Add noise rule    [n] Skip (this run)    [w] Whitelist (never re-propose)")
+        print("  [2] Deep inspect      [3] Read an email")
         try:
             choice = input("  Choice: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -579,14 +636,18 @@ def _interactive_domain_prompt(
         elif choice == "2":
             if sample_emails is None:
                 print(f"\n  Fetching up to {inspect_count} emails from '{domain}'...")
-                sample_emails = _fetch_domain_email_sample(qdrant, collection, domain, inspect_count)
+                sample_emails = _fetch_domain_email_sample(
+                    qdrant, collection, domain, inspect_count
+                )
                 read_index = 0
             if not sample_emails:
                 print(f"  No emails found for '{domain}' in the index.")
                 continue
             print(f"  Classifying {len(sample_emails)} emails with LLM...")
-            batch = [{"sender": e["sender"], "subject": e["subject"], "body": e["body"]}
-                     for e in sample_emails]
+            batch = [
+                {"sender": e["sender"], "subject": e["subject"], "body": e["body"]}
+                for e in sample_emails
+            ]
             results = _llm_classify_email_batch(llm, model, domain, batch)
             if results is None:
                 print("  LLM returned an unexpected response — try again.")
@@ -598,7 +659,9 @@ def _interactive_domain_prompt(
         elif choice == "3":
             if sample_emails is None:
                 print(f"\n  Fetching up to {inspect_count} emails from '{domain}'...")
-                sample_emails = _fetch_domain_email_sample(qdrant, collection, domain, inspect_count)
+                sample_emails = _fetch_domain_email_sample(
+                    qdrant, collection, domain, inspect_count
+                )
                 read_index = 0
             if not sample_emails:
                 print(f"  No emails found for '{domain}' in the index.")
@@ -610,15 +673,17 @@ def _interactive_domain_prompt(
             while read_index < len(sample_emails):
                 email = sample_emails[read_index]
                 read_index += 1
-                print(f"\n  ── Email {read_index}/{len(sample_emails)} ──────────────────────────────────────────────")
+                print(
+                    f"\n  ── Email {read_index}/{len(sample_emails)} ──────────────────────────────────────────────"
+                )
                 print(f"  From   : {email['sender'][:100]}")
                 print(f"  Subject: {email['subject'][:100]}")
-                print(f"  Body   :")
+                print("  Body   :")
                 body_lines = email["body"][:_LLM_BODY_CHARS].split("\n")
                 for line in body_lines[:30]:
                     print(f"    {line[:120]}")
                 if len(body_lines) > 30:
-                    print(f"    [...truncated...]")
+                    print("    [...truncated...]")
                 print(f"  {'─' * 60}")
                 if read_index >= len(sample_emails):
                     print("  (No more emails in sample.)")
@@ -637,6 +702,7 @@ def _interactive_domain_prompt(
 
 # ── Subcommand: discover ──────────────────────────────────────────────────────
 
+
 def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, collection):
     mode = "(DRY RUN) " if args.dry_run else ("(AUTO) " if args.auto else "(INTERACTIVE) ")
     print(f"\n{'=' * 60}")
@@ -651,7 +717,8 @@ def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, coll
     stats = _scroll_sender_stats(qdrant, collection)
 
     whitelisted_skipped = [
-        domain for domain, entry in stats.items()
+        domain
+        for domain, entry in stats.items()
         if entry["unique_emails"] >= args.min_emails
         and domain.lower() not in existing_domains
         and domain.lower() in whitelist
@@ -664,7 +731,7 @@ def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, coll
         and domain.lower() not in whitelist
     ]
 
-    print(f"  Known/covered domains skipped.")
+    print("  Known/covered domains skipped.")
     if whitelisted_skipped:
         sample = ", ".join(whitelisted_skipped[:5])
         suffix = "..." if len(whitelisted_skipped) > 5 else ""
@@ -688,62 +755,76 @@ def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, coll
 
         if is_general:
             result = _llm_classify_general_domain(
-                llm, model, domain, entry["sample_senders"], entry["sample_subjects"], unique)
+                llm, model, domain, entry["sample_senders"], entry["sample_subjects"], unique
+            )
         else:
             result = _llm_classify_dedicated(llm, model, domain, entry["sample_subjects"], unique)
 
         if result is None:
-            print(f"    -> LLM error — skipping")
+            print("    -> LLM error — skipping")
             continue
 
         if args.auto:
             # ── Auto mode: apply LLM result directly (original behaviour) ──
             if is_general:
                 if not result.get("is_noise"):
-                    print(f"    -> no reliable narrow rule — queued for deep-clean")
+                    print("    -> no reliable narrow rule — queued for deep-clean")
                     ambiguous.append((domain, entry))
                     continue
-                patterns_s   = result.get("sender_patterns") or []
+                patterns_s = result.get("sender_patterns") or []
                 patterns_sub = result.get("subject_patterns") or []
                 if not patterns_s and not patterns_sub:
-                    print(f"    -> LLM returned no patterns — queued for deep-clean")
+                    print("    -> LLM returned no patterns — queued for deep-clean")
                     ambiguous.append((domain, entry))
                     continue
                 print(f"    -> NOISE (narrow patterns): {result.get('description')}")
-                new_rules.append({
-                    "domain": domain,
-                    "description": result["description"],
-                    "sender_patterns":  patterns_s,
-                    "subject_patterns": patterns_sub,
-                })
+                new_rules.append(
+                    {
+                        "domain": domain,
+                        "description": result["description"],
+                        "sender_patterns": patterns_s,
+                        "subject_patterns": patterns_sub,
+                    }
+                )
             else:
                 if not result.get("is_noise"):
-                    print(f"    -> clean")
+                    print("    -> clean")
                     continue
                 print(f"    -> NOISE: {result.get('description')}")
-                new_rules.append({
-                    "domain": domain,
-                    "description": result["description"],
-                    "sender_domains": [domain],
-                })
+                new_rules.append(
+                    {
+                        "domain": domain,
+                        "description": result["description"],
+                        "sender_domains": [domain],
+                    }
+                )
         else:
             # ── Interactive mode ────────────────────────────────────────────
             decision = _interactive_domain_prompt(
-                domain, entry, result, is_general,
-                qdrant, collection, llm, model, args.inspect_count,
+                domain,
+                entry,
+                result,
+                is_general,
+                qdrant,
+                collection,
+                llm,
+                model,
+                args.inspect_count,
             )
             if decision == "rule":
                 rule = _result_to_rule(domain, result, is_general)
                 if rule:
                     new_rules.append(rule)
-                    print(f"    -> Rule queued.")
+                    print("    -> Rule queued.")
                 else:
                     print(f"    -> No pattern available for general-purpose domain '{domain}'.")
-                    print(f"       Use 'deep-clean --domain {domain}' to classify individual emails.")
+                    print(
+                        f"       Use 'deep-clean --domain {domain}' to classify individual emails."
+                    )
             elif decision == "whitelist":
-                print(f"    -> Whitelisted.")
+                print("    -> Whitelisted.")
             else:
-                print(f"    -> Skipped.")
+                print("    -> Skipped.")
 
     print(f"\n{'=' * 60}")
     print(f"  New rules found      : {len(new_rules)}")
@@ -769,11 +850,20 @@ def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, coll
             f"Run deep-clean (per-email LLM classification) on {len(ambiguous)} ambiguous domain(s)?"
         ):
             ambiguous_domains = {domain for domain, _ in ambiguous}
-            _deep_clean_domains(ambiguous_domains, qdrant, llm, model,
-                                azure_conn_str, azure_container, collection, dry_run=False)
+            _deep_clean_domains(
+                ambiguous_domains,
+                qdrant,
+                llm,
+                model,
+                azure_conn_str,
+                azure_container,
+                collection,
+                dry_run=False,
+            )
 
 
 # ── Subcommand: purge ─────────────────────────────────────────────────────────
+
 
 def cmd_purge(args, qdrant, azure_conn_str, azure_container, collection):
     from src.data.noise_filter import NoiseFilter
@@ -799,13 +889,14 @@ def cmd_purge(args, qdrant, azure_conn_str, azure_container, collection):
         if not matched:
             continue
         source_id = payload.get("source_id", "")
-        matches[category].append({"point_id": point_id, "source_id": source_id,
-                                   "subject": payload.get("subject", "")})
+        matches[category].append(
+            {"point_id": point_id, "source_id": source_id, "subject": payload.get("subject", "")}
+        )
         if source_id:
             seen[category].add(source_id)
 
     total_vectors = sum(len(v) for v in matches.values())
-    total_emails  = sum(len(s) for s in seen.values())
+    total_emails = sum(len(s) for s in seen.values())
     print(f"  Vectors scanned : {total_points}")
     print(f"  Noise vectors   : {total_vectors}")
     print(f"  Unique emails   : {total_emails}")
@@ -838,12 +929,15 @@ def cmd_purge(args, qdrant, azure_conn_str, azure_container, collection):
     else:
         print("  Skipped Qdrant deletion.")
 
-    all_blob_paths = list({_blob_path(h["source_id"])
-                           for hits in matches.values() for h in hits if h["source_id"]})
+    all_blob_paths = list(
+        {_blob_path(h["source_id"]) for hits in matches.values() for h in hits if h["source_id"]}
+    )
     if not azure_conn_str:
         print("\nAZURE_STORAGE_CONNECTION_STRING not set — skipping blob deletion.")
         return
-    if _confirm(f"Also delete {len(all_blob_paths)} .eml files from Azure Blob '{azure_container}'?"):
+    if _confirm(
+        f"Also delete {len(all_blob_paths)} .eml files from Azure Blob '{azure_container}'?"
+    ):
         _delete_blobs(azure_conn_str, azure_container, all_blob_paths)
     else:
         print("  Skipped Azure Blob deletion.")
@@ -851,9 +945,17 @@ def cmd_purge(args, qdrant, azure_conn_str, azure_container, collection):
 
 # ── Subcommand: deep-clean ────────────────────────────────────────────────────
 
-def _deep_clean_domains(target_domains: set, qdrant, llm, model,
-                        azure_conn_str: str, azure_container: str,
-                        collection: str, dry_run: bool) -> None:
+
+def _deep_clean_domains(
+    target_domains: set,
+    qdrant,
+    llm,
+    model,
+    azure_conn_str: str,
+    azure_container: str,
+    collection: str,
+    dry_run: bool,
+) -> None:
     """Core deep-clean logic shared by the deep-clean subcommand and discover --auto --deep-clean."""
     print(f"\nScrolling '{collection}' for emails from: {sorted(target_domains)}...")
     domain_emails = _scroll_domain_emails(qdrant, collection, target_domains)
@@ -874,9 +976,11 @@ def _deep_clean_domains(target_domains: set, qdrant, llm, model,
 
         print(f"  Classifying in batches of {_DEEP_CLEAN_BATCH}...")
         for start in range(0, len(email_list), _DEEP_CLEAN_BATCH):
-            batch_items = email_list[start: start + _DEEP_CLEAN_BATCH]
-            batch_data = [{"sender": e["sender"], "subject": e["subject"], "body": e["body"]}
-                          for _, e in batch_items]
+            batch_items = email_list[start : start + _DEEP_CLEAN_BATCH]
+            batch_data = [
+                {"sender": e["sender"], "subject": e["subject"], "body": e["body"]}
+                for _, e in batch_items
+            ]
             results = _llm_classify_email_batch(llm, model, domain, batch_data)
             if results is None:
                 print(f"  Warning: unexpected LLM response at batch {start} — skipping batch.")
@@ -884,7 +988,9 @@ def _deep_clean_domains(target_domains: set, qdrant, llm, model,
             for (sid, entry), is_noise in zip(batch_items, results):
                 if is_noise:
                     noise_source_ids.append(sid)
-                    noise_emails_meta.append({"sender": entry["sender"], "subject": entry["subject"]})
+                    noise_emails_meta.append(
+                        {"sender": entry["sender"], "subject": entry["subject"]}
+                    )
             classified += len(batch_items)
             print(f"  Classified {classified}/{len(email_list)}...", end="\r")
 
@@ -897,7 +1003,7 @@ def _deep_clean_domains(target_domains: set, qdrant, llm, model,
             print("  No noise found — skipping.")
             continue
 
-        print(f"\n  Sample noise emails:")
+        print("\n  Sample noise emails:")
         for meta in noise_emails_meta[:5]:
             print(f"    [{meta['sender'][:50]}]  {meta['subject'][:60]}")
 
@@ -912,12 +1018,16 @@ def _deep_clean_domains(target_domains: set, qdrant, llm, model,
                 if rule.get("subject_patterns"):
                     print(f"    subject_patterns: {rule['subject_patterns']}")
                 if not dry_run and _confirm("Add this rule to noise_rules.yaml?"):
-                    written = _merge_rules_to_yaml([{
-                        "domain": domain,
-                        "description": rule["description"],
-                        "sender_patterns":  rule.get("sender_patterns") or [],
-                        "subject_patterns": rule.get("subject_patterns") or [],
-                    }])
+                    written = _merge_rules_to_yaml(
+                        [
+                            {
+                                "domain": domain,
+                                "description": rule["description"],
+                                "sender_patterns": rule.get("sender_patterns") or [],
+                                "subject_patterns": rule.get("subject_patterns") or [],
+                            }
+                        ]
+                    )
                     if written:
                         print("  Rule merged. Review via git diff and commit to keep it.")
             else:
@@ -964,8 +1074,16 @@ def cmd_deep_clean(args, qdrant, llm, model, azure_conn_str, azure_container, co
             return
         print(f"\nAuto-detected domains: {sorted(target_domains)}")
 
-    _deep_clean_domains(target_domains, qdrant, llm, model,
-                        azure_conn_str, azure_container, collection, dry_run=args.dry_run)
+    _deep_clean_domains(
+        target_domains,
+        qdrant,
+        llm,
+        model,
+        azure_conn_str,
+        azure_container,
+        collection,
+        dry_run=args.dry_run,
+    )
 
     print(f"\n{'=' * 60}")
     print("  Deep clean complete.")
@@ -973,6 +1091,7 @@ def cmd_deep_clean(args, qdrant, llm, model, azure_conn_str, azure_container, co
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -983,36 +1102,57 @@ def main():
 
     # discover
     p_disc = sub.add_parser("discover", help="Find new noise rules from the indexed collection")
-    p_disc.add_argument("--min-emails", type=int, default=_DISCOVER_MIN_EMAILS,
-                        help=f"Minimum unique emails per domain to consider (default: {_DISCOVER_MIN_EMAILS})")
-    p_disc.add_argument("--dry-run", action="store_true",
-                        help="Print suggestions without writing to noise_rules.yaml")
-    p_disc.add_argument("--auto", action="store_true",
-                        help="Write rules automatically without interactive prompts")
-    p_disc.add_argument("--deep-clean", action="store_true",
-                        help="(--auto only) Automatically deep-clean ambiguous domains after discovery")
-    p_disc.add_argument("--inspect-count", type=int, default=_DEFAULT_INSPECT_COUNT,
-                        help=f"Emails to fetch per domain for [2] deep-inspect and [3] read (default: {_DEFAULT_INSPECT_COUNT})")
+    p_disc.add_argument(
+        "--min-emails",
+        type=int,
+        default=_DISCOVER_MIN_EMAILS,
+        help=f"Minimum unique emails per domain to consider (default: {_DISCOVER_MIN_EMAILS})",
+    )
+    p_disc.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print suggestions without writing to noise_rules.yaml",
+    )
+    p_disc.add_argument(
+        "--auto", action="store_true", help="Write rules automatically without interactive prompts"
+    )
+    p_disc.add_argument(
+        "--deep-clean",
+        action="store_true",
+        help="(--auto only) Automatically deep-clean ambiguous domains after discovery",
+    )
+    p_disc.add_argument(
+        "--inspect-count",
+        type=int,
+        default=_DEFAULT_INSPECT_COUNT,
+        help=f"Emails to fetch per domain for [2] deep-inspect and [3] read (default: {_DEFAULT_INSPECT_COUNT})",
+    )
 
     # purge
-    p_purge = sub.add_parser("purge", help="Delete noise matched by noise_rules.yaml from Qdrant and Azure Blob")
+    p_purge = sub.add_parser(
+        "purge", help="Delete noise matched by noise_rules.yaml from Qdrant and Azure Blob"
+    )
     p_purge.add_argument("--dry-run", action="store_true", help="Show matches without deleting")
 
     # deep-clean
     p_dc = sub.add_parser("deep-clean", help="Per-email LLM classification for ambiguous domains")
-    p_dc.add_argument("--domain", metavar="DOMAIN",
-                      help="Target a specific domain (default: auto-detect all uncovered general-purpose domains)")
+    p_dc.add_argument(
+        "--domain",
+        metavar="DOMAIN",
+        help="Target a specific domain (default: auto-detect all uncovered general-purpose domains)",
+    )
     p_dc.add_argument("--dry-run", action="store_true", help="Classify but do not delete")
 
     args = parser.parse_args()
 
-    qdrant_url      = os.getenv("QDRANT_URL", "http://host.docker.internal:6333").strip()
-    qdrant_api_key  = os.getenv("QDRANT_API_KEY", "").strip() or None
-    collection      = os.getenv("QDRANT_COLLECTION_NAME", "email-rag").strip()
-    azure_conn_str  = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "").strip()
+    qdrant_url = os.getenv("QDRANT_URL", "http://host.docker.internal:6333").strip()
+    qdrant_api_key = os.getenv("QDRANT_API_KEY", "").strip() or None
+    collection = os.getenv("QDRANT_COLLECTION_NAME", "email-rag").strip()
+    azure_conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "").strip()
     azure_container = os.getenv("AZURE_BLOB_CONTAINER", "eml-archive").strip()
 
     from qdrant_client import QdrantClient
+
     qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
 
     if args.command == "purge":
@@ -1025,7 +1165,8 @@ def main():
         print("Error: OPENAI_API_KEY not set.")
         sys.exit(1)
     from openai import OpenAI
-    llm   = OpenAI(api_key=api_key)
+
+    llm = OpenAI(api_key=api_key)
     model = os.getenv("RAG_LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
     if args.command == "discover":

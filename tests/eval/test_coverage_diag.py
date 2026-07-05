@@ -1,9 +1,16 @@
 """Tests for the coverage-miss diagnostic logic (issue #12)."""
+
 import unittest
 
 from src.eval.coverage_diag import (
-    best_gold_rank, classify_miss, distinct_thread_rank, is_terse, lexical_overlap,
-    oracle_root_cause, is_bad_query)
+    best_gold_rank,
+    classify_miss,
+    distinct_thread_rank,
+    is_bad_query,
+    is_terse,
+    lexical_overlap,
+    oracle_root_cause,
+)
 
 
 def _h(tid, mid):
@@ -13,23 +20,21 @@ def _h(tid, mid):
 class TestBestGoldRank(unittest.TestCase):
     def test_gold_email_at_rank_zero(self):
         hits = [_h("T1", "m1"), _h("T2", "m2")]
-        self.assertEqual(
-            best_gold_rank(hits, "T1", "m1"), {"thread_rank": 0, "email_rank": 0})
+        self.assertEqual(best_gold_rank(hits, "T1", "m1"), {"thread_rank": 0, "email_rank": 0})
 
     def test_gold_thread_sibling_before_gold_email(self):
         # a different email of the gold thread ranks above the gold email itself
         hits = [_h("T2", "m2"), _h("T1", "sibling"), _h("T1", "m1")]
-        self.assertEqual(
-            best_gold_rank(hits, "T1", "m1"), {"thread_rank": 1, "email_rank": 2})
+        self.assertEqual(best_gold_rank(hits, "T1", "m1"), {"thread_rank": 1, "email_rank": 2})
 
     def test_gold_absent(self):
         hits = [_h("T2", "m2"), _h("T3", "m3")]
         self.assertEqual(
-            best_gold_rank(hits, "T1", "m1"), {"thread_rank": None, "email_rank": None})
+            best_gold_rank(hits, "T1", "m1"), {"thread_rank": None, "email_rank": None}
+        )
 
     def test_empty_hits(self):
-        self.assertEqual(
-            best_gold_rank([], "T1", "m1"), {"thread_rank": None, "email_rank": None})
+        self.assertEqual(best_gold_rank([], "T1", "m1"), {"thread_rank": None, "email_rank": None})
 
 
 class TestDistinctThreadRank(unittest.TestCase):
@@ -84,8 +89,12 @@ class TestClassifyMiss(unittest.TestCase):
     TOP_HITS, N, K = 10, 3, 20
 
     def _c(self, **ranks):
-        base = {"hyb_thread_rank": None, "hyb_distinct_rank": None,
-                "dense_thread_rank": None, "sparse_thread_rank": None}
+        base = {
+            "hyb_thread_rank": None,
+            "hyb_distinct_rank": None,
+            "dense_thread_rank": None,
+            "sparse_thread_rank": None,
+        }
         base.update(ranks)
         return classify_miss(base, self.TOP_HITS, self.N, self.K)
 
@@ -104,8 +113,7 @@ class TestClassifyMiss(unittest.TestCase):
         self.assertEqual(self._c(sparse_thread_rank=10), "fusion")
 
     def test_hard_when_deep_in_both(self):
-        self.assertEqual(
-            self._c(dense_thread_rank=150, sparse_thread_rank=180), "hard")
+        self.assertEqual(self._c(dense_thread_rank=150, sparse_thread_rank=180), "hard")
 
     def test_hard_when_absent_everywhere(self):
         self.assertEqual(self._c(), "hard")
