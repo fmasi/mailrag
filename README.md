@@ -262,7 +262,7 @@ an independently named status so it can be wired into branch protection:
 |------|------------------|-------------|
 | `pytest` | Full test suite + a coverage floor of **85%** (current ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
 | `ruff (lint + format)` | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
-| `mypy (type check)` | Type-checks `src/` (lenient: `ignore_missing_imports`, per-module opt-outs for legacy modules) | `poetry run mypy src/` |
+| `mypy (type check)` | Type-checks `src/` (lenient: `ignore_missing_imports`; CI runs deps-free so third-party imports are `Any` and results are deterministic; per-module opt-outs for legacy modules) | `poetry run mypy src/` |
 | `pip-audit (dependency CVEs)` | Known CVEs in the locked deps (OSV) | `poetry run pip-audit --vulnerability-service osv` |
 | `dependency-review` | Blocks PRs that add deps with `moderate`+ advisories | (PR-only; runs on GitHub) |
 

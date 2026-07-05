@@ -85,7 +85,10 @@ def run_wizard(
     ``limit`` caps the corpus the scan/summarize/index steps touch — pass a small
     number for a fast end-to-end test instead of a full (multi-hour) rebuild."""
     if questionary is None:
-        import questionary as questionary  # noqa: PLC0414
+        # DI fallback: the `questionary` parameter above (Any) is shadowed by the
+        # real import when no test double is injected — intentional, so silence
+        # mypy's no-redef on this deliberate reassignment.
+        import questionary as questionary  # type: ignore[no-redef]  # noqa: PLC0414
     q = questionary
     reg = registry or load_registry()
     if console is None:

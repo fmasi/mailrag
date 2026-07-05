@@ -54,15 +54,16 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install Poetry
-        run: python -m pip install --upgrade pip poetry
-
-      # Full deps so mypy resolves real (not just stubbed) library signatures.
-      - name: Install dependencies
-        run: poetry install --with dev --all-extras --no-interaction --no-root
+      # Run WITHOUT the heavy ML/LLM stack installed: with ignore_missing_imports
+      # every third-party import resolves to Any, so the gate only checks our own
+      # source and is deterministic (independent of which library stub versions a
+      # given resolve happens to pull). Also keeps the job fast. Devs with the
+      # full env can still run `poetry run mypy src/` locally.
+      - name: Install mypy
+        run: python -m pip install --upgrade pip "mypy==2.1.0"
 
       - name: Run mypy
-        run: poetry run mypy src/
+        run: mypy src/
 
   pip-audit:
     name: pip-audit (dependency CVEs)
