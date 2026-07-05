@@ -77,6 +77,13 @@ answers example questions by retrieving and assembling whole threads. This is th
 [§13 stack](docs/EXPERIMENTS.md#13-doc-side-thread-aware-summaries--the-evolution-ladder-1113-2026-06-01);
 a small amount of LLM usage goes to the Pass-2 summaries and the answers.
 
+Once a collection is indexed, you can query it from the CLI (`mailrag ask "..."`) or
+expose it to any agent over the **[Model Context Protocol](docs/MCP_SERVER.md)**:
+
+```bash
+mailrag mcp                       # stdio MCP server: search_email + answer_question tools
+```
+
 ## Architecture
 
 ```
@@ -248,6 +255,7 @@ Programme"), at the cost of extra queries per search.
 | `src/indexing/` | Index creation/management |
 | `src/storage/` | Persistence (local / Pinecone / Qdrant) |
 | `src/query/` | Retrieval + RAG query engine |
+| `src/mcp_server/` | MCP (stdio) server exposing `search_email` / `answer_question` |
 | `src/llm/` | Optional LLM "Pass-2" summarization + cache |
 | `scripts/` | Build / index / maintenance utilities |
 | `tests/` | Test suite (pytest) |
@@ -268,6 +276,7 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
    - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
    - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
    - [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware *retrieval* (small→big expansion).
+   - [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — the stdio MCP server: the `search_email` / `answer_question` tools, how to launch it, config, and registering it with an MCP client.
    - [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — the measured findings behind the case study: cleanup economics, regex-vs-LLM, the labeled-eval ladder (§9–§13), and the corpus-portability result (§14). Start with its [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first) for the `C`/`C′` labels and the two senses of "thread-aware".
 
 Reference: [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent).
@@ -277,9 +286,10 @@ Reference: [`config/community_blocklist.template.yaml`](config/community_blockli
 mailrag is built to be one node in a private context stack — so the next steps make it
 easier for agents to reach, and keep its memory current:
 
-- **MCP server** ([#32](https://github.com/fmasi/mailrag/issues/32)) — expose `search`/`ask`
-  and attachment fetch over the Model Context Protocol, so any agent can query your mail
-  without touching the internals.
+- **MCP server** ([#32](https://github.com/fmasi/mailrag/issues/32)) — the query path is
+  live: a stdio server exposing `search_email` / `answer_question` over the Model Context
+  Protocol, so any agent can query your mail without touching the internals (see
+  [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md)). Attachment-fetch tools are the next step.
 - **Live ingestion** — move from one-time imports to incremental ingest of incoming mail, so
   the index stays current: a *living* context source, not a static snapshot. (The
   `EmailLoader` interface is already source-agnostic to make this clean.)
