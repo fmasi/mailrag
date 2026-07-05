@@ -37,4 +37,7 @@ jobs:
         run: poetry install --with dev --all-extras --no-interaction --no-root
 
       - name: Run full test suite
-        run: poetry run python -m pytest tests/ --cov=src --cov-report=term-missing -q
+        # --cov-fail-under=85: current coverage is ~88%; the floor sits a few
+        # points below so ordinary churn doesn't trip the gate while a real
+        # regression still does. Raise it as coverage climbs.
+        run: poetry run python -m pytest tests/ --cov=src --cov-report=term-missing --cov-fail-under=85 -q
