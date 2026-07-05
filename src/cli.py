@@ -254,7 +254,13 @@ def _cmd_run(args):
 
 
 def _cmd_wizard(args):
-    return persona_wizard.run_wizard(args.profile, model=args.model, limit=args.limit)
+    if args.classic:
+        return persona_wizard.run_wizard(args.profile, model=args.model, limit=args.limit)
+    # Default: the full-screen Textual app (src/tui). Imported lazily so the
+    # classic path and the rest of the CLI never pay the textual import.
+    from src.tui.app import run_tui
+
+    return run_tui(args.profile, model=args.model, limit=args.limit)
 
 
 def _cmd_onboard(args):
@@ -432,6 +438,11 @@ def _configure_wizard(p):
         type=int,
         default=None,
         help="cap the corpus for scan/summarize/index — fast end-to-end test",
+    )
+    p.add_argument(
+        "--classic",
+        action="store_true",
+        help="use the legacy line-by-line prompt flow instead of the full-screen TUI",
     )
 
 
@@ -635,7 +646,7 @@ def build_parser():
         "wizard",
         _configure_wizard,
         _cmd_wizard,
-        help="interactive guided pipeline (pick a persona, walk the steps)",
+        help="full-screen guided pipeline (persona → scope → review → live run)",
     )
 
     at = sub.add_parser("attachments", help="ingest / list / fetch email attachments")

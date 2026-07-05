@@ -52,15 +52,28 @@ class TestRunVerb(unittest.TestCase):
 
 
 class TestWizardVerb(unittest.TestCase):
-    def test_wizard_routes_to_run_wizard(self):
-        with mock.patch("src.cli.persona_wizard.run_wizard", return_value=0) as rw:
+    def test_wizard_defaults_to_the_tui(self):
+        with mock.patch("src.tui.app.run_tui", return_value=0) as rt:
             rc = cli.main(["wizard", "--profile", "p.json", "--model", "m"])
+        self.assertEqual(rc, 0)
+        rt.assert_called_once_with("p.json", model="m", limit=None)
+
+    def test_wizard_classic_routes_to_run_wizard(self):
+        with mock.patch("src.cli.persona_wizard.run_wizard", return_value=0) as rw:
+            rc = cli.main(["wizard", "--profile", "p.json", "--model", "m", "--classic"])
         self.assertEqual(rc, 0)
         rw.assert_called_once_with("p.json", model="m", limit=None)
 
     def test_wizard_passes_limit(self):
-        with mock.patch("src.cli.persona_wizard.run_wizard", return_value=0) as rw:
+        with mock.patch("src.tui.app.run_tui", return_value=0) as rt:
             cli.main(["wizard", "--profile", "p.json", "--model", "m", "--limit", "20"])
+        self.assertEqual(rt.call_args.kwargs["limit"], 20)
+
+    def test_wizard_classic_passes_limit(self):
+        with mock.patch("src.cli.persona_wizard.run_wizard", return_value=0) as rw:
+            cli.main(
+                ["wizard", "--profile", "p.json", "--model", "m", "--limit", "20", "--classic"]
+            )
         self.assertEqual(rw.call_args.kwargs["limit"], 20)
 
 
