@@ -459,6 +459,9 @@ class ScopeScreen(WizardScreen):
         self._toggle_current()
 
     def action_continue(self) -> None:
+        if not (self._scope_nodes or self._has_root):
+            self.notify("Empty mailbox — press escape to go back.", severity="warning")
+            return
         rules = self._rules()
         if not rules:
             self.notify("Select at least one folder first.", severity="warning")
@@ -519,6 +522,9 @@ class ReviewScreen(WizardScreen):
                 yield Static("\n".join(f"[dim]{k:>12}[/]  {v}" for k, v in facts))
                 for rule in (st.scope_rules or [])[:8]:
                     yield Static(f"[dim]{'':>12}  · {escape(_describe_rule(rule))}[/]")
+                extra = len(st.scope_rules or []) - 8
+                if extra > 0:
+                    yield Static(f"[dim]{'':>12}  · … and {extra} more[/]")
             with Vertical(id="review-plan-panel"):
                 yield Static("[b]Planned steps[/]", classes="panel-title")
                 for i, step in enumerate(self._planned, start=1):
