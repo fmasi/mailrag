@@ -11,6 +11,7 @@ Run on the HOST (rag env):
     --queries eval/out/queries.jsonl --distractor-threads 900 --max-emails 2000 \
     --out eval/out/spike_slice.txt | tee eval/out/spike_slice.log
 """
+
 import argparse
 import json
 import os
@@ -21,9 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 
 def run(queries_path, selection_path, blacklist, distractor_threads, max_emails, seed, out_path):
-    from src.ingest.local_source import resolve_index_files
     from src.data.loaders.mail_archive_x import MailArchiveXLoader
     from src.data.threading import compute_thread_id
+    from src.ingest.local_source import resolve_index_files
 
     gold_tids = {json.loads(l)["thread_id"] for l in open(queries_path) if l.strip()}
     print(f"gold threads: {len(gold_tids)}", flush=True)
@@ -37,9 +38,7 @@ def run(queries_path, selection_path, blacklist, distractor_threads, max_emails,
     for e in emails:
         # NormalizedEmail has no thread_id field; derive it from the RFC 5322
         # headers exactly as NormalizedEmail.to_document() does.
-        tid = compute_thread_id(
-            e.message_id or "", e.in_reply_to or "", e.references or ""
-        )
+        tid = compute_thread_id(e.message_id or "", e.in_reply_to or "", e.references or "")
         if not tid:
             continue
         by_thread.setdefault(tid, []).append(e.source_id)
@@ -57,9 +56,11 @@ def run(queries_path, selection_path, blacklist, distractor_threads, max_emails,
         paths.extend(by_thread[t])
     gold_email_count = len(paths)
     if gold_email_count > max_emails:
-        print(f"WARNING: gold threads alone = {gold_email_count} emails > "
-              f"--max-emails={max_emails}; keeping ALL gold emails (slice exceeds cap).",
-              flush=True)
+        print(
+            f"WARNING: gold threads alone = {gold_email_count} emails > "
+            f"--max-emails={max_emails}; keeping ALL gold emails (slice exceeds cap).",
+            flush=True,
+        )
     for t in distractor_pool[:distractor_threads]:
         if len(paths) >= max_emails:
             break
@@ -67,7 +68,7 @@ def run(queries_path, selection_path, blacklist, distractor_threads, max_emails,
         paths.extend(by_thread[t])
 
     # Cap only the distractor tail; gold emails are never dropped.
-    paths = paths[:max(max_emails, gold_email_count)]
+    paths = paths[: max(max_emails, gold_email_count)]
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as fh:
         fh.write("\n".join(paths) + "\n")
@@ -85,8 +86,15 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="eval/out/spike_slice.txt")
     args = ap.parse_args()
-    run(args.queries, args.selection, args.blacklist, args.distractor_threads,
-        args.max_emails, args.seed, args.out)
+    run(
+        args.queries,
+        args.selection,
+        args.blacklist,
+        args.distractor_threads,
+        args.max_emails,
+        args.seed,
+        args.out,
+    )
 
 
 if __name__ == "__main__":

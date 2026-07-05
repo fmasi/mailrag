@@ -13,6 +13,7 @@ expensive sweep output is never recomputed.
 
 Safe to re-run: rows that already have both identifiers are skipped.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,6 +30,7 @@ from src.llm.cache import Pass2Cache
 def _load_email_fields(path):
     """Parse one .eml with the production loader; return its NormalizedEmail."""
     from src.data.loaders.mail_archive_x import MailArchiveXLoader
+
     with contextlib.redirect_stdout(io.StringIO()):
         emails = list(MailArchiveXLoader(eml_files=[path]).load())
     if not emails:
@@ -57,8 +59,11 @@ def backfill(cache_path: str, selection_path: str) -> dict:
                 continue
             e = _load_email_fields(path)
             mid, chash = email_identity(
-                sender=e.sender or "", subject=e.subject or "", date=e.date,
-                body=e.body or "", message_id=e.message_id or "",
+                sender=e.sender or "",
+                subject=e.subject or "",
+                date=e.date,
+                body=e.body or "",
+                message_id=e.message_id or "",
             )
             cache.set_identity(sha, mid, chash)
             counts["updated"] += 1

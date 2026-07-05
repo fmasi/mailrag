@@ -13,6 +13,7 @@ Run on the HOST (rag env; RAG_LLM_API_BASE + .env key; pick the strong judge mod
     python scripts/eval/judge.py --pool eval/out/pool.jsonl --out eval/out/grades.json \
     | tee eval/out/judge.log
 """
+
 import argparse
 import json
 import os
@@ -21,16 +22,18 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
+    from dotenv import load_dotenv
+
+    load_dotenv()
 except ImportError:
     pass
 
-from src.llm.client import make_client, default_model, chat
 from src.eval.judge_parse import build_judge_prompt, parse_grade
+from src.llm.client import chat, default_model, make_client
 
 
 def _email_text(hit):
-    return f"Subject: {hit.get('subject','')}\n\n{hit.get('body','')}".strip()
+    return f"Subject: {hit.get('subject', '')}\n\n{hit.get('body', '')}".strip()
 
 
 def _load_pool(path):
@@ -44,9 +47,16 @@ def dump_calib(pool_rows, n, out_path):
     with open(out_path, "w") as fh:
         for row in pool_rows[:n]:
             for hit in row["pool"]:
-                fh.write(json.dumps({"query": row["query"],
-                                     "message_id": hit["message_id"],
-                                     "email_text": _email_text(hit)}) + "\n")
+                fh.write(
+                    json.dumps(
+                        {
+                            "query": row["query"],
+                            "message_id": hit["message_id"],
+                            "email_text": _email_text(hit),
+                        }
+                    )
+                    + "\n"
+                )
                 written += 1
     print(f"wrote {written} calib pairs -> {out_path}", flush=True)
 
@@ -80,8 +90,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool", default="eval/out/pool.jsonl")
     ap.add_argument("--out", default="eval/out/grades.json")
-    ap.add_argument("--dump-calib", type=int, default=0,
-                    help="if >0, dump first-N-queries' pairs for the reference judge instead of grading")
+    ap.add_argument(
+        "--dump-calib",
+        type=int,
+        default=0,
+        help="if >0, dump first-N-queries' pairs for the reference judge instead of grading",
+    )
     ap.add_argument("--calib-out", default="eval/out/calib_pairs.jsonl")
     args = ap.parse_args()
     pool_rows = _load_pool(args.pool)

@@ -10,6 +10,7 @@ These are regex heuristics, not ground truth — they focus the human's attentio
 they do not auto-decide. Records are flat dicts:
 ``{"sender", "subject", "is_noise", "confidence", "summary", "reason"}``.
 """
+
 from __future__ import annotations
 
 import re
@@ -22,17 +23,19 @@ Record = Dict[str, Any]
 REC = re.compile(
     r"receipt|invoice|order|booking|reservation|statement|payment|delivery|shippe|"
     r"itinerary|ticket|boarding|refund|transaction|account|policy|\btax\b|enrol|"
-    r"appointment|\bbill", re.I)
+    r"appointment|\bbill",
+    re.I,
+)
 # Promo-ish vocabulary: marketing, newsletters, sales, digests.
 PROMO = re.compile(
     r"market|promot|newsletter|\bsale\b|discount|offer|advertis|\bdeal\b|digest|"
-    r"recommend", re.I)
+    r"recommend",
+    re.I,
+)
 
 
 def _blob(rec: Record) -> str:
-    return (f"{rec.get('subject') or ''} "
-            f"{rec.get('reason') or ''} "
-            f"{rec.get('summary') or ''}")
+    return f"{rec.get('subject') or ''} {rec.get('reason') or ''} {rec.get('summary') or ''}"
 
 
 def noise_rate(results: List[Record]) -> float:
@@ -53,9 +56,13 @@ def false_keep(results: List[Record]) -> List[Record]:
     Excludes anything whose subject/summary also reads record-ish (a "sale
     receipt" is a record, not a missed promo).
     """
-    return [r for r in results
-            if not r.get("is_noise") and PROMO.search(_blob(r))
-            and not REC.search(f"{r.get('subject', '')} {r.get('summary', '')}")]
+    return [
+        r
+        for r in results
+        if not r.get("is_noise")
+        and PROMO.search(_blob(r))
+        and not REC.search(f"{r.get('subject', '')} {r.get('summary', '')}")
+    ]
 
 
 @dataclass

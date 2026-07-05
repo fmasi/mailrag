@@ -1,11 +1,12 @@
 import os
 import unittest
 from unittest import mock
-from src.attachments.extract.result import ExtractResult, Status, ok
-from src.attachments.extract.ocr.base import OcrResult, ChainedOcr
+
+from src.attachments.extract.ocr.base import ChainedOcr, OcrResult
+from src.attachments.extract.ocr.registry import default_extractor_name, resolve
 from src.attachments.extract.ocr.tesseract import TesseractOcr
 from src.attachments.extract.registry import Extractor
-from src.attachments.extract.ocr.registry import resolve, default_extractor_name
+from src.attachments.extract.result import ExtractResult, Status, ok
 
 
 class TestExtractResult(unittest.TestCase):
@@ -115,8 +116,9 @@ class TestExtractorFacade(unittest.TestCase):
         self.ex = Extractor(self.ocr)
 
     def test_dispatches_text(self):
-        self.assertEqual(self.ex.extract(b"hi there", "text/plain", "a.txt").status,
-                         Status.EXTRACTED)
+        self.assertEqual(
+            self.ex.extract(b"hi there", "text/plain", "a.txt").status, Status.EXTRACTED
+        )
 
     def test_image_uses_injected_ocr(self):
         r = self.ex.extract(b"\x89PNG", "image/png", "x.png")
@@ -131,6 +133,7 @@ class TestExtractorFacade(unittest.TestCase):
 class TestOcrResolve(unittest.TestCase):
     def test_tesseract_name(self):
         from src.attachments.extract.ocr.tesseract import TesseractOcr
+
         self.assertIsInstance(resolve("tesseract"), TesseractOcr)
 
     def test_cloud_is_optin_stub(self):
@@ -144,6 +147,7 @@ class TestOcrResolve(unittest.TestCase):
     def test_llm_resolves_to_chain(self):
         # LlmVision has landed: "llm" resolves to ChainedOcr([LlmVision, TesseractOcr]).
         from src.attachments.extract.ocr.base import ChainedOcr
+
         self.assertIsInstance(resolve("llm"), ChainedOcr)
 
 
@@ -151,14 +155,19 @@ class TestLlmVision(unittest.TestCase):
     @staticmethod
     def _png():
         import io
+
         from PIL import Image
-        b = io.BytesIO(); Image.new("RGB", (8, 8), "white").save(b, format="PNG")
+
+        b = io.BytesIO()
+        Image.new("RGB", (8, 8), "white").save(b, format="PNG")
         return b.getvalue()
 
     def _provider(self, vision_return="DESCRIPTION: a form\nTEXT:\ninvoice 42"):
         from src.attachments.extract.ocr.llm_vision import LlmVision
-        return LlmVision(client=mock.MagicMock(), model="gemma",
-                         chat_vision=lambda *a, **k: vision_return)
+
+        return LlmVision(
+            client=mock.MagicMock(), model="gemma", chat_vision=lambda *a, **k: vision_return
+        )
 
     def test_returns_description_and_transcription(self):
         out = self._provider().read(self._png(), "image/png", "x.png")
@@ -169,20 +178,26 @@ class TestLlmVision(unittest.TestCase):
 
     def test_unavailable_when_no_model(self):
         from src.attachments.extract.ocr.llm_vision import LlmVision
-        out = LlmVision(client=mock.MagicMock(), model="",
-                        chat_vision=lambda *a, **k: "x").read(self._png(), "image/png", "x.png")
+
+        out = LlmVision(client=mock.MagicMock(), model="", chat_vision=lambda *a, **k: "x").read(
+            self._png(), "image/png", "x.png"
+        )
         self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
 
     def test_connection_error_is_unavailable_falls_through(self):
         def boom(*a, **k):
             raise ConnectionError("LM Studio down")
+
         from src.attachments.extract.ocr.llm_vision import LlmVision
-        out = LlmVision(client=mock.MagicMock(), model="gemma",
-                        chat_vision=boom).read(self._png(), "image/png", "x.png")
+
+        out = LlmVision(client=mock.MagicMock(), model="gemma", chat_vision=boom).read(
+            self._png(), "image/png", "x.png"
+        )
         self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
 
     def _fake_p2i(self, pages_total):
         from PIL import Image
+
         fake = mock.MagicMock()
         fake.pdfinfo_from_bytes.return_value = {"Pages": pages_total}
         fake.convert_from_bytes.return_value = [Image.new("RGB", (4, 4), "white")]
@@ -190,24 +205,34 @@ class TestLlmVision(unittest.TestCase):
 
     def test_pdf_rendering_is_capped_and_truncation_logged(self):
         from src.attachments.extract.ocr.llm_vision import LlmVision
+
         fake_p2i = self._fake_p2i(12)
         log = mock.MagicMock()
-        p = LlmVision(client=mock.MagicMock(), model="gemma",
-                      chat_vision=lambda *a, **k: "DESCRIPTION: x\nTEXT:\nhi", log=log)
+        p = LlmVision(
+            client=mock.MagicMock(),
+            model="gemma",
+            chat_vision=lambda *a, **k: "DESCRIPTION: x\nTEXT:\nhi",
+            log=log,
+        )
         with mock.patch.dict("sys.modules", {"pdf2image": fake_p2i}):
             out = p.read(b"%PDF-1.4", "application/pdf", "scan.pdf")
         self.assertEqual(out.status, Status.EXTRACTED)
         _, kwargs = fake_p2i.convert_from_bytes.call_args
-        self.assertEqual(kwargs.get("last_page"), 10,
-                         "must render at most the cap, not the whole PDF")
+        self.assertEqual(
+            kwargs.get("last_page"), 10, "must render at most the cap, not the whole PDF"
+        )
         log.assert_called_once()
         self.assertIn("12", log.call_args[0][0])
 
     def test_default_log_emits_to_logging(self):
         from src.attachments.extract.ocr.llm_vision import LlmVision
+
         fake_p2i = self._fake_p2i(12)
-        p = LlmVision(client=mock.MagicMock(), model="gemma",
-                      chat_vision=lambda *a, **k: "DESCRIPTION: x\nTEXT:\nhi")
+        p = LlmVision(
+            client=mock.MagicMock(),
+            model="gemma",
+            chat_vision=lambda *a, **k: "DESCRIPTION: x\nTEXT:\nhi",
+        )
         with mock.patch.dict("sys.modules", {"pdf2image": fake_p2i}):
             with self.assertLogs("mailrag.attachments", level="WARNING"):
                 p.read(b"%PDF-1.4", "application/pdf", "scan.pdf")
@@ -226,6 +251,7 @@ class TestRenderPdfPages(unittest.TestCase):
         fake = self._fake_p2i(30)
         with mock.patch.dict("sys.modules", {"pdf2image": fake}):
             from src.attachments.extract.ocr.pages import render_pdf_pages
+
             render_pdf_pages(b"%PDF", log=mock.MagicMock())
         _, kwargs = fake.convert_from_bytes.call_args
         self.assertEqual(kwargs.get("last_page"), 10)
@@ -235,6 +261,7 @@ class TestRenderPdfPages(unittest.TestCase):
         log = mock.MagicMock()
         with mock.patch.dict("sys.modules", {"pdf2image": fake}):
             from src.attachments.extract.ocr.pages import render_pdf_pages
+
             render_pdf_pages(b"%PDF", log=log)
         log.assert_called_once()
         self.assertIn("30", log.call_args[0][0])
@@ -244,6 +271,7 @@ class TestRenderPdfPages(unittest.TestCase):
         log = mock.MagicMock()
         with mock.patch.dict("sys.modules", {"pdf2image": fake}):
             from src.attachments.extract.ocr.pages import render_pdf_pages
+
             render_pdf_pages(b"%PDF", log=log)
         log.assert_not_called()
 
@@ -252,6 +280,7 @@ class TestRenderPdfPages(unittest.TestCase):
         with mock.patch.dict(os.environ, {"RAG_ATTACH_MAX_PAGES": "2"}):
             with mock.patch.dict("sys.modules", {"pdf2image": fake}):
                 from src.attachments.extract.ocr.pages import render_pdf_pages
+
                 render_pdf_pages(b"%PDF", log=mock.MagicMock())
         _, kwargs = fake.convert_from_bytes.call_args
         self.assertEqual(kwargs.get("last_page"), 2)
@@ -262,6 +291,7 @@ class TestRenderPdfPages(unittest.TestCase):
         log = mock.MagicMock()
         with mock.patch.dict("sys.modules", {"pdf2image": fake}):
             from src.attachments.extract.ocr.pages import render_pdf_pages
+
             render_pdf_pages(b"%PDF", log=log)
         _, kwargs = fake.convert_from_bytes.call_args
         self.assertEqual(kwargs.get("last_page"), 10)
@@ -277,8 +307,9 @@ class TestTesseractPdfCap(unittest.TestCase):
         with mock.patch.dict("sys.modules", {"pdf2image": fake_p2i, "pytesseract": fake_pt}):
             TesseractOcr().read(b"%PDF-1.4", "application/pdf", "x.pdf")
         _, kwargs = fake_p2i.convert_from_bytes.call_args
-        self.assertEqual(kwargs.get("last_page"), 10,
-                         "tesseract must not OCR every page of an unbounded PDF")
+        self.assertEqual(
+            kwargs.get("last_page"), 10, "tesseract must not OCR every page of an unbounded PDF"
+        )
 
     def test_mixed_case_mime_routes_to_pdf_path(self):
         fake_p2i = mock.MagicMock()
@@ -287,8 +318,9 @@ class TestTesseractPdfCap(unittest.TestCase):
         fake_pt = mock.MagicMock()
         with mock.patch.dict("sys.modules", {"pdf2image": fake_p2i, "pytesseract": fake_pt}):
             TesseractOcr().read(b"%PDF-1.4", "Application/PDF", "scan.bin")
-        self.assertTrue(fake_p2i.convert_from_bytes.called,
-                        "mixed-case PDF mime must reach the PDF path")
+        self.assertTrue(
+            fake_p2i.convert_from_bytes.called, "mixed-case PDF mime must reach the PDF path"
+        )
 
 
 if __name__ == "__main__":

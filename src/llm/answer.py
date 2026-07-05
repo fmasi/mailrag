@@ -3,7 +3,8 @@
 Shared by the demo (main.run_demo), the onboard report, and `mailrag query` so
 there is one prompt and one answer path.
 """
-from src.llm.client import make_client, chat, default_model
+
+from src.llm.client import chat, default_model, make_client
 
 
 def answer_from_threads(query, contexts, *, client=None, model=None, k=3):

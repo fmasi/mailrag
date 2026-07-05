@@ -3,12 +3,13 @@
 In-memory analogue of scripts/eval/gen_thread_summaries.py::run(), for the demo build.
 Returns {message_id: summary}; noise emails get "".
 """
+
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from src.llm.client import make_client, chat, default_model
-from src.llm.summary import build_thread_aware_prompt, parse_response
 from src.data.threading import compute_thread_id
+from src.llm.client import chat, default_model, make_client
+from src.llm.summary import build_thread_aware_prompt, parse_response
 
 
 def _as_dict(e):

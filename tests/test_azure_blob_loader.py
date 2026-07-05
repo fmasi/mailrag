@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -33,22 +33,28 @@ class TestAzureBlobEmailLoader(unittest.TestCase):
         mock_container.list_blobs.return_value = blobs
 
         mock_blob_client = MagicMock()
-        mock_blob_client.download_blob.return_value.readall.return_value = b"From: a@b.com\nSubject: hi\n\nBody"
+        mock_blob_client.download_blob.return_value.readall.return_value = (
+            b"From: a@b.com\nSubject: hi\n\nBody"
+        )
         mock_container.get_blob_client.return_value = mock_blob_client
 
-        MockBlobService.from_connection_string.return_value.get_container_client.return_value = mock_container
+        MockBlobService.from_connection_string.return_value.get_container_client.return_value = (
+            mock_container
+        )
 
         expected = [
             NormalizedEmail(
-                sender="a@b.com", subject="hi", date=None,
-                body="Body", source="mail_archive_x", source_id="f",
+                sender="a@b.com",
+                subject="hi",
+                date=None,
+                body="Body",
+                source="mail_archive_x",
+                source_id="f",
             )
         ]
         MockMailLoader.return_value.load.return_value = expected
 
-        loader = AzureBlobEmailLoader(
-            connection_string="conn", container_name="c", blob_prefix=""
-        )
+        loader = AzureBlobEmailLoader(connection_string="conn", container_name="c", blob_prefix="")
 
         # Patch BlobServiceClient at the module where it is imported
         with patch("src.data.loaders.azure_blob.BlobServiceClient", MockBlobService):
@@ -71,12 +77,12 @@ class TestAzureBlobEmailLoader(unittest.TestCase):
         mock_blob_client.download_blob.return_value.readall.return_value = b"data"
         mock_container.get_blob_client.return_value = mock_blob_client
 
-        MockBlobService.from_connection_string.return_value.get_container_client.return_value = mock_container
+        MockBlobService.from_connection_string.return_value.get_container_client.return_value = (
+            mock_container
+        )
         MockMailLoader.return_value.load.return_value = []
 
-        loader = AzureBlobEmailLoader(
-            connection_string="conn", container_name="c"
-        )
+        loader = AzureBlobEmailLoader(connection_string="conn", container_name="c")
         with patch("src.data.loaders.azure_blob.BlobServiceClient", MockBlobService):
             loader.load(num_samples=3)
 
@@ -114,7 +120,9 @@ class TestAzureBlobEmailLoader(unittest.TestCase):
         """list_blobs receives the configured prefix."""
         mock_container = MagicMock()
         mock_container.list_blobs.return_value = []
-        MockBlobService.from_connection_string.return_value.get_container_client.return_value = mock_container
+        MockBlobService.from_connection_string.return_value.get_container_client.return_value = (
+            mock_container
+        )
         MockMailLoader.return_value.load.return_value = []
 
         loader = AzureBlobEmailLoader(

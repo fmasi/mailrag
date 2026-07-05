@@ -6,6 +6,7 @@ block). Prints only timing numbers — no generated content.
 Run (model must already be loaded):
   RAG_LLM_API_KEY=... python scripts/eval/bench_models.py --model <id> --label <tag>
 """
+
 import argparse
 import json
 import os
@@ -13,7 +14,9 @@ import sys
 import urllib.request
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
+    from dotenv import load_dotenv
+
+    load_dotenv()
 except ImportError:
     pass
 
@@ -46,11 +49,19 @@ def _ctx_prompts():
 
 
 def _call(model, prompt):
-    body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}],
-                       "temperature": 0.0, "max_tokens": 200}).encode()
-    req = urllib.request.Request(f"{BASE}/api/v0/chat/completions", data=body,
-                                 headers={"Content-Type": "application/json",
-                                          "Authorization": f"Bearer {KEY}"})
+    body = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+            "max_tokens": 200,
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"{BASE}/api/v0/chat/completions",
+        data=body,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {KEY}"},
+    )
     with urllib.request.urlopen(req, timeout=300) as resp:
         return json.load(resp)
 
@@ -77,8 +88,11 @@ def main():
     for tag, p in (("short", short), ("long", long)):
         try:
             st = _stats(args.model, p)
-            print(f"  {tag:5} prompt_tok={st['prompt_tokens']:>6} gen_tok={st['gen_tokens']:>4} "
-                  f"tok/s={st['tok_per_sec']:.1f} ttft={st['ttft_s']:.2f}s", flush=True)
+            print(
+                f"  {tag:5} prompt_tok={st['prompt_tokens']:>6} gen_tok={st['gen_tokens']:>4} "
+                f"tok/s={st['tok_per_sec']:.1f} ttft={st['ttft_s']:.2f}s",
+                flush=True,
+            )
         except Exception as e:  # noqa: BLE001
             print(f"  {tag:5} ERROR: {e}", flush=True)
 

@@ -1,5 +1,6 @@
 """PDF handler: prefer the embedded text layer (pypdf); if there is none, hand the
 bytes to the configured OCR provider (which renders pages and reads them)."""
+
 from __future__ import annotations
 
 import io
@@ -33,5 +34,5 @@ class PdfHandler:
         text = _pdf_text(data)
         if text.strip():
             return ok(text, "pdf")
-        out = self._ocr.read(data, "application/pdf", filename)   # image-only -> OCR
+        out = self._ocr.read(data, "application/pdf", filename)  # image-only -> OCR
         return ExtractResult(out.text, out.status, f"pdf+{out.provider}")

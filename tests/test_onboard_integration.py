@@ -15,8 +15,7 @@ class TestOnboardEndToEnd(unittest.TestCase):
     (set RAG_LLM_MODEL / QDRANT_URL as in the handover for host runs)."""
 
     def test_onboard_builds_and_validates(self):
-        report = run_onboard(
-            FIXTURES, collection="mailrag-itest", validate=False)
+        report = run_onboard(FIXTURES, collection="mailrag-itest", validate=False)
         self.assertGreaterEqual(report.kept, 1)
         self.assertGreaterEqual(report.chunks, 1)
         self.assertEqual(report.collection, "mailrag-itest")

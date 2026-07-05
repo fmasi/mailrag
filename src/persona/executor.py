@@ -5,6 +5,7 @@ this walks the persona's steps in order, calling ``handler(profile, **params)``.
 Both the headless ``run`` verb and the interactive TUI build a handler map and
 hand it here, so the run logic lives in one place. See docs/VERBS.md.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,9 +38,14 @@ def missing_handlers(persona: Persona, handlers: Dict[str, Handler]) -> List[str
     return seen
 
 
-def run_persona(profile: Any, persona: Persona, handlers: Dict[str, Handler], *,
-                on_step: Optional[Callable[[Step], None]] = None,
-                on_skip: Optional[Callable[[Step], None]] = None) -> List[StepResult]:
+def run_persona(
+    profile: Any,
+    persona: Persona,
+    handlers: Dict[str, Handler],
+    *,
+    on_step: Optional[Callable[[Step], None]] = None,
+    on_skip: Optional[Callable[[Step], None]] = None,
+) -> List[StepResult]:
     """Run *persona*'s steps in order against *profile*.
 
     Raises ``ValueError`` if a required step has no handler (check first with
@@ -48,8 +54,8 @@ def run_persona(profile: Any, persona: Persona, handlers: Dict[str, Handler], *,
     missing = missing_handlers(persona, handlers)
     if missing:
         raise ValueError(
-            f"persona {persona.name!r} needs unimplemented verb(s): "
-            f"{', '.join(missing)}")
+            f"persona {persona.name!r} needs unimplemented verb(s): {', '.join(missing)}"
+        )
     results: List[StepResult] = []
     for step in persona.steps:
         if step.verb not in handlers:

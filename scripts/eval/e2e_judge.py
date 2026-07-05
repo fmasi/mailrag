@@ -12,6 +12,7 @@ Run on the HOST (rag env; RAG_LLM_API_BASE + .env key; strong judge model):
     --contexts eval/out/e2e/contexts_v2.jsonl --answers eval/out/e2e/answers_pm.json \
     --tag pm | tee eval/out/e2e_judge_pm.log
 """
+
 import argparse
 import collections
 import json
@@ -21,12 +22,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
+    from dotenv import load_dotenv
+
+    load_dotenv()
 except ImportError:
     pass
 
-from src.llm.client import make_client, default_model, chat
 from src.eval.judge_parse import build_answer_judge_prompt, parse_grade
+from src.llm.client import chat, default_model, make_client
 
 
 def run(contexts_path, answers_path, out_path, model):
@@ -58,7 +61,7 @@ def run(contexts_path, answers_path, out_path, model):
     json.dump(grades, open(out_path, "w"), indent=2)
     print("\n=== mean answer grade per setup ===", flush=True)
     for setup, gs in per_setup.items():
-        print(f"  {setup:18s} {sum(gs)/len(gs):.2f}  (n={len(gs)})", flush=True)
+        print(f"  {setup:18s} {sum(gs) / len(gs):.2f}  (n={len(gs)})", flush=True)
     print(f"wrote grades -> {out_path}", flush=True)
 
 

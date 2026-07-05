@@ -1,16 +1,24 @@
 """Tests for thread-aware retrieval expansion."""
+
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
+from llama_index.core.schema import NodeWithScore, TextNode
+
 from src.query import thread_expand as te
-from llama_index.core.schema import TextNode, NodeWithScore
 
 
 class TestDataTypes(unittest.TestCase):
     def test_thread_email_holds_fields(self):
         e = te.ThreadEmail(
-            message_id="m1", sender="a@x", to="b@y", cc="",
-            date="2024-05-03T14:12:53+00:00", subject="Re: hi",
-            body="Lets do it", summary="agree to meet",
+            message_id="m1",
+            sender="a@x",
+            to="b@y",
+            cc="",
+            date="2024-05-03T14:12:53+00:00",
+            subject="Re: hi",
+            body="Lets do it",
+            summary="agree to meet",
         )
         self.assertEqual(e.message_id, "m1")
         self.assertEqual(e.body, "Lets do it")
@@ -63,12 +71,26 @@ class TestFetchThreadPayloads(unittest.TestCase):
 class TestGroupIntoEmails(unittest.TestCase):
     def test_single_chunk_emails(self):
         payloads = [
-            {"message_id": "m1", "sender": "a", "to": "b", "cc": "",
-             "date": "2024-05-01T00:00:00+00:00", "subject": "hi", "text": "first",
-             "summary": "s1"},
-            {"message_id": "m2", "sender": "b", "to": "a", "cc": "c",
-             "date": "2024-05-02T00:00:00+00:00", "subject": "Re: hi", "text": "second",
-             "summary": "s2"},
+            {
+                "message_id": "m1",
+                "sender": "a",
+                "to": "b",
+                "cc": "",
+                "date": "2024-05-01T00:00:00+00:00",
+                "subject": "hi",
+                "text": "first",
+                "summary": "s1",
+            },
+            {
+                "message_id": "m2",
+                "sender": "b",
+                "to": "a",
+                "cc": "c",
+                "date": "2024-05-02T00:00:00+00:00",
+                "subject": "Re: hi",
+                "text": "second",
+                "summary": "s2",
+            },
         ]
         emails = te.group_into_emails(payloads)
         self.assertEqual({e.message_id for e in emails}, {"m1", "m2"})
@@ -78,10 +100,26 @@ class TestGroupIntoEmails(unittest.TestCase):
 
     def test_multi_chunk_concatenated(self):
         payloads = [
-            {"message_id": "m1", "text": "part B", "date": "d", "sender": "a",
-             "to": "b", "cc": "", "subject": "hi", "summary": ""},
-            {"message_id": "m1", "text": "part A", "date": "d", "sender": "a",
-             "to": "b", "cc": "", "subject": "hi", "summary": ""},
+            {
+                "message_id": "m1",
+                "text": "part B",
+                "date": "d",
+                "sender": "a",
+                "to": "b",
+                "cc": "",
+                "subject": "hi",
+                "summary": "",
+            },
+            {
+                "message_id": "m1",
+                "text": "part A",
+                "date": "d",
+                "sender": "a",
+                "to": "b",
+                "cc": "",
+                "subject": "hi",
+                "summary": "",
+            },
         ]
         emails = te.group_into_emails(payloads)
         self.assertEqual(len(emails), 1)
@@ -92,8 +130,9 @@ class TestGroupIntoEmails(unittest.TestCase):
 
 class TestOrderByDate(unittest.TestCase):
     def _e(self, mid, date):
-        return te.ThreadEmail(message_id=mid, sender="a", to="b", cc="",
-                              date=date, subject="hi", body="x")
+        return te.ThreadEmail(
+            message_id=mid, sender="a", to="b", cc="", date=date, subject="hi", body="x"
+        )
 
     def test_sorts_iso_dates_ascending(self):
         emails = [
@@ -115,12 +154,24 @@ class TestOrderByDate(unittest.TestCase):
 class TestRenderThread(unittest.TestCase):
     def test_renders_attribution_header_per_email(self):
         emails = [
-            te.ThreadEmail(message_id="m1", sender="Anthony", to="Fred", cc="",
-                           date="2015-01-08T16:05:00+00:00", subject="viewing",
-                           body="Please find details"),
-            te.ThreadEmail(message_id="m2", sender="Fred", to="Anthony", cc="Boss",
-                           date="2015-01-08T16:59:00+00:00", subject="Re: viewing",
-                           body="Lets do it"),
+            te.ThreadEmail(
+                message_id="m1",
+                sender="Anthony",
+                to="Fred",
+                cc="",
+                date="2015-01-08T16:05:00+00:00",
+                subject="viewing",
+                body="Please find details",
+            ),
+            te.ThreadEmail(
+                message_id="m2",
+                sender="Fred",
+                to="Anthony",
+                cc="Boss",
+                date="2015-01-08T16:59:00+00:00",
+                subject="Re: viewing",
+                body="Lets do it",
+            ),
         ]
         text = te.render_thread("t1", emails)
         self.assertIn("[Thread: viewing]", text)
@@ -136,14 +187,19 @@ class TestRenderThread(unittest.TestCase):
 
 class TestAssembleThreads(unittest.TestCase):
     def test_end_to_end_with_mock_client(self):
-        nodes = [NodeWithScore(node=TextNode(text="Lets do it",
-                 metadata={"thread_id": "t1"}), score=1.0)]
+        nodes = [
+            NodeWithScore(node=TextNode(text="Lets do it", metadata={"thread_id": "t1"}), score=1.0)
+        ]
         client = MagicMock()
-        client.scroll.side_effect = [(
-            [self._pt("m1", "a", "2024-05-01T00:00:00+00:00", "details"),
-             self._pt("m2", "b", "2024-05-02T00:00:00+00:00", "Lets do it")],
-            None,
-        )]
+        client.scroll.side_effect = [
+            (
+                [
+                    self._pt("m1", "a", "2024-05-01T00:00:00+00:00", "details"),
+                    self._pt("m2", "b", "2024-05-02T00:00:00+00:00", "Lets do it"),
+                ],
+                None,
+            )
+        ]
         ctxs = te.assemble_threads(nodes, client, "work-rag")
         self.assertEqual(len(ctxs), 1)
         self.assertEqual(ctxs[0].thread_id, "t1")
@@ -153,9 +209,17 @@ class TestAssembleThreads(unittest.TestCase):
 
     def _pt(self, mid, sender, date, text):
         p = MagicMock()
-        p.payload = {"message_id": mid, "thread_id": "t1", "sender": sender,
-                     "to": "x", "cc": "", "date": date, "subject": "hi",
-                     "text": text, "summary": ""}
+        p.payload = {
+            "message_id": mid,
+            "thread_id": "t1",
+            "sender": sender,
+            "to": "x",
+            "cc": "",
+            "date": date,
+            "subject": "hi",
+            "text": text,
+            "summary": "",
+        }
         return p
 
     def test_no_thread_ids_returns_empty(self):
@@ -165,11 +229,21 @@ class TestAssembleThreads(unittest.TestCase):
 
 class TestBoundThread(unittest.TestCase):
     def _ctx(self, n_emails, body):
-        emails = [te.ThreadEmail(message_id=f"m{i}", sender="a", to="b", cc="",
-                  date=f"2024-05-{i+1:02d}T00:00:00+00:00", subject="hi", body=body)
-                  for i in range(n_emails)]
-        return te.ThreadContext(thread_id="t1", subject="hi", emails=emails,
-                                text=te.render_thread("t1", emails))
+        emails = [
+            te.ThreadEmail(
+                message_id=f"m{i}",
+                sender="a",
+                to="b",
+                cc="",
+                date=f"2024-05-{i + 1:02d}T00:00:00+00:00",
+                subject="hi",
+                body=body,
+            )
+            for i in range(n_emails)
+        ]
+        return te.ThreadContext(
+            thread_id="t1", subject="hi", emails=emails, text=te.render_thread("t1", emails)
+        )
 
     def test_under_budget_is_unchanged(self):
         ctx = self._ctx(2, "short")
@@ -180,9 +254,11 @@ class TestBoundThread(unittest.TestCase):
     def test_over_budget_with_summarizer_summarizes_tail(self):
         ctx = self._ctx(6, "x" * 400)
         called = {}
+
         def fake_summarizer(text: str) -> str:
             called["yes"] = True
             return "SUMMARY OF EARLIER"
+
         out = te.bound_thread(ctx, max_tokens=200, summarizer=fake_summarizer)
         self.assertTrue(out.bounded)
         self.assertIn("SUMMARY OF EARLIER", out.text)

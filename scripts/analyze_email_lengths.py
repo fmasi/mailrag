@@ -11,7 +11,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import random
 import sys
@@ -24,7 +23,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Reuse helpers from the batch script
 from scripts.batch_index_to_vector_store import (  # noqa: E402
-    CHECKPOINT_FILE,
     _filter_blobs_by_selection,
     _read_checkpoint_state,
 )
@@ -153,8 +151,8 @@ def main() -> None:
     print(f"  Max          : {token_counts[-1]:>6} tokens")
     print("-" * 55)
     print(f"  Chunk size simulated : {chunk_size} tokens")
-    print(f"  Fit in 1 chunk       : {fits_in_one:>5} ({100*fits_in_one//n}%)")
-    print(f"  Would be split       : {will_split:>5} ({100*will_split//n}%)")
+    print(f"  Fit in 1 chunk       : {fits_in_one:>5} ({100 * fits_in_one // n}%)")
+    print(f"  Would be split       : {will_split:>5} ({100 * will_split // n}%)")
     print("=" * 55)
 
     # Suggest a good chunk size

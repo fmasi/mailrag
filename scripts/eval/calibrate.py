@@ -10,6 +10,7 @@ Run (any env with src importable):
     python scripts/eval/calibrate.py --local eval/out/grades.json \
     --ref eval/out/calib_ref_grades.json --rankings eval/out/arm_rankings.json
 """
+
 import argparse
 import json
 import os
@@ -17,7 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.eval.agreement import cohen_kappa, spearman, decision_flips
+from src.eval.agreement import cohen_kappa, decision_flips, spearman
 from src.eval.decisions import decide  # added in Task 12
 
 
@@ -26,7 +27,8 @@ def _paired(local, ref):
     for q, mids in ref.items():
         for mid, g in mids.items():
             if q in local and mid in local[q]:
-                a.append(local[q][mid]); b.append(g)
+                a.append(local[q][mid])
+                b.append(g)
     return a, b
 
 

@@ -6,6 +6,7 @@ plain dicts ({"thread_id", "message_id"}) so it unit-tests in the lightweight en
 The live driver is scripts/eval/diagnose_coverage.py. See
 docs/superpowers/specs/2026-05-30-coverage-miss-diagnostic-design.md.
 """
+
 from __future__ import annotations
 
 import re
@@ -108,8 +109,12 @@ def oracle_root_cause(body_rank: Optional[int], top_hits: int = 10) -> str:
     return "index_or_chunking" if body_fail else "vocab_gap"
 
 
-def is_bad_query(body_rank: Optional[int], overlap_query_thread: float,
-                 top_hits: int = 10, overlap_threshold: float = 0.15) -> bool:
+def is_bad_query(
+    body_rank: Optional[int],
+    overlap_query_thread: float,
+    top_hits: int = 10,
+    overlap_threshold: float = 0.15,
+) -> bool:
     """True when a hard miss is likely a bad synthetic query, not a retrieval bug.
 
     Flags the case where even the gold body-as-query fails to surface the thread AND

@@ -1,8 +1,11 @@
-import os, shutil, tempfile, unittest
+import os
+import shutil
+import tempfile
+import unittest
 from email.message import EmailMessage
 
+from src.attachments.ingest_eml import _decode_filename, ingest_eml
 from src.attachments.store import AttachmentStore
-from src.attachments.ingest_eml import ingest_eml, _decode_filename
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 
 
@@ -13,8 +16,7 @@ def _write_eml(path):
     m["Subject"] = "Report"
     m["Message-ID"] = "<m1@work>"
     m.set_content("See attached.")
-    m.add_attachment(b"%PDF-1.4 fake", maintype="application", subtype="pdf",
-                     filename="report.pdf")
+    m.add_attachment(b"%PDF-1.4 fake", maintype="application", subtype="pdf", filename="report.pdf")
     m.add_attachment(b"col\n1\n", maintype="text", subtype="csv", filename="d.csv")
     with open(path, "wb") as fh:
         fh.write(bytes(m))
@@ -43,7 +45,7 @@ class TestIngestEml(unittest.TestCase):
         self.assertEqual(pdf.mime, "application/pdf")
         self.assertEqual(pdf.source_type, "eml")
         self.assertEqual(pdf.source_ref, self.eml)
-        self.assertTrue(pdf.thread_id)              # computed
+        self.assertTrue(pdf.thread_id)  # computed
         self.assertEqual(self.store.get_bytes(pdf.sha256), b"%PDF-1.4 fake")
 
     def test_reingest_is_idempotent(self):
@@ -61,14 +63,12 @@ class TestIngestEml(unittest.TestCase):
         m["Subject"] = "Q3 numbers"
         m["Message-ID"] = "<real-mid@work>"
         m.set_content("see attached")
-        m.add_attachment(b"%PDF-1.4 fake", maintype="application", subtype="pdf",
-                         filename="q3.pdf")
+        m.add_attachment(b"%PDF-1.4 fake", maintype="application", subtype="pdf", filename="q3.pdf")
         # Real Mail Archive X preamble: an mbox 'From ' line AND an extra numeric
         # field, which breaks naive header parsing (Message-ID is lost).
         path = os.path.join(self.d, "with_preamble.eml")
         with open(path, "wb") as fh:
-            fh.write(b"From <alice@work.com> Fri Oct  9 12:24:48 2025\n"
-                     b"188035    \n" + bytes(m))
+            fh.write(b"From <alice@work.com> Fri Oct  9 12:24:48 2025\n188035    \n" + bytes(m))
 
         # the indexer's thread_id for this exact file (via the loader -> to_document)
         e = MailArchiveXLoader(eml_files=[path], verbose=False).load()[0]
@@ -80,18 +80,20 @@ class TestIngestEml(unittest.TestCase):
         self.assertTrue(metas, "attachment not found by its real Message-ID")
         self.assertEqual(metas[0].thread_id, indexer_tid)
 
-
     def test_text_attachment_mime_carries_declared_charset(self):
         """The declared charset must survive into the stored mime so extraction can
         decode non-UTF-8 text attachments correctly (instead of latin-1 mojibake)."""
-        raw = (b"From: alice@work.com\r\nTo: bob@work.com\r\nSubject: Enc\r\n"
-               b"Message-ID: <enc@work>\r\nMIME-Version: 1.0\r\n"
-               b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n'
-               b"--B\r\nContent-Type: text/plain\r\n\r\nbody\r\n"
-               b'--B\r\nContent-Type: text/plain; charset="iso-8859-1"\r\n'
-               b'Content-Disposition: attachment; filename="latin.txt"\r\n'
-               b"Content-Transfer-Encoding: 8bit\r\n\r\n"
-               + "h\xe9llo".encode("iso-8859-1") + b"\r\n--B--\r\n")
+        raw = (
+            b"From: alice@work.com\r\nTo: bob@work.com\r\nSubject: Enc\r\n"
+            b"Message-ID: <enc@work>\r\nMIME-Version: 1.0\r\n"
+            b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n'
+            b"--B\r\nContent-Type: text/plain\r\n\r\nbody\r\n"
+            b'--B\r\nContent-Type: text/plain; charset="iso-8859-1"\r\n'
+            b'Content-Disposition: attachment; filename="latin.txt"\r\n'
+            b"Content-Transfer-Encoding: 8bit\r\n\r\n"
+            + "h\xe9llo".encode("iso-8859-1")
+            + b"\r\n--B--\r\n"
+        )
         path = os.path.join(self.d, "charset.eml")
         with open(path, "wb") as fh:
             fh.write(raw)
@@ -102,8 +104,9 @@ class TestIngestEml(unittest.TestCase):
 
     def test_non_text_attachment_mime_stays_bare(self):
         ingest_eml([self.eml], self.store)
-        pdf = next(m for m in self.store.list_for(message_id="<m1@work>")
-                   if m.filename == "report.pdf")
+        pdf = next(
+            m for m in self.store.list_for(message_id="<m1@work>") if m.filename == "report.pdf"
+        )
         self.assertEqual(pdf.mime, "application/pdf")
 
     def test_encoded_word_filename_is_decoded(self):
@@ -114,7 +117,9 @@ class TestIngestEml(unittest.TestCase):
         self.assertEqual(_decode_filename("plain.pdf"), "plain.pdf")
         self.assertEqual(_decode_filename(None), "")
         # Unknown charset raises inside make_header -> except branch returns raw string unchanged
-        self.assertEqual(_decode_filename("=?not-a-charset?B?aGVsbG8=?="), "=?not-a-charset?B?aGVsbG8=?=")
+        self.assertEqual(
+            _decode_filename("=?not-a-charset?B?aGVsbG8=?="), "=?not-a-charset?B?aGVsbG8=?="
+        )
 
 
 if __name__ == "__main__":

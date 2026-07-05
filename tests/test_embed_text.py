@@ -1,8 +1,9 @@
 # tests/test_embed_text.py
 """Tests for contextual-retrieval embed-text assembly (stdlib-only)."""
+
 import unittest
 
-from src.ingest.embed_text import prepend_summary, embed_max_length
+from src.ingest.embed_text import embed_max_length, prepend_summary
 
 
 class TestPrependSummary(unittest.TestCase):

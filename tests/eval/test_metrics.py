@@ -1,9 +1,15 @@
 # tests/eval/test_metrics.py
 import math
 import unittest
+
 from src.eval.metrics import (
-    dcg, ndcg_at_k, precision_at_k, recall_at_k, mrr, success_at_k,
     aggregate,
+    dcg,
+    mrr,
+    ndcg_at_k,
+    precision_at_k,
+    recall_at_k,
+    success_at_k,
 )
 
 REL = 2  # binary-relevance threshold

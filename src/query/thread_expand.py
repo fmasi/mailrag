@@ -4,9 +4,10 @@
 Reads the existing hybrid collection (no re-embedding). See
 docs/superpowers/specs/2026-05-29-thread-aware-retrieval-design.md.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 
@@ -61,9 +62,7 @@ def fetch_thread_payloads(client, collection: str, thread_ids: List[str]) -> Lis
     from qdrant_client import models
 
     flt = models.Filter(
-        must=[models.FieldCondition(
-            key="thread_id", match=models.MatchAny(any=list(thread_ids))
-        )]
+        must=[models.FieldCondition(key="thread_id", match=models.MatchAny(any=list(thread_ids)))]
     )
     payloads: List[dict] = []
     offset = None
@@ -84,11 +83,13 @@ def fetch_thread_payloads(client, collection: str, thread_ids: List[str]) -> Lis
 
 def order_by_date(emails: List[ThreadEmail]) -> List[ThreadEmail]:
     """Chronological order; unparseable/unknown dates sort last (stable)."""
+
     def key(e: ThreadEmail):
         d = e.date or ""
         # ISO-8601 strings sort lexicographically; "unknown" / "" sort last.
         bad = not d or d == "unknown"
         return (bad, d)
+
     return sorted(emails, key=key)
 
 
@@ -113,10 +114,7 @@ def render_thread(thread_id: str, emails: List[ThreadEmail]) -> str:
     lines = [f"[Thread: {subject}]", ""]
     for e in emails:
         cc = e.cc.strip() if e.cc else ""
-        lines.append(
-            f"[{_short_date(e.date)}] From: {e.sender}  To: {e.to}  "
-            f"Cc: {cc or _EMDASH}"
-        )
+        lines.append(f"[{_short_date(e.date)}] From: {e.sender}  To: {e.to}  Cc: {cc or _EMDASH}")
         lines.append(f"  {e.body.strip()}")
         lines.append("")
     return "\n".join(lines).strip()
@@ -145,9 +143,14 @@ def assemble_threads(nodes, client, collection: str) -> List[ThreadContext]:
         if not emails:
             continue
         text = render_thread(tid, emails)
-        contexts.append(ThreadContext(
-            thread_id=tid, subject=emails[0].subject, emails=emails, text=text,
-        ))
+        contexts.append(
+            ThreadContext(
+                thread_id=tid,
+                subject=emails[0].subject,
+                emails=emails,
+                text=text,
+            )
+        )
     return contexts
 
 
@@ -185,8 +188,11 @@ def bound_thread(
     tail_body = tail.split("\n", 2)[-1] if "\n" in tail else tail
     text = "\n\n".join([head, middle_block, tail_body]).strip()
     return ThreadContext(
-        thread_id=ctx.thread_id, subject=ctx.subject, emails=ctx.emails,
-        text=text, bounded=True,
+        thread_id=ctx.thread_id,
+        subject=ctx.subject,
+        emails=ctx.emails,
+        text=text,
+        bounded=True,
     )
 
 
@@ -211,14 +217,16 @@ def group_into_emails(payloads: List[dict]) -> List[ThreadEmail]:
         chunks = by_mid[mid]
         head = chunks[0]
         body = "\n".join(c.get("text", "") for c in chunks).strip()
-        emails.append(ThreadEmail(
-            message_id=mid,
-            sender=head.get("sender", ""),
-            to=head.get("to", ""),
-            cc=head.get("cc", ""),
-            date=head.get("date", ""),
-            subject=head.get("subject", ""),
-            body=body,
-            summary=head.get("summary", ""),
-        ))
+        emails.append(
+            ThreadEmail(
+                message_id=mid,
+                sender=head.get("sender", ""),
+                to=head.get("to", ""),
+                cc=head.get("cc", ""),
+                date=head.get("date", ""),
+                subject=head.get("subject", ""),
+                body=body,
+                summary=head.get("summary", ""),
+            )
+        )
     return emails

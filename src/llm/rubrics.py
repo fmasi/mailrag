@@ -6,6 +6,7 @@ parses). They resolve two-tier: a gitignored ``rubrics/local/`` override dir is
 searched first, then the shipped ``rubrics/`` dir — so corpus-specific rubrics
 stay local while the public repo still ships ``work`` and a ``personal.example``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ class Rubric:
     name: str
     template: str
     version: int = 1
-    judge_template: str = ""   # optional verdict-only prompt for the `judge` verb
+    judge_template: str = ""  # optional verdict-only prompt for the `judge` verb
 
 
 def _find(name: str) -> Path:
@@ -40,14 +41,14 @@ def _find(name: str) -> Path:
     raise ValueError(
         f"no rubric named {name!r} (looked in: {searched}); "
         f"create rubrics/local/{name}.yaml "
-        f"(e.g. copy rubrics/{name}.example.yaml if one ships)")
+        f"(e.g. copy rubrics/{name}.example.yaml if one ships)"
+    )
 
 
 def _validate(name: str, template: str) -> None:
     missing = [p for p in _REQUIRED_PLACEHOLDERS if p not in template]
     if missing:
-        raise ValueError(
-            f"rubric {name!r} template missing placeholders: {', '.join(missing)}")
+        raise ValueError(f"rubric {name!r} template missing placeholders: {', '.join(missing)}")
 
 
 def load_rubric(name: str) -> Rubric:
@@ -59,9 +60,12 @@ def load_rubric(name: str) -> Rubric:
         raise ValueError(f"rubric {name!r} ({path}) has no 'template' string")
     _validate(name, template)
     judge_template = data.get("judge_template") or ""
-    return Rubric(name=str(data.get("name", name)), template=template,
-                  version=int(data.get("version", 1)),
-                  judge_template=str(judge_template))
+    return Rubric(
+        name=str(data.get("name", name)),
+        template=template,
+        version=int(data.get("version", 1)),
+        judge_template=str(judge_template),
+    )
 
 
 def build_prompt(name: str, email: Dict[str, Any], body_chars: int = _BODY_CHARS) -> str:
@@ -82,8 +86,7 @@ def build_prompt(name: str, email: Dict[str, Any], body_chars: int = _BODY_CHARS
     )
 
 
-def build_judge_prompt(name: str, email: Dict[str, Any],
-                       body_chars: int = _BODY_CHARS) -> str:
+def build_judge_prompt(name: str, email: Dict[str, Any], body_chars: int = _BODY_CHARS) -> str:
     """Format the rubric's verdict-only `judge_template` for *email*.
 
     The judge prompt asks only for ``is_noise``/``confidence``/``reason`` (no
@@ -94,10 +97,12 @@ def build_judge_prompt(name: str, email: Dict[str, Any],
     template = rubric.judge_template
     if not template:
         import warnings
+
         warnings.warn(
             f"rubric {name!r} has no judge_template; judge will use the full "
             f"summarize template (no token saving). Add a judge_template to save cost.",
-            stacklevel=2)
+            stacklevel=2,
+        )
         template = rubric.template
     body = (email.get("body") or "").strip()
     if len(body) > body_chars:

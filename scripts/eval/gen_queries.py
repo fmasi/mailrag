@@ -12,6 +12,7 @@ Run on the HOST (rag env; QDRANT_URL + RAG_LLM_* set; .env loaded for keys):
     python scripts/eval/gen_queries.py --collection work-rag \
     --n-terse 48 --n-content 48 --n-spanning 24 --out eval/out/queries.jsonl
 """
+
 import argparse
 import json
 import os
@@ -21,26 +22,28 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
+    from dotenv import load_dotenv
+
+    load_dotenv()
 except ImportError:
     pass
 
+from src.eval.query_validator import build_validation_prompt, parse_validation
+from src.llm.client import chat, default_model, make_client
 from src.query.hybrid import _qdrant_client
 from src.query.thread_expand import group_into_emails, render_thread
-from src.llm.client import make_client, default_model, chat
-from src.eval.query_validator import build_validation_prompt, parse_validation
 
 _PAGE = 512
 
 # category -> instruction nudging the generator toward that query shape
 _CATEGORY_PROMPT = {
     "terse": "The answer should hinge on a short/terse reply in the thread (an "
-             "acknowledgement, confirmation, or one-line decision). Ask who said what or "
-             "what was confirmed.",
+    "acknowledgement, confirmation, or one-line decision). Ask who said what or "
+    "what was confirmed.",
     "content": "Ask a specific factual/technical question answered by the substantive "
-               "content of the thread. Prefer exact terms, names, or acronyms used.",
+    "content of the thread. Prefer exact terms, names, or acronyms used.",
     "spanning": "Ask a question whose answer must be assembled across several emails in "
-                "the thread (e.g. what was decided and when, how a plan evolved).",
+    "the thread (e.g. what was decided and when, how a plan evolved).",
 }
 
 # Appended to every category instruction: force content questions, ban artifact/meta ones.
@@ -57,8 +60,12 @@ def _sample_threads(client, collection, k, min_emails, max_emails, seed):
     offset = None
     while True:
         points, offset = client.scroll(
-            collection_name=collection, limit=_PAGE,
-            with_payload=True, with_vectors=False, offset=offset)
+            collection_name=collection,
+            limit=_PAGE,
+            with_payload=True,
+            with_vectors=False,
+            offset=offset,
+        )
         for p in points:
             tid = (p.payload or {}).get("thread_id")
             if tid:
@@ -81,13 +88,13 @@ def _gen_one(client, model, category, tid, emails):
     prompt = (
         "You are building a search-eval question from an email thread.\n"
         f"{_CATEGORY_PROMPT[category]}{_ARTIFACT_RULE}\n\n"
-        "Return STRICT JSON: {\"query\": <user question>, \"answer_message_id\": <one of "
+        'Return STRICT JSON: {"query": <user question>, "answer_message_id": <one of '
         f"these ids: {mids}>}}. Use ONLY information present below.\n\nTHREAD:\n{body}"
     )
     raw = chat(client, model, prompt)
     raw = raw.strip().lstrip("`")
     start, end = raw.find("{"), raw.rfind("}")
-    obj = json.loads(raw[start:end + 1])
+    obj = json.loads(raw[start : end + 1])
     q = (obj.get("query") or "").strip()
     amid = (obj.get("answer_message_id") or "").strip()
     if not q or amid not in mids:
@@ -102,10 +109,8 @@ def _validate_one(client, model, row, emails):
     the model, and returns parse_validation's verdict dict {"keep", "reason"}.
     """
     thread_text = render_thread(row["thread_id"], emails)
-    answer_body = next(
-        (e.body for e in emails if e.message_id == row["answer_message_id"]), "")
-    raw = chat(client, model, build_validation_prompt(
-        row["query"], thread_text, answer_body))
+    answer_body = next((e.body for e in emails if e.message_id == row["answer_message_id"]), "")
+    raw = chat(client, model, build_validation_prompt(row["query"], thread_text, answer_body))
     return parse_validation(raw)
 
 
@@ -138,7 +143,8 @@ def run(collection, counts, out_path, seed):
             if not verdict["keep"]:
                 print(f"  reject ({category}): {verdict['reason'][:60]}", flush=True)
                 continue
-            rows.append(row); made += 1
+            rows.append(row)
+            made += 1
             print(f"  [{category}] {made}/{k}", flush=True)
         if made < k:
             print(f"  WARNING: {category} under-delivered ({made}/{k})", flush=True)

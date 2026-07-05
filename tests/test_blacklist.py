@@ -1,4 +1,5 @@
 """Tests for the sha256(raw .eml) blacklist (stdlib-only, host-runnable)."""
+
 import hashlib
 import os
 import tempfile
@@ -17,10 +18,9 @@ class TestFileSha256(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             a, b, c = (os.path.join(d, n) for n in ("a", "b", "c"))
             _write(a, b"hello")
-            _write(b, b"hello")   # identical content
+            _write(b, b"hello")  # identical content
             _write(c, b"world")
-            self.assertEqual(blacklist.file_sha256(a),
-                             hashlib.sha256(b"hello").hexdigest())
+            self.assertEqual(blacklist.file_sha256(a), hashlib.sha256(b"hello").hexdigest())
             self.assertEqual(blacklist.file_sha256(a), blacklist.file_sha256(b))
             self.assertNotEqual(blacklist.file_sha256(a), blacklist.file_sha256(c))
 

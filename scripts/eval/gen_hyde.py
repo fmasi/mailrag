@@ -12,6 +12,7 @@ Run on the HOST (rag env; RAG_LLM_API_BASE + .env key):
     --queries eval/out/queries.jsonl --out eval/out/hyde_queries.jsonl \
     | tee eval/out/gen_hyde.log
 """
+
 import argparse
 import json
 import os
@@ -20,11 +21,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
+    from dotenv import load_dotenv
+
+    load_dotenv()
 except ImportError:
     pass
 
-from src.llm.client import make_client, default_model
+from src.llm.client import default_model, make_client
 from src.query.hyde import generate_hypothetical
 
 
@@ -54,8 +57,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--queries", default="eval/out/queries.jsonl")
     ap.add_argument("--out", default="eval/out/hyde_queries.jsonl")
-    ap.add_argument("--anchored", action="store_true",
-                    help="preserve query anchors / invent nothing (EXPERIMENTS §12)")
+    ap.add_argument(
+        "--anchored",
+        action="store_true",
+        help="preserve query anchors / invent nothing (EXPERIMENTS §12)",
+    )
     args = ap.parse_args()
     model = os.getenv("RAG_HYDE_MODEL", "").strip() or default_model()
     run(args.queries, args.out, model, anchored=args.anchored)

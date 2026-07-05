@@ -1,4 +1,5 @@
 """Image handler: delegate raster images to the configured OCR provider."""
+
 from __future__ import annotations
 
 from src.attachments.extract.mime import mime_base

@@ -7,6 +7,7 @@ real answer email, so it matches better). Pure logic (prompt + combine) lives he
 and is unit-tested; the LLM call is a thin glue function. See
 docs/superpowers/specs/2026-05-30-hyde-query-side-design.md.
 """
+
 from __future__ import annotations
 
 from src.llm.client import chat

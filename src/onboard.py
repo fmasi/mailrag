@@ -2,11 +2,12 @@
 .eml directory in one bounded LLM pass. See
 docs/superpowers/specs/2026-06-02-zth-onboard-design.md.
 """
+
 import json
 import os
 import re
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +33,7 @@ def load_eml_dir(source_dir, *, limit=None):
     if not paths:
         raise ValueError(f"no .eml files found under {source_dir}")
     from src.data.loaders.mail_archive_x import MailArchiveXLoader
+
     return MailArchiveXLoader(eml_files=paths).load()
 
 
@@ -71,12 +73,17 @@ class OnboardReport:
     validated: bool
 
     def one_line(self):
-        cov = (f"coverage@3 = {self.coverage_at3:.0%} on {self.n_queries} queries"
-               if self.validated else "validation skipped")
+        cov = (
+            f"coverage@3 = {self.coverage_at3:.0%} on {self.n_queries} queries"
+            if self.validated
+            else "validation skipped"
+        )
         fails = f", {self.llm_failures} llm-failures" if self.llm_failures else ""
-        return (f"Onboarded {self.kept} emails ({self.noise_dropped} noise dropped"
-                f"{fails}) -> {self.chunks} chunks in '{self.collection}'; {cov}. "
-                f"Query it: mailrag query --collection {self.collection} '...'")
+        return (
+            f"Onboarded {self.kept} emails ({self.noise_dropped} noise dropped"
+            f"{fails}) -> {self.chunks} chunks in '{self.collection}'; {cov}. "
+            f"Query it: mailrag query --collection {self.collection} '...'"
+        )
 
 
 def write_manifest(report, *, source, model):
@@ -85,10 +92,12 @@ def write_manifest(report, *, source, model):
     MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     path = MANIFEST_DIR / f"{report.collection}.json"
     data = asdict(report)
-    data.update(source=source, model=model,
-                created_at=datetime.now(timezone.utc).isoformat(),
-                defaults={"fusion": "rrf", "sparse_weight": 1,
-                          "thread_aware": True, "reranker": False})
+    data.update(
+        source=source,
+        model=model,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        defaults={"fusion": "rrf", "sparse_weight": 1, "thread_aware": True, "reranker": False},
+    )
     path.write_text(json.dumps(data, indent=2))
     return str(path)
 
@@ -97,8 +106,7 @@ def latest_manifest_collection():
     """Collection name from the most-recently-written manifest, or None."""
     if not MANIFEST_DIR.is_dir():
         return None
-    manifests = sorted(MANIFEST_DIR.glob("*.json"),
-                       key=lambda p: (p.stat().st_mtime, p.name))
+    manifests = sorted(MANIFEST_DIR.glob("*.json"), key=lambda p: (p.stat().st_mtime, p.name))
     if not manifests:
         return None
     return json.loads(manifests[-1].read_text()).get("collection")
@@ -117,8 +125,9 @@ def _load_queries(path):
 def _coverage_at3(searcher, queries):
     """covered@3 over thread-distinct ranks. ``queries``: list of dicts with
     ``query`` and ``thread_id``. Returns ``(coverage, n_queries)``."""
-    from src.query.thread_expand import _node_metadata
     from src.eval.coverage_diag import distinct_thread_rank
+    from src.query.thread_expand import _node_metadata
+
     if not queries:
         return None, 0
     covered = 0
@@ -126,16 +135,14 @@ def _coverage_at3(searcher, queries):
         hits = []
         for node in searcher.search(q["query"]):
             md = _node_metadata(node)
-            hits.append({"thread_id": md.get("thread_id"),
-                         "message_id": md.get("message_id")})
+            hits.append({"thread_id": md.get("thread_id"), "message_id": md.get("message_id")})
         rank = distinct_thread_rank(hits, q["thread_id"])
         if rank is not None and rank < 3:
             covered += 1
     return covered / len(queries), len(queries)
 
 
-def validate_coverage(collection, *, searcher=None, queries_path=None,
-                      counts=None, seed=7):
+def validate_coverage(collection, *, searcher=None, queries_path=None, counts=None, seed=7):
     """Return ``(coverage_at3, n_queries)``. Uses ``queries_path`` if given, else
     auto-generates a small validated set via gen_queries.run. Best-effort: returns
     ``(None, 0)`` on any failure (the index is already usable). Query rows must
@@ -146,13 +153,16 @@ def validate_coverage(collection, *, searcher=None, queries_path=None,
             queries = _load_queries(queries_path)
         else:
             import tempfile
+
             from scripts.eval.gen_queries import run as gen_run
+
             with tempfile.TemporaryDirectory() as td:
                 tmp = os.path.join(td, "queries.jsonl")
                 gen_run(collection, counts, tmp, seed)
                 queries = _load_queries(tmp)
         if searcher is None:
             from src.query.hybrid import build_hybrid_searcher
+
             searcher = build_hybrid_searcher(collection, mode="hybrid")
         return _coverage_at3(searcher, queries)
     except Exception as exc:  # best-effort validation
@@ -163,30 +173,48 @@ def validate_coverage(collection, *, searcher=None, queries_path=None,
 def _require_qdrant(qdrant_url):
     """Fail fast (before the expensive LLM pass) if Qdrant is unreachable."""
     from src.ingest import hybrid_qdrant as hq
+
     try:
         hq.get_client(qdrant_url).get_collections()
     except Exception as e:
         raise ValueError(
             f"Qdrant not reachable at {qdrant_url}. Start it with "
-            f"`docker compose up -d qdrant`. ({e})")
+            f"`docker compose up -d qdrant`. ({e})"
+        )
 
 
 def _profile_chunk_size(emails):
     from transformers import AutoTokenizer
+
     from src.ingest.profile import suggest_chunk_size
+
     tok = AutoTokenizer.from_pretrained("BAAI/bge-m3")
-    lengths = [len(tok.encode(e.body or "", add_special_tokens=False))
-               for e in emails if (e.body or "").strip()]
+    lengths = [
+        len(tok.encode(e.body or "", add_special_tokens=False))
+        for e in emails
+        if (e.body or "").strip()
+    ]
     return suggest_chunk_size(lengths)
 
 
-def run_onboard(source_dir, *, collection=None, chunk_size=None, queries_path=None,
-                validate=True, limit=None, noise_min_confidence=0.7, model=None,
-                qdrant_url="http://localhost:6333", embedder=None, cache_path=None):
+def run_onboard(
+    source_dir,
+    *,
+    collection=None,
+    chunk_size=None,
+    queries_path=None,
+    validate=True,
+    limit=None,
+    noise_min_confidence=0.7,
+    model=None,
+    qdrant_url="http://localhost:6333",
+    embedder=None,
+    cache_path=None,
+):
     """Profile -> single resumable LLM pass -> filter+build -> validate -> report."""
+    from src.indexing.contextual_index import build_contextual_index
     from src.llm.cache import Pass2Cache
     from src.llm.onboard_pass import generate_thread_judgments
-    from src.indexing.contextual_index import build_contextual_index
 
     collection = collection or collection_slug(source_dir)
     _require_qdrant(qdrant_url)
@@ -201,38 +229,50 @@ def run_onboard(source_dir, *, collection=None, chunk_size=None, queries_path=No
     MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     cache = Pass2Cache(cache_path)
     from tqdm import tqdm
+
     bar = tqdm(total=len(emails), desc="clean+summarize")
     try:
-        judgments = generate_thread_judgments(
-            emails, cache=cache, model=model, progress=bar.update)
+        judgments = generate_thread_judgments(emails, cache=cache, model=model, progress=bar.update)
     finally:
         bar.close()
         cache.close()
 
-    llm_failures = sum(1 for r in judgments.values()
-                       if str(r.get("reason", "")).startswith("llm_error"))
-    kept, noise_dropped = filter_kept(
-        emails, judgments, min_confidence=noise_min_confidence)
+    llm_failures = sum(
+        1 for r in judgments.values() if str(r.get("reason", "")).startswith("llm_error")
+    )
+    kept, noise_dropped = filter_kept(emails, judgments, min_confidence=noise_min_confidence)
     if not kept:
         raise ValueError("all emails were filtered as noise; nothing to index")
 
     if embedder is None:
         from src.ingest.embedder import BgeM3Embedder
+
         embedder = BgeM3Embedder(use_fp16=True)
     res = build_contextual_index(
-        kept, collection=collection, embedder=embedder,
+        kept,
+        collection=collection,
+        embedder=embedder,
         summaries=None,  # summaries already set on each e.summary by filter_kept()
-        embed_summary=True, chunk_size=chunk_size, recreate=True,
-        qdrant_url=qdrant_url)
+        embed_summary=True,
+        chunk_size=chunk_size,
+        recreate=True,
+        qdrant_url=qdrant_url,
+    )
 
     coverage, n_queries = (None, 0)
     if validate:
         coverage, n_queries = validate_coverage(collection, queries_path=queries_path)
 
     report = OnboardReport(
-        collection=collection, kept=len(kept), noise_dropped=noise_dropped,
-        llm_failures=llm_failures, chunks=res.chunks, chunk_size=chunk_size,
-        coverage_at3=coverage, n_queries=n_queries,
-        validated=(coverage is not None))
+        collection=collection,
+        kept=len(kept),
+        noise_dropped=noise_dropped,
+        llm_failures=llm_failures,
+        chunks=res.chunks,
+        chunk_size=chunk_size,
+        coverage_at3=coverage,
+        n_queries=n_queries,
+        validated=(coverage is not None),
+    )
     write_manifest(report, source=str(source_dir), model=(model or ""))
     return report

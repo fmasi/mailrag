@@ -4,6 +4,7 @@ A persona is a named, ordered recipe of verbs (with optional per-step settings).
 Resolves two-tier like the rubric registry: a gitignored ``personas.local.yaml``
 merges over the shipped ``personas.yaml`` (local personas win). See docs/VERBS.md.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -49,8 +50,7 @@ class Registry:
 
     def get(self, name: str) -> Persona:
         if name not in self.personas:
-            raise ValueError(
-                f"no persona named {name!r}; known: {', '.join(self.names())}")
+            raise ValueError(f"no persona named {name!r}; known: {', '.join(self.names())}")
         return self.personas[name]
 
     def verb_info(self, name: str) -> VerbInfo:
@@ -71,8 +71,7 @@ def _parse_step(raw: Any) -> Step:
 
 def _parse(data: Dict[str, Any]) -> Registry:
     verbs = {
-        name: VerbInfo(name=name, does=str(meta.get("does", "")),
-                       cost=str(meta.get("cost", "")))
+        name: VerbInfo(name=name, does=str(meta.get("does", "")), cost=str(meta.get("cost", "")))
         for name, meta in (data.get("verbs") or {}).items()
     }
     personas: Dict[str, Persona] = {}
@@ -82,10 +81,14 @@ def _parse(data: Dict[str, Any]) -> Registry:
             if s.verb not in verbs:
                 raise ValueError(
                     f"persona {name!r} uses unknown verb {s.verb!r} "
-                    f"(declare it under `verbs:` in personas.yaml)")
+                    f"(declare it under `verbs:` in personas.yaml)"
+                )
         personas[name] = Persona(
-            name=name, label=str(meta.get("label", name)),
-            advisor_hint=str(meta.get("advisor_hint", "")), steps=steps)
+            name=name,
+            label=str(meta.get("label", name)),
+            advisor_hint=str(meta.get("advisor_hint", "")),
+            steps=steps,
+        )
     return Registry(verbs=verbs, personas=personas)
 
 

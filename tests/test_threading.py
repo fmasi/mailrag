@@ -1,4 +1,5 @@
 """Tests for email thread-id computation (stdlib-only, host-runnable)."""
+
 import unittest
 
 from src.data import threading
@@ -26,17 +27,11 @@ class TestComputeThreadId(unittest.TestCase):
         self.assertEqual(tid, "root@x")
 
     def test_falls_back_to_in_reply_to_when_no_references(self):
-        self.assertEqual(
-            threading.compute_thread_id("<c@x>", "<b@x>", ""), "b@x"
-        )
-        self.assertEqual(
-            threading.compute_thread_id("<c@x>", "<b@x>", None), "b@x"
-        )
+        self.assertEqual(threading.compute_thread_id("<c@x>", "<b@x>", ""), "b@x")
+        self.assertEqual(threading.compute_thread_id("<c@x>", "<b@x>", None), "b@x")
 
     def test_falls_back_to_own_message_id_at_thread_root(self):
-        self.assertEqual(
-            threading.compute_thread_id("<root@x>", "", ""), "root@x"
-        )
+        self.assertEqual(threading.compute_thread_id("<root@x>", "", ""), "root@x")
 
     def test_root_email_and_its_reply_share_thread_id(self):
         root = threading.compute_thread_id("<root@x>", "", "")
@@ -50,20 +45,24 @@ class TestComputeThreadId(unittest.TestCase):
 class TestSubjectSlug(unittest.TestCase):
     def test_strips_prefixes_and_normalizes(self):
         from src.data.threading import subject_slug
+
         self.assertEqual(subject_slug("Re: FW:  The  Plan "), "the plan")
         self.assertEqual(subject_slug("Fwd: Re: Budget"), "budget")
 
     def test_bare_subject_lowercased(self):
         from src.data.threading import subject_slug
+
         self.assertEqual(subject_slug("Monthly Report"), "monthly report")
 
     def test_empty_and_none_return_empty(self):
         from src.data.threading import subject_slug
+
         self.assertEqual(subject_slug(""), "")
         self.assertEqual(subject_slug(None), "")
 
     def test_collapses_internal_whitespace(self):
         from src.data.threading import subject_slug
+
         self.assertEqual(subject_slug("  Hello   World  "), "hello world")
 
 

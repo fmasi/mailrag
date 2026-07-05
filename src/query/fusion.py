@@ -9,6 +9,7 @@ RRF score for a document = sum over each result list of 1 / (k + rank), where
 rank is 0-based position in that list. ``alpha`` is accepted for signature
 compatibility but unused (RRF is rank-based, not score-weighted).
 """
+
 import math
 from typing import Dict, List
 
@@ -47,7 +48,7 @@ def _rank_fusion(
         xs = terms[_id]
         if math.isinf(p):
             return max(xs)
-        return math.fsum(x ** p for x in xs) ** (1.0 / p)
+        return math.fsum(x**p for x in xs) ** (1.0 / p)
 
     # Sort by (combined score, sum-of-terms tiebreak), descending. terms.keys()
     # preserves first-seen order, so equal keys keep a stable order (matches the
@@ -87,7 +88,8 @@ def make_rank_fusion(p: float = 1.0, k: int = 60, sparse_weight: float = 1.0):
         raise ValueError("sparse_weight must be >= 0")
 
     def fusion_fn(dense_result, sparse_result, alpha: float = 0.5, top_k: int = 2, k: int = k):
-        return _rank_fusion(dense_result, sparse_result, top_k=top_k, k=k, p=p,
-                            sparse_weight=sparse_weight)
+        return _rank_fusion(
+            dense_result, sparse_result, top_k=top_k, k=k, p=p, sparse_weight=sparse_weight
+        )
 
     return fusion_fn
