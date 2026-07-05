@@ -18,6 +18,7 @@ Two tiers:
   failure — where the engine is absent. That skip *is* the graceful-degradation
   contract at the test layer.
 """
+
 import importlib.util
 import io
 import os
@@ -34,14 +35,14 @@ def _have(module: str) -> bool:
         return False
 
 
-_TESSERACT = (shutil.which("tesseract") is not None
-              and _have("pytesseract") and _have("PIL"))
+_TESSERACT = shutil.which("tesseract") is not None and _have("pytesseract") and _have("PIL")
 _HAVE_DOCX = _have("docx")
 
 
 def _png_with_text(text: str) -> bytes:
     """A white PNG with ``text`` drawn on it (black), for a real OCR round-trip."""
     from PIL import Image, ImageDraw
+
     img = Image.new("RGB", (720, 200), "white")
     # Draw twice at 2x-ish spacing so the default bitmap font gives tesseract a
     # clear signal even without a TrueType face installed.
@@ -61,6 +62,7 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
         # Import here so the module imports even if src layout changes underneath.
         from src.attachments.store import AttachmentStore
+
         self.store = AttachmentStore(os.path.join(self.d, "store"))
         self.addCleanup(self.store.close)
 
@@ -72,8 +74,7 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
         m["Message-ID"] = message_id
         m.set_content("body")
         for data, maintype, subtype, filename in attachments:
-            m.add_attachment(data, maintype=maintype, subtype=subtype,
-                             filename=filename)
+            m.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
         path = os.path.join(self.d, name)
         with open(path, "wb") as fh:
             fh.write(bytes(m))
@@ -86,8 +87,10 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
         from src.attachments.ingest_eml import ingest_eml
 
         path = self._write_eml(
-            "plain.eml", "<e2e-plain@work>",
-            [(b"name,amount\nInvoice,99\n", "text", "csv", "ledger.csv")])
+            "plain.eml",
+            "<e2e-plain@work>",
+            [(b"name,amount\nInvoice,99\n", "text", "csv", "ledger.csv")],
+        )
         counts = ingest_eml([path], self.store)
         self.assertEqual(counts, {"emails": 1, "attachments": 1, "skipped": 0})
 
@@ -112,8 +115,8 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
 
         # =?utf-8?B?SW52b2ljZS5jc3Y=?=  ==  "Invoice.csv"
         path = self._write_eml(
-            "enc.eml", "<e2e-enc@work>",
-            [(b"x\n", "text", "csv", "=?utf-8?B?SW52b2ljZS5jc3Y=?=")])
+            "enc.eml", "<e2e-enc@work>", [(b"x\n", "text", "csv", "=?utf-8?B?SW52b2ljZS5jc3Y=?=")]
+        )
         ingest_eml([path], self.store)
         metas = self.store.list_for(message_id="<e2e-enc@work>")
         self.assertEqual(len(metas), 1)
@@ -127,8 +130,8 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
 
         blob = b"\x00\x01\x02BINARY\xff"
         path = self._write_eml(
-            "bin.eml", "<e2e-bin@work>",
-            [(blob, "application", "octet-stream", "mystery.bin")])
+            "bin.eml", "<e2e-bin@work>", [(blob, "application", "octet-stream", "mystery.bin")]
+        )
         ingest_eml([path], self.store)
         meta = self.store.list_for(message_id="<e2e-bin@work>")[0]
         res = self.store.fetch(meta.sha256, extractor="tesseract")
@@ -142,6 +145,7 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
         """A real .docx round-trips through ingest and yields its paragraph text —
         the office-document leg end-to-end, not just at the handler unit level."""
         from docx import Document
+
         from src.attachments.ingest_eml import ingest_eml
 
         doc = Document()
@@ -150,8 +154,8 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
         doc.save(dbuf)
         subtype = "vnd.openxmlformats-officedocument.wordprocessingml.document"
         path = self._write_eml(
-            "doc.eml", "<e2e-docx@work>",
-            [(dbuf.getvalue(), "application", subtype, "report.docx")])
+            "doc.eml", "<e2e-docx@work>", [(dbuf.getvalue(), "application", subtype, "report.docx")]
+        )
         ingest_eml([path], self.store)
         meta = self.store.list_for(message_id="<e2e-docx@work>")[0]
         res = self.store.fetch(meta.sha256, extractor="tesseract")
@@ -168,6 +172,7 @@ class TestAttachmentOcrE2E(unittest.TestCase):
         self.d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
         from src.attachments.store import AttachmentStore
+
         self.store = AttachmentStore(os.path.join(self.d, "store"))
         self.addCleanup(self.store.close)
 
@@ -197,8 +202,7 @@ class TestAttachmentOcrE2E(unittest.TestCase):
         self.assertEqual(meta.mime, "image/png")
 
         res = self.store.fetch(meta.sha256, extractor="tesseract")
-        self.assertEqual(res["text_status"], "extracted",
-                         f"OCR produced no text: {res!r}")
+        self.assertEqual(res["text_status"], "extracted", f"OCR produced no text: {res!r}")
         # tesseract is imperfect on the bitmap font, so assert on a robust token.
         self.assertIn("invoice", res["text"].lower())
 
