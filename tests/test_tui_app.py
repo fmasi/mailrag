@@ -167,6 +167,19 @@ class TestHappyPathNoLLM(_TuiCase):
             saved = json.load(fh)
         self.assertEqual(saved["selection_rules"], [{"type": "prefix", "value": "Inbox/"}])
 
+    async def test_unchecking_parent_restores_child_selection(self):
+        app = self.app()
+        async with app.run_test(size=_SIZE) as pilot:
+            await self.to_scope(app, pilot)
+            await self.wait_for(pilot, self._screen_is(app, ScopeScreen))
+            # rows: 0 root-files, 1 Archive/, 2 Inbox/, 3 (direct), 4 Inbox/Acme/
+            await pilot.press("down", "down", "down", "down", "space")  # check Inbox/Acme/
+            await pilot.press("up", "up", "space")  # check Inbox/ -> parent rule wins
+            screen = app.screen
+            self.assertEqual(screen._rules(), [{"type": "prefix", "value": "Inbox/"}])
+            await pilot.press("space")  # uncheck Inbox/ -> child selection restored
+            self.assertEqual(screen._rules(), [{"type": "prefix", "value": "Inbox/Acme/"}])
+
     async def test_scope_requires_a_selection(self):
         app = self.app()
         async with app.run_test(size=_SIZE) as pilot:

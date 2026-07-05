@@ -383,11 +383,13 @@ class ScopeScreen(WizardScreen):
             scope_node = self._find(node_id)
             text = scope_node.label if scope_node else node_id
         text = escape(text)  # folder names may contain markup-significant brackets
-        if node_id in self._checked:
-            return f"[green]▣[/] {text}"
+        # A checked parent covers this node whatever its own check state is
+        # (selection_to_rules gives the parent's whole-prefix rule precedence).
         parent = self._parent_of(node_id)
         if parent and parent in self._checked:
             return f"[dim]▣ {text} (covered by {escape(parent)})[/]"
+        if node_id in self._checked:
+            return f"[green]▣[/] {text}"
         return f"[dim]☐[/] {text}"
 
     def _find(self, node_id: str) -> Optional[flow.ScopeNode]:
@@ -438,16 +440,13 @@ class ScopeScreen(WizardScreen):
         if node is None or node.data is None:
             return
         node_id = str(node.data)
+        # Child checks are kept (not cleared) when a parent gets checked:
+        # selection_to_rules gives the parent precedence while it is checked,
+        # and unchecking the parent restores the child selection unchanged.
         if node_id in self._checked:
             self._checked.discard(node_id)
         else:
             self._checked.add(node_id)
-            # A whole-folder check makes child checks redundant; drop them so the
-            # produced rules stay minimal (parent prefix already covers them).
-            scope_node = self._find(node_id)
-            if scope_node is not None:
-                for child in scope_node.children:
-                    self._checked.discard(child.node_id)
         self._refresh_labels()
 
     def action_toggle_include(self) -> None:
