@@ -19,5 +19,8 @@ FlagEmbedding
 tqdm
 questionary
 
+# MCP server (src/mcp_server): expose the query path over Model Context Protocol
+mcp
+
 # pytest for testing
 pytest
