@@ -18,6 +18,11 @@ FlagEmbedding
 # Optional: For better CLI and logging
 tqdm
 questionary
+# Full-screen TUI for `mailrag wizard` (src/tui)
+textual
+
+# MCP server (src/mcp_server): expose the query path over Model Context Protocol
+mcp
 
 # pytest for testing
 pytest

@@ -1,4 +1,8 @@
-"""Interactive persona wizard (the TUI) — a thin `questionary`+`rich` runner.
+"""Classic interactive persona wizard — a thin `questionary`+`rich` runner.
+
+This is the legacy line-by-line prompt flow, kept as ``mailrag wizard --classic``;
+the default interactive experience is now the full-screen Textual app in
+``src/tui/`` (same gates, same handler map — see docs/GUIDE.md).
 
 Asks "which persona?" first (surfacing `scan`'s recommendation if a scan ran),
 then walks the recipe in order, rendering each step. Two interaction points the
@@ -29,7 +33,7 @@ from src.profile import CorpusProfile
 _LLM_STEPS = {"calibrate", "summarize", "judge"}
 
 
-def _read_recommendation(profile_path: str) -> Optional[str]:
+def read_recommendation(profile_path: str) -> Optional[str]:
     """Return the persona `scan` recommended, if a scan artifact sits beside the profile."""
     path = profile_path.rsplit(".", 1)[0] + ".scan.json"
     if not os.path.exists(path):
@@ -96,7 +100,7 @@ def run_wizard(
 
         console = Console()
 
-    rec = _read_recommendation(profile_path)
+    rec = read_recommendation(profile_path)
     if rec:
         console.print(f"scan recommends: [bold]{rec}[/bold]")
     for name in reg.names():

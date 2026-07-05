@@ -11,6 +11,7 @@ aliases for one release.
 
 import argparse
 import datetime
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -253,7 +254,13 @@ def _cmd_run(args):
 
 
 def _cmd_wizard(args):
-    return persona_wizard.run_wizard(args.profile, model=args.model, limit=args.limit)
+    if args.classic:
+        return persona_wizard.run_wizard(args.profile, model=args.model, limit=args.limit)
+    # Default: the full-screen Textual app (src/tui). Imported lazily so the
+    # classic path and the rest of the CLI never pay the textual import.
+    from src.tui.app import run_tui
+
+    return run_tui(args.profile, model=args.model, limit=args.limit)
 
 
 def _cmd_onboard(args):
@@ -324,6 +331,34 @@ def _configure_ask(p):
         help="override Qdrant URL (default: profile, else http://localhost:6333)",
     )
     p.add_argument("--k", type=int, default=3)
+
+
+def _cmd_mcp(args):
+    """Run the stdio MCP server exposing search_email / answer_question.
+
+    CLI flags are surfaced to the server via env vars (the server resolves all
+    config from the environment, mirroring `mailrag ask`)."""
+    if args.collection:
+        os.environ["MAILRAG_COLLECTION"] = args.collection
+    if args.qdrant_url:
+        os.environ["MAILRAG_QDRANT_URL"] = args.qdrant_url
+    from src.mcp_server.server import serve
+
+    serve()  # blocks, serving over stdio until the client disconnects
+    return 0
+
+
+def _configure_mcp(p):
+    p.add_argument(
+        "--collection",
+        default=None,
+        help="collection to serve (default: $MAILRAG_COLLECTION or latest manifest)",
+    )
+    p.add_argument(
+        "--qdrant-url",
+        default=None,
+        help="Qdrant URL (default: $MAILRAG_QDRANT_URL / $QDRANT_URL, else localhost)",
+    )
 
 
 def _configure_index(p):
@@ -403,6 +438,11 @@ def _configure_wizard(p):
         type=int,
         default=None,
         help="cap the corpus for scan/summarize/index — fast end-to-end test",
+    )
+    p.add_argument(
+        "--classic",
+        action="store_true",
+        help="use the legacy line-by-line prompt flow instead of the full-screen TUI",
     )
 
 
@@ -526,6 +566,13 @@ def build_parser():
     )
     _add_verb(
         sub,
+        "mcp",
+        _configure_mcp,
+        _cmd_mcp,
+        help="run the MCP server (stdio) over the indexed corpus",
+    )
+    _add_verb(
+        sub,
         "scope",
         _add_profile_arg,
         _cmd_scope,
@@ -599,7 +646,7 @@ def build_parser():
         "wizard",
         _configure_wizard,
         _cmd_wizard,
-        help="interactive guided pipeline (pick a persona, walk the steps)",
+        help="full-screen guided pipeline (persona → scope → review → live run)",
     )
 
     at = sub.add_parser("attachments", help="ingest / list / fetch email attachments")
