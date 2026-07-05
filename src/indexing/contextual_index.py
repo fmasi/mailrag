@@ -111,7 +111,7 @@ def build_contextual_index(
         return BuildResult(collection=collection, kept_emails=0, chunks=0)
 
     # 4. Tokenise + split into chunks
-    # NOTE: transformers is a runtime dep (not installed in mailrag-test env).
+    # NOTE: transformers is a runtime dep (not installed in mailrag env).
     # The import is intentionally lazy so the module is importable without it.
     # Tests that reach this code must patch 'transformers.AutoTokenizer' or
     # install transformers in the test env.

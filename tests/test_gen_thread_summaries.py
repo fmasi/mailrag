@@ -8,7 +8,7 @@ import unittest
 
 # ---------------------------------------------------------------------------
 # Import strategy: gen_thread_summaries has top-level imports from src.*
-# which should be present in the mailrag-test env.  We import with
+# which should be present in the mailrag env.  We import with
 # importlib so that an ImportError here is explicit and the test can be
 # skipped cleanly rather than crashing the suite.
 # ---------------------------------------------------------------------------

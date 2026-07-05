@@ -30,11 +30,10 @@ We use two conda envs because the test suite and the GPU build need different de
 **a) Test env** (no torch/FlagEmbedding needed — fast):
 
 ```bash
-conda create -y -n mailrag-test python=3.12
-conda run -n mailrag-test pip install -r requirements.txt \
+conda create -y -n mailrag python=3.12
+conda run -n mailrag pip install -r requirements.txt \
     rich azure-storage-blob llama-index-vector-stores-pinecone openai anthropic
-conda run -n mailrag-test python -m pytest tests/ -q     # expect: all pass, ~1 skipped
-# cleanup when done: conda env remove -y -n mailrag-test
+conda run -n mailrag python -m pytest tests/ -q     # expect: all pass, ~1 skipped
 ```
 
 (The 5 extras are pyproject deps not in `requirements.txt`. The project is poetry
@@ -56,7 +55,7 @@ Run host-side scripts with `conda run -n mailrag-build --no-capture-output pytho
   (the build talks to Qdrant via `qdrant-client` directly):
   `conda run -n rag pip install "llama-index-vector-stores-qdrant>=0.10,<0.11" llama-index-postprocessor-flag-embedding-reranker`.
   The reranker pulls FlagEmbedding (already present). Both are deliberately NOT core
-  dependencies — the unit suite mocks/patches them, so `mailrag-test` does not need them.
+  dependencies — the unit suite mocks/patches them, so `mailrag` does not need them.
 
 ---
 
@@ -132,7 +131,7 @@ per-batch upsert rate.
 ## 7. Running tests
 
 ```bash
-conda run -n mailrag-test python -m pytest tests/ -q          # full suite
+conda run -n mailrag python -m pytest tests/ -q          # full suite
 # stdlib-only modules can run on the host without the env, e.g.:
 PYTHONPATH=. python3 tests/test_llm_cache.py
 ```
