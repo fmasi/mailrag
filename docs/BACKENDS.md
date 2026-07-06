@@ -28,8 +28,8 @@ one server:
 
 | Where | What it does | How it's built |
 |-------|--------------|----------------|
-| **Answer side** (`Settings.llm`) | generates grounded answers from retrieved threads | LlamaIndex LLM, selected by `RAG_LLM_PROVIDER` |
-| **Cleanup pipeline** (`src/llm/client.py`) | Pass-2 summarize/judge, HyDE, vision OCR | LlamaIndex `OpenAILike`, always — reads `RAG_LLM_API_BASE` directly (provider-agnostic) |
+| **Answer side** (`Settings.llm`) | generates grounded answers from retrieved threads — for both `./mailrag ask` and the MCP [`answer_question`](MCP_SERVER.md#answer_questionquery-collectionnone-k3) tool | LlamaIndex LLM, selected by `RAG_LLM_PROVIDER` |
+| **Cleanup pipeline** (`src/llm/client.py`) | `summarize`/`judge`, HyDE, vision OCR | LlamaIndex `OpenAILike`, always — reads `RAG_LLM_API_BASE` directly (provider-agnostic) |
 
 ### Variables
 
@@ -87,6 +87,12 @@ the local model cache.
 from src.ingest.embedder import make_embedder
 emb = make_embedder("bge-m3")   # dense + learned sparse, produces_sparse=True
 ```
+
+> **`HF_HUB_OFFLINE=1` for cached weights.** The first run downloads ~2 GB of bge-m3
+> weights into your Hugging Face cache; after that, set `HF_HUB_OFFLINE=1` so
+> FlagEmbedding loads from cache instead of contacting the Hub on every build/query
+> (faster, works offline). Applies anywhere bge-m3 embeds — `./mailrag ask`,
+> `./mailrag index`, and the MCP server. See [`SETUP.md § 2`](SETUP.md#2-the-mailrag-environment).
 
 ### b. Remote OpenAI-compatible dense embedder
 
