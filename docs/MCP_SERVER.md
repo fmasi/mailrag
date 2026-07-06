@@ -11,7 +11,7 @@ corpus you have indexed. Every query tool takes an optional `collection` argumen
 so an agent can list what is available and then target a specific corpus per call.
 
 The server is a thin wrapper — retrieval is the same hybrid (bge-m3 dense + learned
-sparse, RRF) searcher used by `mailrag ask`, answers use the same grounded-answer
+sparse, RRF) searcher used by `./mailrag ask`, answers use the same grounded-answer
 path, and attachment text comes straight from the same content-addressed store the
 CLI uses. No ranking, fusion, answering, or extraction logic is reimplemented.
 
@@ -101,7 +101,7 @@ grounded natural-language answer for you.
 ### `list_attachments(thread_id=None, message_id=None, collection=None)`
 
 List the attachments belonging to a thread or a message (parity with the CLI
-`mailrag attachments list`).
+`./mailrag attachments list`).
 
 - **Args:**
   - `thread_id` (str, optional) — thread whose attachments to list.
@@ -125,7 +125,7 @@ List the attachments belonging to a thread or a message (parity with the CLI
 ### `get_attachment(sha256, ocr=None)`
 
 Return the **extracted text** (and metadata) for one attachment (parity with the
-CLI `mailrag attachments get --text`). Raw bytes are **never** returned over MCP.
+CLI `./mailrag attachments get --text`). Raw bytes are **never** returned over MCP.
 
 - **Args:**
   - `sha256` (str, required) — content hash of the attachment (from `list_attachments`).
@@ -157,7 +157,7 @@ precedence order:
 1. the **`collection`** argument (when given);
 2. the **`$MAILRAG_COLLECTION`** environment variable;
 3. the **latest onboarding manifest** (`latest_manifest_collection` — the corpus
-   your most recent `mailrag onboard` built).
+   your most recent `./mailrag onboard` built).
 
 If none of those resolve, the tool returns a clear error
 (`no email collection configured: set MAILRAG_COLLECTION or run 'mailrag onboard' first`)
@@ -166,7 +166,7 @@ rather than crashing. The same precedence drives the `is_default` flag returned 
 
 ## Configuration
 
-Config mirrors `mailrag ask` and is resolved from flags/environment:
+Config mirrors `./mailrag ask` and is resolved from flags/environment:
 
 | Setting | Resolution (highest precedence first) | Notes |
 |---------|---------------------------------------|-------|
@@ -179,24 +179,30 @@ Config mirrors `mailrag ask` and is resolved from flags/environment:
 ## Running it
 
 The server needs an already-indexed Qdrant collection — build one first with
-`mailrag onboard` (see [`QUICKSTART.md`](QUICKSTART.md)). Then launch either way:
+`./mailrag onboard` (see [`QUICKSTART.md`](QUICKSTART.md)). Then launch either way:
 
 ```bash
 # via the CLI verb (recommended)
-mailrag mcp
-mailrag mcp --collection work-rag --qdrant-url http://localhost:6333
+./mailrag mcp
+./mailrag mcp --collection work-rag --qdrant-url http://localhost:6333
 
-# or as a module (no console script needed)
+# or as a module (equivalent — no installed console command)
 python -m src.mcp_server
 ```
 
+Run it in the `mailrag` conda env, and set `HF_HUB_OFFLINE=1` once the bge-m3
+weights are cached so `search_email` / `answer_question` embed the query from
+cache without contacting the Hub (see [`SETUP.md § 2`](SETUP.md#2-the-mailrag-environment)).
 The process speaks MCP over stdio and blocks until the client disconnects.
 
 ## Registering with an MCP client
 
-The repo ships no console-script `mailrag` shim, so point clients at the conda
-env's Python running the module, with `PYTHONPATH` set to the repo root so
-`src` is importable. Adjust the paths to your checkout.
+The repo-root `./mailrag` shim is a shell wrapper that relies on your shell's
+`python` and working directory, so it isn't a stable launch command for an MCP
+client — and there is **no *installed* console command** (Poetry stays
+`package-mode = false`). So point clients directly at the `mailrag` env's Python
+running the module, with `PYTHONPATH` set to the repo root so `src` is importable.
+Adjust the paths to your checkout.
 
 ### Claude Code
 
@@ -285,5 +291,40 @@ tools are the agent-facing subset.
 | Run the MCP server | `mcp` | *(this server)* | Launches the stdio server itself. |
 
 If you need any CLI-only capability, run it from a shell in the `mailrag` conda env
-(e.g. `conda run -n mailrag mailrag onboard …`); it then becomes queryable through
+(e.g. `conda run -n mailrag ./mailrag onboard …`); it then becomes queryable through
 the MCP tools above.
+
+## Advanced: driving retrieval from your own code
+
+The MCP tools wrap the same in-process API the CLI uses, so an agent host (or any
+Python you write) can skip the stdio layer and call retrieval directly. Run this in
+the `mailrag` env, from the repo root, with the bge-m3 weights cached
+(`HF_HUB_OFFLINE=1`):
+
+```python
+from dotenv import load_dotenv; load_dotenv()
+from src.query.hybrid import build_hybrid_searcher
+from src.llm.answer import answer_from_threads
+
+searcher = build_hybrid_searcher(
+    "work-rag",
+    mode="hybrid",     # "hybrid" (best) | "dense" | "sparse"
+    rerank=False,      # True = cross-encoder precision boost (slower, +~2 GB RAM)
+    dense_top_k=20, sparse_top_k=20, top_n=5,
+)
+
+# Thread-aware retrieval — ThreadContext objects (whole threads, not fragments).
+contexts = searcher.search_threads("What did we decide about the Q3 budget?")
+for c in contexts[:5]:
+    print(c.subject)      # thread subject
+    print(c.text[:500])   # rendered thread (headers + bodies), ready for an LLM
+
+# Optional grounded answer over the top-k threads (the answer_question path).
+print(answer_from_threads("What did we decide about the Q3 budget?", contexts, k=3))
+```
+
+`searcher.search(query)` (no expansion) returns ranked `NodeWithScore` chunks if you
+want raw passages instead of whole threads. `search_threads` + `answer_from_threads`
+are exactly what `search_email` and `answer_question` call under the hood. See
+[`RETRIEVAL_GUIDE.md` → How to call it](RETRIEVAL_GUIDE.md#how-to-call-it) for the full
+`HybridSearcher` API and [`BACKENDS.md`](BACKENDS.md) for the answer LLM configuration.
