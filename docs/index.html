@@ -100,7 +100,7 @@
       <div class="bar">thread-aware contextual RAG over the public Enron demo</div>
 <pre><span class="p">$</span> git clone https://github.com/fmasi/mailrag &amp;&amp; cd mailrag
 <span class="p">$</span> make demo                <span class="c"># Qdrant + a thread-aware index over 100 public Enron emails</span>
-<span class="p">$</span> mailrag ask <span class="o">"who approved the Q3 budget, and when?"</span>
+<span class="p">$</span> ./mailrag ask <span class="o">"who approved the Q3 budget, and when?"</span>
   <span class="c">→ retrieves the matching message, expands to its full thread,</span>
   <span class="c">  and answers from the whole conversation — with citations.</span></pre>
     </div>
@@ -127,6 +127,7 @@
       <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Local by default — but point it at <em>any</em> OpenAI-compatible server (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI) with one env var.</p></div>
       <div class="card"><h3>Pluggable loaders</h3><p>Public Enron corpus, local <code>.eml</code> archives, or Azure Blob — behind one <code>EmailLoader</code> interface, ready for live sources next.</p></div>
       <div class="card"><h3>Measured methodology</h3><p>A 360-query eval that prices every technique, controls for confounds, reports significance — and in several cases overturned the intuitive choice.</p></div>
+      <div class="card"><h3>Agents connect over MCP</h3><p>A multi-collection, read-only <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server (<code>./mailrag mcp</code>): any agent can discover your indexed corpora, search threads, ask grounded questions, and read attachment text — five tools, no internals exposed.</p></div>
     </div>
   </section>
 
@@ -168,7 +169,7 @@
 
   <section>
     <h2>The guided wizard</h2>
-    <p class="muted" style="margin:0 0 14px"><code>mailrag wizard</code> is a full-screen terminal app
+    <p class="muted" style="margin:0 0 14px"><code>./mailrag wizard</code> is a full-screen terminal app
        (<a href="https://textual.textualize.io/">Textual</a>): pick a cost-ordered persona, scope your
        folders on a tree, review the exact plan, then watch every step run live. Two human checkpoints —
        the calibrate gate and confirm-before-spend — keep you in control before any LLM cost.</p>
@@ -214,9 +215,9 @@
     <p class="muted" style="margin:0 0 16px">mailrag is built to be one node in a private context
        stack — so the next steps make it easier for agents to reach, and keep its memory current:</p>
     <div class="grid">
-      <div class="card"><h3>MCP server</h3><p>Expose <code>search</code>, <code>ask</code>, and attachment fetch over the Model Context Protocol, so any agent — yours or a teammate's — can query your mail without touching the internals.</p></div>
+      <div class="card"><h3>MCP server — shipped ✓</h3><p>A multi-collection stdio server exposes <code>list_collections</code>, <code>search_email</code>, <code>answer_question</code>, and attachment fetch over the Model Context Protocol — so any agent, yours or a teammate's, can query your mail without touching the internals.</p></div>
       <div class="card"><h3>Live ingestion</h3><p>Move from one-time imports to incremental ingest of incoming mail, so the index stays current — a <em>living</em> context source, not a static snapshot.</p></div>
-      <div class="card"><h3>Guided TUI — shipped ✓</h3><p><code>mailrag wizard</code> is now a full-screen terminal app (Textual): pick a persona, scope folders on a tree, review the plan, and watch the run live — with the calibrate and confirm-before-spend gates as dialogs.</p></div>
+      <div class="card"><h3>Guided TUI — shipped ✓</h3><p><code>./mailrag wizard</code> is now a full-screen terminal app (Textual): pick a persona, scope folders on a tree, review the plan, and watch the run live — with the calibrate and confirm-before-spend gates as dialogs.</p></div>
     </div>
   </section>
 

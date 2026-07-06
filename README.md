@@ -75,13 +75,13 @@ make demo                               # starts Qdrant, builds the contextual i
 emails — per-email preceding-context summaries embedded with bge-m3 hybrid vectors — then
 answers example questions by retrieving and assembling whole threads. This is the
 [§13 stack](docs/EXPERIMENTS.md#13-doc-side-thread-aware-summaries--the-evolution-ladder-1113-2026-06-01);
-a small amount of LLM usage goes to the Pass-2 summaries and the answers.
+a small amount of LLM usage goes to the `summarize` step and the answers.
 
-Once a collection is indexed, you can query it from the CLI (`mailrag ask "..."`) or
+Once a collection is indexed, you can query it from the CLI (`./mailrag ask "..."`) or
 expose it to any agent over the **[Model Context Protocol](docs/MCP_SERVER.md)**:
 
 ```bash
-mailrag mcp                       # stdio MCP server (multi-collection)
+./mailrag mcp                     # stdio MCP server (multi-collection)
 ```
 
 The server is multi-collection and read-only: one process exposes five tools —
@@ -103,12 +103,12 @@ CLI↔MCP capability matrix.
   │ Azure   │          └────┬─────┴────┬────┴────┬────┘
   └─────────┘               │   NormalizedEmail    │
                             ▼                      ▼
-            Pass-1: regex noise filter — tag bulk/newsletters   (no LLM)
+            tag: regex noise filter — flag bulk/newsletters   (no LLM)
                             ▼
-            Pass-2: local LLM — summarize + judge noise, cached  (optional)
+            summarize: local LLM — summary + noise judgement, cached  (optional)
                             ▼
             drop noise · dedup · reply-chain strip
-              └ drop stage is tunable: Pass-1 = save LLM budget · Pass-2 = best quality
+              └ drop stage is tunable: tag = save LLM budget · summarize = best quality
                             ▼
             chunk (SentenceSplitter, bge-m3 tokenizer)
               └ optional: prepend each email's summary  → contextual retrieval
@@ -122,16 +122,18 @@ CLI↔MCP capability matrix.
             query engine (hybrid RRF · thread-aware expansion · optional rerank)
 ```
 
-Pass-1 only *tags* by default, so nothing is lost before the LLM sees it; the confident
-drop happens at Pass-2. Where you drop is a deliberate budget-vs-quality knob — drop at
-Pass-1 to skip the LLM cost, or at Pass-2 for the cleaner result.
+The `tag` step only *tags* by default, so nothing is lost before the LLM sees it; the
+confident drop happens at `summarize` (the LLM pass). Where you drop is a deliberate
+budget-vs-quality knob — drop at `tag` to skip the LLM cost, or at `summarize` for the
+cleaner result. *(These map onto the eval labels used in the case study below and in
+[`EXPERIMENTS.md`](docs/EXPERIMENTS.md): **Pass-1 = `tag`**, **Pass-2 = `summarize`**.)*
 
-Between the two there's an optional, **no-LLM** triage: `mailrag explore` clusters the
+Between the two there's an optional, **no-LLM** triage: `./mailrag scan` clusters the
 corpus embeddings at thread level and ranks the densest "noise pockets" (bulk and
-automated mail) by pass-1-tag enrichment, sender concentration, and tightness. It spends
+automated mail) by `tag` enrichment, sender concentration, and tightness. It spends
 no LLM budget — it reuses the already-embedded vectors when a collection exists, else
 embeds once — and writes a JSON artifact (thread → `.eml` paths) so you can see where the
-noise concentrates before deciding how much Pass-2 to run.
+noise concentrates before deciding how much of the `summarize` pass to run.
 
 ## Case study: what the cleanup & retrieval choices actually bought
 
@@ -264,26 +266,31 @@ Programme"), at the cost of extra queries per search.
 | `src/storage/` | Persistence (local / Pinecone / Qdrant) |
 | `src/query/` | Retrieval + RAG query engine |
 | `src/mcp_server/` | Multi-collection MCP (stdio) server: discovery, search, answer, attachments |
-| `src/llm/` | Optional LLM "Pass-2" summarization + cache |
+| `src/llm/` | Optional LLM `summarize` pass (per-email summary + noise verdict) + cache |
 | `scripts/` | Build / index / maintenance utilities |
 | `tests/` | Test suite (pytest) |
 | `docs/` | Architecture, quickstart, preprocessing guides |
 
 ## CI / quality gates
 
-Every PR runs the following checks (all pinned to commit-SHA'd actions). Each is
-an independently named status so it can be wired into branch protection:
+Every PR runs these checks. Two are **required** branch-protection gates; the rest
+are advisory signals. The actions in our workflow files are pinned to commit SHAs
+(CodeQL is the exception — it runs via GitHub's managed default setup, with no
+workflow file to pin):
 
-| Gate | What it enforces | Run locally |
-|------|------------------|-------------|
-| `pytest` | Full test suite + a coverage floor of **85%** (current ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
-| `ruff (lint + format)` | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
-| `mypy (type check)` | Type-checks `src/` (lenient: `ignore_missing_imports`; CI runs deps-free so third-party imports are `Any` and results are deterministic; per-module opt-outs for legacy modules) | `poetry run mypy src/` |
-| `pip-audit (dependency CVEs)` | Known CVEs in the locked deps (OSV) | `poetry run pip-audit --vulnerability-service osv` |
-| `dependency-review` | Blocks PRs that add deps with `moderate`+ advisories | (PR-only; runs on GitHub) |
+| Gate | Required? | What it enforces | Run locally |
+|------|-----------|------------------|-------------|
+| `pytest` | ✅ required | Full test suite + a coverage floor of **85%** (current ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
+| `CodeQL` | ✅ required | Static security analysis — GitHub **default setup** (managed, no workflow file) | (runs on GitHub) |
+| `ruff (lint + format)` | advisory | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
+| `mypy (type check)` | advisory | Type-checks `src/` (lenient: `ignore_missing_imports`; CI runs deps-free so third-party imports are `Any` and results are deterministic; per-module opt-outs for legacy modules) | `poetry run mypy src/` |
+| `pip-audit (dependency CVEs)` | advisory | Known CVEs in the locked deps (OSV) | `poetry run pip-audit --vulnerability-service osv` |
+| `dependency-review` | advisory | Blocks PRs that add deps with `moderate`+ advisories | (PR-only; runs on GitHub) |
+| Claude review | advisory | Automated PR review + `@claude` mentions (`claude.yml`, `claude-code-review.yml`; skipped until the app token is set) | (runs on GitHub) |
 
 Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.mypy]`) and the workflows
-under `.github/workflows/` (`ci.yml`, `dependency-review.yml`, `test-suite.yml`).
+under `.github/workflows/` (`ci.yml`, `test-suite.yml`, `dependency-review.yml`,
+`claude.yml`, `claude-code-review.yml`); CodeQL has no file (GitHub default setup).
 `ruff check --fix .` and `ruff format .` auto-fix most lint/format findings.
 
 Two transitive advisories with no upstream fix (`nltk` path-traversal, `torch`
@@ -301,11 +308,11 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
 4. [`docs/SETUP.md`](docs/SETUP.md) — full setup, the local `.eml` pipeline, and how to run the tests.
 5. Deep dives:
    - [`docs/BACKENDS.md`](docs/BACKENDS.md) — point mailrag at the LLM / embedder / vector store of your choice (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI, Qdrant), with the dense-only "sparse caveat".
-   - [`docs/VERBS.md`](docs/VERBS.md) — the verb ladder (cost of each step) and the persona recipes; the source of truth for the CLI.
+   - [`docs/VERBS.md`](docs/VERBS.md) — the CLI source of truth: every verb (including `ask` and `mcp`), the cost-ordered ladder, the alias table, and the persona recipes.
+   - [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — the multi-collection stdio MCP server: the `list_collections` / `search_email` / `answer_question` / `list_attachments` / `get_attachment` tools, collection discovery & selection, config, client setup (Claude Code / opencode), and the CLI↔MCP capability matrix.
    - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
    - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
    - [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware *retrieval* (small→big expansion).
-   - [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — the multi-collection stdio MCP server: the `list_collections` / `search_email` / `answer_question` / `list_attachments` / `get_attachment` tools, collection discovery & selection, config, client setup (Claude Code / opencode), and the CLI↔MCP capability matrix.
    - [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — the measured findings behind the case study: cleanup economics, regex-vs-LLM, the labeled-eval ladder (§9–§13), and the corpus-portability result (§14). Start with its [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first) for the `C`/`C′` labels and the two senses of "thread-aware".
 
 Reference: [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent).
@@ -325,11 +332,11 @@ easier for agents to reach, and keep its memory current:
   the index stays current: a *living* context source, not a static snapshot. (The
   `EmailLoader` interface is already source-agnostic to make this clean.)
 - **Guided TUI** ([#36](https://github.com/fmasi/mailrag/issues/36)) — ✅ shipped:
-  `mailrag wizard` is now a full-screen terminal app ([Textual](https://textual.textualize.io/)):
+  `./mailrag wizard` is now a full-screen terminal app ([Textual](https://textual.textualize.io/)):
   pick a persona, scope folders on a tree, review the plan, and watch the run live — with the
   calibrate and confirm-before-spend gates as dialogs (see
   [`docs/GUIDE.md`](docs/GUIDE.md#what-to-expect-from-the-wizard)). The old prompt flow
-  remains as `--classic`; `mailrag run` stays the headless path.
+  remains as `--classic`; `./mailrag run` stays the headless path.
 
   ![The mailrag wizard persona picker — a cost-ordered persona list on the left and a live preview of the highlighted recipe with colour-coded cost badges on the right](docs/images/tui/persona.svg)
 

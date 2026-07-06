@@ -53,7 +53,7 @@ drop, `prune` shows a sample of what it will blacklist and asks.
 **Don't know which?** Run `scan` first — it's free (no LLM) and it *tells you*:
 
 ```text
-$ mailrag scan --profile mybox.profile.json
+$ ./mailrag scan --profile mybox.profile.json
 scan: 186 threads / 188 emails, k=10, seed=11, baseline tag rate=0.022
 ┏━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
 ┃ id ┃ threads ┃ score ┃ tag_lift ┃ top_sender (share)          ┃ tight ┃
@@ -72,7 +72,7 @@ The bigger that share, the more a budget persona saves you.
 
 ## What to expect from the wizard
 
-`mailrag wizard --profile mybox.profile.json` opens a **full-screen TUI**
+`./mailrag wizard --profile mybox.profile.json` opens a **full-screen TUI**
 ([Textual](https://textual.textualize.io/)) that walks the whole pipeline as a
 sequence of screens — a breadcrumb at the top always shows where you are:
 
@@ -131,34 +131,34 @@ Two human checkpoints interrupt the run as modal dialogs, and keep you in contro
 > stay in sync with the code. Regenerate them with
 > `python scripts/gen_tui_screenshots.py`.
 
-Prefer the old line-by-line prompt flow? It's kept as `mailrag wizard --classic`.
+Prefer the old line-by-line prompt flow? It's kept as `./mailrag wizard --classic`.
 For non-interactive / scripted runs, use the headless equivalent:
-`mailrag run --profile … --persona <name> [--model <m>]` — same recipes, same
+`./mailrag run --profile … --persona <name> [--model <m>]` — same recipes, same
 handlers, no prompts.
 
 ## Quick start
 
 ```bash
 # 1. create/scope a profile, measure it
-mailrag scope   --profile mybox.profile.json     # pick folders (interactive)
-mailrag measure --profile mybox.profile.json     # suggest chunk size
+./mailrag scope   --profile mybox.profile.json     # pick folders (interactive)
+./mailrag measure --profile mybox.profile.json     # suggest chunk size
 
 # 2. (optional, free) see where the noise is and get a recommendation
-mailrag scan    --profile mybox.profile.json
+./mailrag scan    --profile mybox.profile.json
 
 # 3. let the wizard walk the rest — or run a persona headlessly
-mailrag wizard  --profile mybox.profile.json
-mailrag run     --profile mybox.profile.json --persona llm-all --model <llm>
+./mailrag wizard  --profile mybox.profile.json
+./mailrag run     --profile mybox.profile.json --persona llm-all --model <llm>
 #    add --limit N to wizard/run for a fast end-to-end test on a small sample
 #    (caps the scan/summarize/index steps) instead of a full multi-hour rebuild
 
 # 4. ask questions
-mailrag ask "what did Alice say about the budget?" --profile mybox.profile.json
+./mailrag ask "what did Alice say about the budget?" --profile mybox.profile.json
 ```
 
 ## Power use & custom personas
 
-Every step is also a standalone verb (`mailrag tag`, `mailrag calibrate`, …), so you
+Every step is also a standalone verb (`./mailrag tag`, `./mailrag calibrate`, …), so you
 can run the pipeline by hand. Personas live in [`personas.yaml`](../personas.yaml) —
 add an entry (or a gitignored `personas.local.yaml`) to define your own recipe; the
 wizard and `run` both read it. See [`VERBS.md`](VERBS.md) for the full ladder and the
@@ -170,14 +170,14 @@ Attachments are stored separately from email bodies. The three commands are:
 
 ```bash
 # ingest a profile's attachment bytes into the content-addressed store
-mailrag attachments build --profile <profile.json> [--limit N]
+./mailrag attachments build --profile <profile.json> [--limit N]
 
 # list a thread's / message's attachments (prints full sha256s)
-mailrag attachments list --thread-id <id>        # or --message-id <id>
+./mailrag attachments list --thread-id <id>        # or --message-id <id>
 
 # fetch one attachment by sha256: extract + print its text, or write raw bytes
-mailrag attachments get <sha256> --text [--extractor llm|tesseract] [--force]
-mailrag attachments get <sha256> --out <path>    # raw bytes (always available)
+./mailrag attachments get <sha256> --text [--extractor llm|tesseract] [--force]
+./mailrag attachments get <sha256> --out <path>    # raw bytes (always available)
 ```
 
 Text extraction runs lazily on `get --text` (and is cached). `--extractor` overrides
