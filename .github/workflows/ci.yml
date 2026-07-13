@@ -92,10 +92,14 @@ jobs:
       # --ignore-vuln entries below are transitive advisories with NO upstream
       # fix release yet; every fixable advisory was already resolved by bumping
       # the lockfile (cryptography 49.0.0, pypdf 6.14.2, tornado 6.5.7, and
-      # torch 2.12.1 which moved us out of GHSA-rrmf-rvhw-rf47's range). Revisit
-      # these ignores whenever the packages cut a patched release.
+      # torch 2.12.1 which moved us out of GHSA-rrmf-rvhw-rf47's range; plus
+      # pillow 12.3.0, soupsieve 2.8.4, transformers 5.12.1 and click 8.4.2 via
+      # the constraint floors in pyproject.toml). Revisit these ignores whenever
+      # the packages cut a patched release.
       #   nltk 3.9.4 — path traversal in nltk.data (no fixed version):
       #     https://github.com/advisories/GHSA-p4gq-832x-fm9v  (alias PYSEC-2026-597)
+      #     CVE-2026-54293 (alias of the above GHSA) claims a fix in nltk 3.10.0,
+      #     but 3.10.0 is not yet published on PyPI, so the ignore still stands.
       - name: Run pip-audit
         run: >
           poetry run pip-audit
