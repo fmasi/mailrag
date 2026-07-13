@@ -54,10 +54,23 @@ openpyxl = "^3.1"
 python-pptx = "^1.0"
 pytesseract = "^0.3"
 pdf2image = "^1.17"
-pillow = "^12.2"
+# 12.3 is the CVE floor: 12.2 is affected by CVE-2026-54059/54060/55379/55380/55798
+# (PYSEC-2026-2253..2257), all fixed in 12.3.0.
+pillow = "^12.3"
 # Official Model Context Protocol SDK — powers the stdio MCP server
 # (src/mcp_server) that exposes the email-RAG query path to MCP clients.
 mcp = "^1.28.1"
+# --- Transitive security floors (not imported directly) ---------------------
+# These are pulled in transitively (soupsieve via beautifulsoup4; transformers
+# via FlagEmbedding). We pin a minimum here purely to lift the resolved version
+# past known CVEs — see the pip-audit job in .github/workflows/ci.yml.
+#   soupsieve  — CVE-2026-49476/49477 (PYSEC-2026-3071/3072), fixed in 2.8.4.
+#                Supersedes Dependabot PR #79.
+soupsieve = "^2.8.4"
+#   transformers — CVE-2026-5241 (PYSEC-2026-2290), fixed in 5.5.0.
+transformers = "^5.5.0"
+#   click — CVE-2026-7246 (PYSEC-2026-2132), fixed in 8.3.3; pin the 8.4 line.
+click = "^8.4.1"
 
 [tool.poetry.extras]
 # C/NIM experiment path (NVIDIA NeMo Retriever dense embed + rerank NIMs)
