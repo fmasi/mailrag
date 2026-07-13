@@ -326,6 +326,50 @@ focused chunks = better retrieval precision.
 
 ---
 
+## Attachment content is indexed (issue #80)
+
+The email *body* is often a four-line "see attached" while the actual facts —
+quotas, targets, contract figures — live inside a spreadsheet, PDF or deck. Those
+attachments are now indexed alongside the body so `search_email` can find them.
+
+During the build (`src/pipeline/build.py`), for every `.eml` being indexed,
+`build_attachment_documents` (`src/indexing/attachment_docs.py`) extracts each
+attachment's text with the existing handler registry
+(`src/attachments/extract` — `.xlsx`/`.csv` cells, `.pdf` text layer, `.docx`,
+`.pptx`, image OCR) and emits a **separate** LlamaIndex `Document` per attachment.
+Keeping attachment documents separate from the body means the chunker never mixes
+a terse body with a 500-row sheet in one chunk.
+
+Each attachment chunk carries payload that traces the hit back to its email:
+
+| Payload field | Meaning |
+|---|---|
+| `content_kind` | `"attachment"` (vs a body chunk) — filterable |
+| `attachment_name` | the (decoded) filename, e.g. `Q3 MBO targets partner team.xlsx` |
+| `parent_message_id` | the `Message-ID` of the carrying email |
+| `thread_id` | same value as the email's body chunks, so a thread joins its files |
+
+Disable with `build.run(..., index_attachments=False)` if you only want body text.
+
+## Body decoding (issue #81)
+
+Bodies are decoded **before** chunking/embedding: `Content-Transfer-Encoding` is
+honoured per MIME part (quoted-printable and base64 are decoded via
+`get_payload(decode=True)`), `multipart/alternative` prefers `text/plain` and falls
+back to stripped `text/html`, and raw base64 is never embedded as prose. See
+`MailArchiveXLoader._extract_email_body_from_message`.
+
+## Exact numbers & IDs (issue #82, partial)
+
+Bare numbers carry almost no semantic signal, and one figure has many surface forms
+(`$210,000,000`, `210,000,000`, `210M`, `210 million`). At both index and query time
+we append a **canonical integer token** (`210000000`) via `augment_numeric`
+(`src/ingest/numeric.py`) so the sparse/dense legs share a matchable token while the
+original surface form is preserved. This improves *exact-figure* recall only; fuzzy
+numeric ranges and a raw-corpus `grep_email` escape hatch remain open on #82.
+
+---
+
 ## Re-indexing after changes
 
 Stripping changes the *content* that gets embedded. If you change stripping
