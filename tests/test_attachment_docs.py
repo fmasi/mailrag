@@ -63,7 +63,10 @@ class TestBuildAttachmentDocuments(unittest.TestCase):
     def test_xlsx_cells_become_a_document_with_lineage(self):
         build = self._paths()
         xlsx = _xlsx_bytes(
-            [["Objective", "Weight", "Team Target FY2025"], ["Partner bookings", 0.50, "210,000,000"]]
+            [
+                ["Objective", "Weight", "Team Target FY2025"],
+                ["Partner bookings", 0.50, "210,000,000"],
+            ]
         )
         path = _write_eml(
             os.path.join(self.d, "mbo.eml"),

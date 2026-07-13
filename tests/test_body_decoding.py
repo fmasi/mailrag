@@ -43,9 +43,7 @@ class TestBodyDecoding(unittest.TestCase):
         m = EmailMessage()
         m["Subject"] = "s"
         m.set_content("PLAIN body 210,000,000", subtype="plain", cte="quoted-printable")
-        m.add_alternative(
-            "<html><body>HTML body 999</body></html>", subtype="html", cte="base64"
-        )
+        m.add_alternative("<html><body>HTML body 999</body></html>", subtype="html", cte="base64")
         body = _body(bytes(m))
         self.assertIn("210,000,000", body)
         # HTML branch not used when a plain part exists.
