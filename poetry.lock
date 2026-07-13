@@ -6871,4 +6871,4 @@ nvidia = ["llama-index-embeddings-nvidia", "llama-index-postprocessor-nvidia-rer
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "6cd918c460b9c67fcbc1ea011508550be459615cec4c2994df752acfd7ddb613"
+content-hash = "ebff25f23804ee4dd68786ef33c867ed673331430bb9abb8cd2671c1fdcaeb4b"

@@ -35,6 +35,7 @@ from src.attachments.ingest_eml import _decode_filename
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 from src.data.models import _truncate
 from src.data.threading import compute_thread_id
+from src.indexing.attachment_chunking import DEFAULT_CHUNK_BUDGET, chunk_attachment
 
 _MAX_ATTACH_NAME_LEN = 512
 
@@ -47,12 +48,16 @@ _EXCLUDED_KEYS = [
     "parent_message_id",
     "content_kind",
     "attachment_name",
+    "chunk_index",
 ]
 
 
-def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, str]]:
-    """Return ``(filename, text, message_id, thread_id)`` for every attachment in
-    *path* that yielded non-empty text. Never raises — a malformed .eml yields []."""
+def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, str, bytes, str]]:
+    """Return ``(filename, text, message_id, thread_id, data, mime)`` for every
+    attachment in *path* that yielded non-empty text. The raw ``data`` bytes and
+    ``mime`` are carried through so the structure-aware chunker can re-parse the
+    attachment by its own format units (issue #89). Never raises — a malformed .eml
+    yields []."""
     try:
         loaded = MailArchiveXLoader(eml_files=[path], verbose=False).load()
     except Exception:
@@ -72,7 +77,7 @@ def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, st
     except Exception:
         return []
 
-    out: List[tuple[str, str, str, str]] = []
+    out: List[tuple[str, str, str, str, bytes, str]] = []
     for part in msg.walk():
         if part.is_multipart():
             continue
@@ -92,14 +97,31 @@ def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, st
             mime = f"{mime}; charset={charset}"
         result = extractor.extract(data, mime, filename or "(unnamed)")
         if result.status == Status.EXTRACTED and result.text.strip():
-            out.append((filename or "(unnamed)", result.text, message_id, thread_id))
+            # ``data`` is bytes here (decode=True on a leaf part) — narrow it for the
+            # typed tuple so the structure-aware chunker receives raw bytes.
+            out.append(
+                (filename or "(unnamed)", result.text, message_id, thread_id, bytes(data), mime)
+            )
     return out
 
 
 def build_attachment_documents(
-    eml_paths: Iterable[str], *, extractor=None, extractor_name: Optional[str] = None
+    eml_paths: Iterable[str],
+    *,
+    extractor=None,
+    extractor_name: Optional[str] = None,
+    chunk_budget: int = DEFAULT_CHUNK_BUDGET,
+    token_len=None,
 ) -> List[Document]:
-    """Extract every attachment's text from *eml_paths* into LlamaIndex Documents.
+    """Extract every attachment's text from *eml_paths* into LlamaIndex Documents,
+    split structure-aware into embedder-sized chunks (issue #89).
+
+    Each attachment is routed through :func:`chunk_attachment`, which splits it by
+    its FORMAT's own units — spreadsheet row-groups (header repeated per chunk), PDF
+    pages, PPTX slides, DOCX sections — with a prose-splitter fallback. Every emitted
+    chunk becomes its own Document already sized under ``chunk_budget`` (a hard cap
+    well below bge-m3's 8192-token limit), so the shared body ``SentenceSplitter`` in
+    ``build_contextual_index`` leaves it intact instead of truncating a giant sheet.
 
     Parameters
     ----------
@@ -111,20 +133,27 @@ def build_attachment_documents(
     extractor_name:
         Name of the default extractor/OCR backend to build when ``extractor`` is
         None. ``"tesseract"`` avoids constructing an LLM client for the OCR leg.
+    chunk_budget:
+        Hard per-chunk token cap (defaults to the profile ``chunk_size``).
+    token_len:
+        Injectable token counter passed through to :func:`chunk_attachment`.
 
     Returns
     -------
     list[Document]
-        One Document per attachment that produced non-empty text. Body-diluting is
-        avoided by keeping these documents separate from the email-body documents.
+        One Document per attachment *chunk*. Small attachments still yield a single
+        Document. Body-diluting is avoided by keeping these documents separate from
+        the email-body documents.
     """
     if extractor is None:
         extractor = build_default_extractor(extractor_name)
 
     docs: List[Document] = []
     for path in eml_paths:
-        for filename, text, message_id, thread_id in _extract_texts_for_eml(path, extractor):
-            metadata = {
+        for filename, text, message_id, thread_id, data, mime in _extract_texts_for_eml(
+            path, extractor
+        ):
+            base_meta: dict = {
                 "content_kind": "attachment",
                 "attachment_name": _truncate(filename, _MAX_ATTACH_NAME_LEN),
                 "thread_id": thread_id,
@@ -132,17 +161,32 @@ def build_attachment_documents(
                 "source_id": path,
             }
             if message_id:
-                metadata["parent_message_id"] = message_id
+                base_meta["parent_message_id"] = message_id
             # A concise, human-readable subject line for the chunk so search results
             # are legible ("attachment: <name>") without embedding the long path.
-            metadata["subject"] = _truncate(f"attachment: {filename}", _MAX_ATTACH_NAME_LEN)
-            docs.append(
-                Document(
-                    text=text,
-                    metadata=metadata,
-                    doc_id=f"attachment_{message_id or path}_{filename}",
-                    excluded_embed_metadata_keys=_EXCLUDED_KEYS,
-                    excluded_llm_metadata_keys=_EXCLUDED_KEYS,
-                )
+            base_meta["subject"] = _truncate(f"attachment: {filename}", _MAX_ATTACH_NAME_LEN)
+
+            chunks = chunk_attachment(
+                data=data,
+                text=text,
+                mime=mime,
+                filename=filename,
+                budget=chunk_budget,
+                token_len=token_len,
             )
+            for idx, chunk in enumerate(chunks):
+                metadata = dict(base_meta)
+                if len(chunks) > 1:
+                    # Tag the chunk's position so a hit names which slice of a large
+                    # sheet/PDF it came from; single-chunk attachments stay untagged.
+                    metadata["chunk_index"] = idx
+                docs.append(
+                    Document(
+                        text=chunk,
+                        metadata=metadata,
+                        doc_id=f"attachment_{message_id or path}_{filename}_{idx}",
+                        excluded_embed_metadata_keys=_EXCLUDED_KEYS,
+                        excluded_llm_metadata_keys=_EXCLUDED_KEYS,
+                    )
+                )
     return docs

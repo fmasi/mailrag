@@ -52,6 +52,11 @@ pypdf = "^6.10.2"
 python-docx = "^1.1"
 openpyxl = "^3.1"
 python-pptx = "^1.0"
+# Structure-aware attachment chunking (#89): parse spreadsheets by row-groups
+# (header repeated per chunk) so large sheets are split into embedder-sized chunks
+# instead of one giant blob bge-m3 truncates at 8192 tokens. Used in
+# src/indexing/attachment_chunking.py.
+pandas = ">=2.2,<4"
 pytesseract = "^0.3"
 pdf2image = "^1.17"
 # 12.3 is the CVE floor: 12.2 is affected by CVE-2026-54059/54060/55379/55380/55798
