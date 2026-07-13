@@ -32,6 +32,11 @@ def _payload_indexes():
         ("thread_id", models.PayloadSchemaType.KEYWORD),
         ("source", models.PayloadSchemaType.KEYWORD),
         ("date", models.PayloadSchemaType.KEYWORD),
+        # Attachment lineage (issue #80): filter "chunks from attachments",
+        # "chunks of this email's files", and full-text on the filename.
+        ("content_kind", models.PayloadSchemaType.KEYWORD),
+        ("parent_message_id", models.PayloadSchemaType.KEYWORD),
+        ("attachment_name", models.PayloadSchemaType.TEXT),
     ]
 
 

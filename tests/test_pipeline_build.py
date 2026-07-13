@@ -79,6 +79,53 @@ class TestBuildStage(unittest.TestCase):
         self.assertEqual(args[0], kept)
         self.assertIs(kwargs["embed_summary"], True)
 
+    def test_attachment_docs_are_built_and_passed_as_extra_docs(self):
+        """build.run extracts attachment docs from the indexed emails' paths and
+        hands them to build_contextual_index as extra_docs (issue #80)."""
+        from src.pipeline import build
+
+        prof = CorpusProfile(
+            root="/r",
+            selection_rules=[{"type": "prefix", "value": "a/"}],
+            collection="c",
+        )
+        e = _email("b@real.example")
+        e.source_id = "/r/a/x.eml"  # loader sets source_id to the .eml path
+        sentinel_docs = [object()]
+        with (
+            mock.patch("src.pipeline.build.resolve_index_files", return_value=(["/r/a/x.eml"], [])),
+            mock.patch("src.pipeline.build.MailArchiveXLoader") as Loader,
+            mock.patch("src.pipeline.build.build_contextual_index") as bci,
+            mock.patch("src.pipeline.build.NoiseFilter") as NF,
+            mock.patch(
+                "src.pipeline.build.build_attachment_documents", return_value=sentinel_docs
+            ) as bad,
+        ):
+            Loader.return_value.load.return_value = [e]
+            NF.from_project_rules.return_value.matched_category.return_value = None
+            build.run(prof, embedder=mock.Mock(), recreate=True)
+        # attachments extracted from the .eml path of the indexed email
+        self.assertEqual(bad.call_args[0][0], ["/r/a/x.eml"])
+        # and forwarded to the indexer as extra_docs
+        self.assertIs(bci.call_args.kwargs["extra_docs"], sentinel_docs)
+
+    def test_index_attachments_false_skips_extraction(self):
+        from src.pipeline import build
+
+        prof = CorpusProfile(root="/r", selection_rules=[], collection="c")
+        with (
+            mock.patch("src.pipeline.build.resolve_index_files", return_value=(["/r/a/x.eml"], [])),
+            mock.patch("src.pipeline.build.MailArchiveXLoader") as Loader,
+            mock.patch("src.pipeline.build.build_contextual_index") as bci,
+            mock.patch("src.pipeline.build.NoiseFilter") as NF,
+            mock.patch("src.pipeline.build.build_attachment_documents") as bad,
+        ):
+            Loader.return_value.load.return_value = [_email("b@real.example")]
+            NF.from_project_rules.return_value.matched_category.return_value = None
+            build.run(prof, embedder=mock.Mock(), recreate=True, index_attachments=False)
+        bad.assert_not_called()
+        self.assertIsNone(bci.call_args.kwargs["extra_docs"])
+
     def test_no_embed_summary_skips_pass2_cache(self):
         from src.pipeline import build
 

@@ -17,6 +17,7 @@ from src.data.dedup import dedup_by_content
 from src.data.noise_filter import NoiseFilter
 from src.ingest import hybrid_qdrant as hq
 from src.ingest.embed_text import embed_max_length, prepend_summary
+from src.ingest.numeric import augment_numeric
 from src.ingest.sparse import lexical_weights_to_sparse
 
 
@@ -44,6 +45,7 @@ def build_contextual_index(
     recreate: bool = True,
     qdrant_url: str = "http://localhost:6333",
     apply_noise_filter: bool = True,
+    extra_docs: Optional[List] = None,
 ) -> BuildResult:
     """Clean -> (inject summaries) -> split -> dedup -> bge-m3 hybrid embed -> upsert.
 
@@ -82,6 +84,14 @@ def build_contextual_index(
         Drop and recreate the collection before indexing when True.
     qdrant_url:
         URL of the Qdrant instance.
+    extra_docs:
+        Optional pre-built LlamaIndex ``Document`` objects to index alongside the
+        email bodies — the attachment documents from
+        ``src.indexing.attachment_docs.build_attachment_documents`` (issue #80).
+        They are chunked with the same splitter but carry their own
+        ``content_kind="attachment"`` / ``attachment_name`` / ``parent_message_id``
+        payload so an attachment hit traces back to its email. Kept separate from
+        the body documents so a terse 4-line body never dilutes a 500-row sheet.
 
     Returns
     -------
@@ -105,8 +115,12 @@ def build_contextual_index(
 
     kept_emails = len(emails)
 
-    # 3. Convert to LlamaIndex Documents
+    # 3. Convert to LlamaIndex Documents. Attachment documents (issue #80) are
+    # appended as their own Documents so they chunk independently of the body —
+    # a 4-line body must not be split into the same chunk as a 500-row sheet.
     docs = [e.to_document(doc_id=f"{e.source}_{i}") for i, e in enumerate(emails)]
+    if extra_docs:
+        docs.extend(extra_docs)
     if not docs:
         return BuildResult(collection=collection, kept_emails=0, chunks=0)
 
@@ -155,6 +169,12 @@ def build_contextual_index(
             t = n.get_content(metadata_mode=MetadataMode.EMBED)
             if embed_summary:
                 t = prepend_summary(t, n.metadata.get("summary"))
+            # Append canonical numeric tokens ($210,000,000 -> 210000000) so the
+            # sparse/dense legs gain an exact-figure hit (issue #82). The same
+            # augmentation runs at query time (src/query/hybrid path) so both sides
+            # share the token-id vocabulary. The stored `text` payload below keeps
+            # the untouched surface form.
+            t = augment_numeric(t)
             embed_texts.append(t)
         dense, sparse = embedder.encode(embed_texts, batch_size=embed_batch, max_length=enc_max_len)
         points = []
