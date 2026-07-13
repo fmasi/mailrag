@@ -49,5 +49,25 @@ class TestBgeM3SparseQueryFn(unittest.TestCase):
         self.assertEqual(values, [[0.5], []])
 
 
+class TestNumericQueryAugmentation(unittest.TestCase):
+    """Query-time numeric normalisation mirrors the index-time one (issue #82)."""
+
+    def test_sparse_query_is_augmented_with_canonical_number(self):
+        emb = MagicMock()
+        emb.encode.return_value = (np.zeros((1, 3)), [{}])
+        fn = make_bge_m3_sparse_query_fn(emb)
+        fn(["$210,000,000"])
+        encoded = emb.encode.call_args[0][0][0]
+        self.assertIn("210000000", encoded)
+
+    def test_dense_query_is_augmented_with_canonical_number(self):
+        emb = MagicMock()
+        emb.encode.return_value = (np.array([[0.1, 0.2, 0.3]]), [{}])
+        m = BgeM3LlamaIndexEmbedding(embedder=emb)
+        m._get_query_embedding("we booked 210M")
+        encoded = emb.encode.call_args[0][0][0]
+        self.assertIn("210000000", encoded)
+
+
 if __name__ == "__main__":
     unittest.main()

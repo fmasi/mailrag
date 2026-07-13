@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 from src.data.noise_filter import NoiseFilter
+from src.indexing.attachment_docs import build_attachment_documents
 from src.indexing.contextual_index import build_contextual_index
 from src.ingest.local_source import resolve_index_files
 from src.llm.cache import Pass2Cache
@@ -21,6 +22,8 @@ def run(
     summaries=None,
     limit=None,
     noise_min_confidence=0.7,
+    index_attachments=True,
+    attachment_extractor_name="tesseract",
 ):
     kept, _ = resolve_index_files(
         profile.resolved_root(), profile.selection_rules, getattr(profile, "blacklist", None)
@@ -47,6 +50,20 @@ def run(
             f"pass2 apply: dropped {dropped} noise (confidence >= "
             f"{noise_min_confidence}); indexing {len(emails)} with summaries"
         )
+    # Attachment content (issue #80). Extract text from the attachments of the
+    # emails we are actually indexing and hand it in as SEPARATE documents so a
+    # fact that lives only inside an .xlsx/.pdf/.docx/.pptx becomes searchable and
+    # traces back to its email via parent_message_id/thread_id. Built from the
+    # final `emails` (post-pass2) so dropped-as-noise emails don't sneak their
+    # attachments back in. source_id is the .eml path (set by the loader).
+    attachment_docs = None
+    if index_attachments:
+        eml_paths = [e.source_id for e in emails if getattr(e, "source_id", None)]
+        attachment_docs = build_attachment_documents(
+            eml_paths, extractor_name=attachment_extractor_name
+        )
+        print(f"attachments: indexed text from {len(attachment_docs)} attachment(s)")
+
     return build_contextual_index(
         emails,
         collection=profile.collection,
@@ -58,4 +75,5 @@ def run(
         recreate=recreate,
         qdrant_url=profile.qdrant_url,
         apply_noise_filter=False,
+        extra_docs=attachment_docs,
     )
