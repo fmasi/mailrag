@@ -99,8 +99,12 @@ class _Corpus:
         _write(
             os.path.join(self.dir, "plain.eml"),
             _plain_eml(
-                "Invoice", "alice@x.com", "bob@y.com", "Mon, 1 Jan 2025 10:00:00 +0000",
-                "<inv1>", "The March Acme invoice #4021 was $12,480.",
+                "Invoice",
+                "alice@x.com",
+                "bob@y.com",
+                "Mon, 1 Jan 2025 10:00:00 +0000",
+                "<inv1>",
+                "The March Acme invoice #4021 was $12,480.",
             ),
         )
         # QP encodes '=' as '=3D' and soft-wraps with '='.

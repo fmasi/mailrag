@@ -177,9 +177,7 @@ class TestSearchEmail(unittest.TestCase):
         # A 5000-char body must be windowed to max_chars around the match.
         body = ("x" * 2000) + " TARGETWORD " + ("y" * 3000)
         thread = _FakeThread("t1", "S", body)
-        rows = server.search_email(
-            "targetword", max_chars=200, searcher=_FakeSearcher([thread])
-        )
+        rows = server.search_email("targetword", max_chars=200, searcher=_FakeSearcher([thread]))
         snippet = rows[0]["snippet"]
         self.assertLessEqual(len(snippet), 200 + 2)  # + ellipsis markers
         self.assertIn("targetword", snippet.lower())
@@ -187,15 +185,15 @@ class TestSearchEmail(unittest.TestCase):
     def test_max_chars_is_hard_capped(self):
         body = "z" * 20000
         thread = _FakeThread("t1", "S", body)
-        rows = server.search_email(
-            "nomatch", max_chars=999999, searcher=_FakeSearcher([thread])
-        )
+        rows = server.search_email("nomatch", max_chars=999999, searcher=_FakeSearcher([thread]))
         # Even a huge requested max_chars is clamped to the hard cap.
         self.assertLessEqual(len(rows[0]["snippet"]), server.HARD_SEARCH_MAX_CHARS + 1)
 
     def test_bad_max_chars_rejected(self):
         with self.assertRaises(ValueError):
-            server.search_email("q", max_chars=0, searcher=_FakeSearcher([_FakeThread("t", "s", "b")]))
+            server.search_email(
+                "q", max_chars=0, searcher=_FakeSearcher([_FakeThread("t", "s", "b")])
+            )
 
     def test_full_returns_whole_body(self):
         body = "full body here " * 100
@@ -228,9 +226,7 @@ class TestGrepEmailTool(unittest.TestCase):
             "src.mcp_server.server._grep_email", return_value=[{"subject": "hit"}]
         ) as grep:
             rows = server.grep_email("210,000,000", max_matches=5, regex=False)
-        grep.assert_called_once_with(
-            "210,000,000", collection=None, max_matches=5, regex=False
-        )
+        grep.assert_called_once_with("210,000,000", collection=None, max_matches=5, regex=False)
         self.assertEqual(rows[0]["subject"], "hit")
 
 
@@ -309,9 +305,7 @@ class TestSearchAnswerParity(unittest.TestCase):
                 return (t for t in threads)  # a one-shot generator
 
         with mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"):
-            out = server.answer_question(
-                "q", k=2, searcher=_GenSearcher(), healthcheck=False
-            )
+            out = server.answer_question("q", k=2, searcher=_GenSearcher(), healthcheck=False)
         self.assertEqual([s["thread_id"] for s in out["sources"]], ["t1", "t2"])
 
 
@@ -321,9 +315,7 @@ class TestAnswerQuestion(unittest.TestCase):
         with mock.patch(
             "src.mcp_server.server.answer_from_threads", return_value="GROUNDED"
         ) as answer:
-            out = server.answer_question(
-                "when due?", k=2, searcher=searcher, healthcheck=False
-            )
+            out = server.answer_question("when due?", k=2, searcher=searcher, healthcheck=False)
         self.assertEqual(searcher.calls, ["when due?"])
         # answer_from_threads receives the full context list + k (it truncates).
         args, kwargs = answer.call_args

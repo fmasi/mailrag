@@ -180,7 +180,9 @@ def _thread_meta(ctx) -> Dict[str, Any]:
     }
 
 
-def _thread_to_dict(ctx, query: str = "", max_chars: int = DEFAULT_SEARCH_MAX_CHARS) -> Dict[str, Any]:
+def _thread_to_dict(
+    ctx, query: str = "", max_chars: int = DEFAULT_SEARCH_MAX_CHARS
+) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` into a **bounded** JSON result row.
 
     Returns a snippet window (``snippet``) plus metadata instead of the full
@@ -562,9 +564,7 @@ def build_server():
             max_matches: Max matching messages (default 50, hard cap 500).
             regex: Treat ``pattern`` as a Python regex (default False = literal).
         """
-        return grep_email(
-            pattern, collection=collection, max_matches=max_matches, regex=regex
-        )
+        return grep_email(pattern, collection=collection, max_matches=max_matches, regex=regex)
 
     @server.tool(name="answer_question")
     def _tool_answer_question(
