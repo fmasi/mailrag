@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Callable, List, Tuple
 from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.embeddings import BaseEmbedding
 
+from src.ingest.numeric import augment_numeric
 from src.ingest.sparse import lexical_weights_to_sparse
 
 if TYPE_CHECKING:
@@ -37,7 +38,10 @@ class BgeM3LlamaIndexEmbedding(BaseEmbedding):
         return [[float(x) for x in row] for row in dense_vecs]
 
     def _get_query_embedding(self, query: str) -> List[float]:
-        return self._dense([query])[0]
+        # Augment the query with canonical numeric tokens so an exact-figure query
+        # ("$210,000,000" / "210M") shares the token-id vocabulary with the
+        # index-time augmentation (issue #82).
+        return self._dense([augment_numeric(query)])[0]
 
     def _get_text_embedding(self, text: str) -> List[float]:
         return self._dense([text])[0]
@@ -62,6 +66,11 @@ def make_bge_m3_sparse_query_fn(embedder: "BgeM3Embedder") -> SparseEncoderCalla
     """Return a LlamaIndex sparse_query_fn backed by bge-m3 lexical weights."""
 
     def _fn(texts: List[str]) -> Tuple[List[List[int]], List[List[float]]]:
+        # Augment each query with canonical numeric tokens so the sparse leg gets a
+        # near-exact hit on exact figures (issue #82); mirrors the index-time
+        # augmentation in build_contextual_index. This fn is only used for the query
+        # role in practice (docs are indexed by the build path, not here).
+        texts = [augment_numeric(t) for t in texts]
         _, lexical_weights = embedder.encode(texts)
         indices: List[List[int]] = []
         values: List[List[float]] = []
