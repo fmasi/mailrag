@@ -38,6 +38,7 @@ class _FakeLLMClient:
     def __init__(self, text):
         self._llm = _FakeLLM(text)
         self.llm_calls = []
+        self.base_url = "http://localhost:1234/v1"
 
     def llm(self, model, temperature=0.0):
         self.llm_calls.append((model, temperature))
@@ -212,6 +213,108 @@ class TestResolveLlmApiBase(unittest.TestCase):
             os.environ, {"RAG_LLM_API_BASE": " ", "RAG_LLM_BASE_URL": "  "}, clear=True
         ):
             self.assertEqual(client.resolve_llm_api_base(), "http://localhost:1234/v1")
+
+
+class _RaisingLLM:
+    """An LLM whose ``complete`` raises a chosen exception (endpoint failures)."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def complete(self, prompt):
+        raise self._exc
+
+
+class _RaisingClient:
+    """Stands in for ``_LLMClient`` but its ``.llm`` raises on ``complete``."""
+
+    def __init__(self, exc, base_url="http://localhost:1234/v1"):
+        self.base_url = base_url
+        self._llm = _RaisingLLM(exc)
+
+    def llm(self, model, temperature=0.0):
+        return self._llm
+
+
+class TestApiKeyResolution(unittest.TestCase):
+    """The sentinel key is used only when RAG_LLM_API_KEY is unset (issue #83)."""
+
+    def test_placeholder_when_unset(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(client._resolve_api_key(), "lm-studio")
+            self.assertTrue(client.using_placeholder_key())
+
+    def test_real_key_used_when_set(self):
+        with mock.patch.dict(os.environ, {"RAG_LLM_API_KEY": "sk-real"}, clear=True):
+            self.assertEqual(client._resolve_api_key(), "sk-real")
+            self.assertFalse(client.using_placeholder_key())
+
+    def test_blank_key_falls_back_to_placeholder(self):
+        with mock.patch.dict(os.environ, {"RAG_LLM_API_KEY": "   "}, clear=True):
+            self.assertTrue(client.using_placeholder_key())
+
+
+class TestChatAuthError(unittest.TestCase):
+    """A 401/auth failure becomes a clear, actionable LLMHealthcheckError."""
+
+    def test_401_reraised_as_healthcheck_error_naming_key(self):
+        exc = Exception("Error code: 401 - Malformed LM Studio API token")
+        c = _RaisingClient(exc)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(client.LLMHealthcheckError) as ctx:
+                client.chat(c, "m", "hi")
+        msg = str(ctx.exception)
+        self.assertIn("RAG_LLM_API_KEY", msg)
+        self.assertNotEqual(msg.strip(), "401")  # not a raw status leak
+
+    def test_non_auth_error_propagates_unchanged(self):
+        exc = RuntimeError("connection refused")
+        c = _RaisingClient(exc)
+        with self.assertRaises(RuntimeError):
+            client.chat(c, "m", "hi")
+
+
+class TestHealthcheck(unittest.TestCase):
+    """healthcheck() fails loudly at init instead of a per-query 401 (issue #83)."""
+
+    def test_ok_when_endpoint_responds(self):
+        c = _FakeLLMClient("pong")
+        # No RAG_LLM_MODEL needed when we pass model explicitly.
+        self.assertIsNone(client.healthcheck(c, model="m"))
+
+    def test_missing_model_raises_naming_model_var(self):
+        c = _FakeLLMClient("x")
+        with self.assertRaises(client.LLMHealthcheckError) as ctx:
+            client.healthcheck(c, model="")
+        self.assertIn("RAG_LLM_MODEL", str(ctx.exception))
+
+    def test_auth_failure_names_api_key_and_placeholder(self):
+        c = _RaisingClient(Exception("HTTP 401 Unauthorized"))
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(client.LLMHealthcheckError) as ctx:
+                client.healthcheck(c, model="m")
+        self.assertIn("RAG_LLM_API_KEY", str(ctx.exception))
+
+    def test_unreachable_endpoint_names_base(self):
+        c = _RaisingClient(RuntimeError("connection refused"), base_url="http://x:9/v1")
+        with self.assertRaises(client.LLMHealthcheckError) as ctx:
+            client.healthcheck(c, model="m")
+        self.assertIn("http://x:9/v1", str(ctx.exception))
+        self.assertIn("RAG_LLM_API_BASE", str(ctx.exception))
+
+    def test_docker_host_gotcha_reported_as_unreachable(self):
+        # A base URL pointing at host.docker.internal from the host (issue #29
+        # class) surfaces as a clear unreachable error naming RAG_LLM_API_BASE,
+        # not an opaque connection traceback.
+        c = _RaisingClient(
+            ConnectionError("Failed to establish a new connection: [Errno 61]"),
+            base_url="http://host.docker.internal:1234/v1",
+        )
+        with self.assertRaises(client.LLMHealthcheckError) as ctx:
+            client.healthcheck(c, model="m")
+        msg = str(ctx.exception)
+        self.assertIn("host.docker.internal", msg)
+        self.assertIn("RAG_LLM_API_BASE", msg)
 
 
 if __name__ == "__main__":

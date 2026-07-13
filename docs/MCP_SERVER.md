@@ -28,9 +28,16 @@ CLI uses. No ranking, fusion, answering, or extraction logic is reimplemented.
 
 ## Tools
 
-All five tools are registered on one server. Every query tool accepts an optional
+All seven tools are registered on one server. Every query tool accepts an optional
 `collection`; when omitted it falls back to the server's resolved default (see
 [Collection discovery & selection](#collection-discovery--selection)).
+
+> **Bounded output.** `search_email` returns a **snippet window + metadata** per
+> hit, not the full thread body (a single call used to emit ~130 K chars). Pull a
+> full thread on demand with `get_thread` (or `search_email(..., full=True)`).
+> For exact needle hunts — a number, an ID, an email address, an error string —
+> use `grep_email`, a literal/regex scan over the raw corpus that bypasses
+> embeddings entirely.
 
 ### `list_collections()`
 
@@ -51,10 +58,12 @@ Discover the indexed corpora on the configured Qdrant instance.
 ]
 ```
 
-### `search_email(query, collection=None, top_k=5, mode="hybrid")`
+### `search_email(query, collection=None, top_k=5, mode="hybrid", max_chars=500, full=False)`
 
 Retrieve the email **threads** most relevant to `query`. No LLM call — cheap raw
-material for the agent to reason over itself.
+material for the agent to reason over itself. **Output is bounded** (issue #84):
+each hit is a snippet window centred on the query match plus metadata, never the
+full thread body.
 
 - **Args:**
   - `query` (str, required) — natural-language search query.
@@ -62,29 +71,95 @@ material for the agent to reason over itself.
   - `top_k` (int, default 5) — maximum threads to return.
   - `mode` (str, default `"hybrid"`) — retrieval leg: `hybrid` (dense+sparse RRF),
     `dense` (dense-only), or `sparse` (sparse-only).
-- **Returns:** up to `top_k` rows `{thread_id, subject, num_emails, text}`.
-- **Errors:** `ValueError` on a blank `query`, `top_k < 1`, an unknown `mode`, or an
-  unconfigured corpus.
+  - `max_chars` (int, default 500) — snippet window size per hit. Clamped to a hard
+    cap of **4000** so a single call can never emit an unbounded payload.
+  - `full` (bool, default `false`) — return the full thread `text` instead of a
+    snippet. The opt-in escape hatch when you genuinely need the whole body.
+- **Returns:** up to `top_k` **bounded** rows
+  `{thread_id, subject, num_emails, snippet, date, last_date, from, to, message_ids, attachment_names}`.
+  With `full=true`, the `snippet` field is replaced by `text` (the whole thread).
+- **Errors:** `ValueError` on a blank `query`, `top_k < 1`, `max_chars < 1`, an
+  unknown `mode`, or an unconfigured corpus.
 
 ```jsonc
-// search_email("invoice from acme in march", collection="work-rag", top_k=3)
+// search_email("invoice from acme in march", collection="work-rag", top_k=2)
 [
-  { "thread_id": "t-91af", "subject": "Acme invoice #4021", "num_emails": 4, "text": "..." },
-  { "thread_id": "t-2c0d", "subject": "Re: March billing",   "num_emails": 2, "text": "..." }
+  { "thread_id": "t-91af", "subject": "Acme invoice #4021", "num_emails": 4,
+    "snippet": "…the March Acme invoice #4021 was $12,480, due 2026-04-15…",
+    "date": "2026-03-02T09:14:00+00:00", "from": "billing@acme.com",
+    "to": "you@co.com", "message_ids": ["m-01", "m-02"], "attachment_names": [] }
 ]
 ```
+
+### `get_thread(thread_id, collection=None, mode="hybrid")`
+
+Fetch the **full text** of one thread by `thread_id` — the full-body companion to
+the bounded `search_email` (issue #84). Given an id from a `search_email` hit,
+returns that thread's complete attributed text plus metadata.
+
+- **Args:**
+  - `thread_id` (str, required) — the id from a `search_email` result row.
+  - `collection` (str, optional) — corpus to read; defaults to the resolved default.
+  - `mode` (str, default `"hybrid"`) — retrieval leg used to resolve the thread.
+- **Returns:** `{thread_id, subject, num_emails, text, date, last_date, from, to, message_ids, attachment_names}`.
+- **Errors:** `ValueError` on a blank id, an unknown thread, or an unconfigured corpus.
+
+### `grep_email(pattern, collection=None, max_matches=50, regex=False)`
+
+Literal / regex search over the **raw email corpus** — no embeddings (issue #82).
+Walks the raw `.eml` files, decodes each body (quoted-printable + base64, HTML
+stripped to text), and returns matching lines plus message metadata. This is the
+escape hatch for exact needle hunts (a number, an ID, an email address, an error
+string) where dense/hybrid retrieval is blind to numerals and identifiers.
+
+- **Args:**
+  - `pattern` (str, required) — the string to find (literal by default).
+  - `collection` (str, optional) — accepted for API symmetry; grep is
+    corpus-directory based (see the `MAILRAG_EML_ROOT` config below).
+  - `max_matches` (int, default 50) — maximum matching **messages** to return.
+    Clamped to a hard cap of **500**.
+  - `regex` (bool, default `false`) — treat `pattern` as a Python regex.
+- **Returns:** up to `max_matches` rows
+  `{subject, from, to, date, message_id, attachment_names, matches, path}`, where
+  `matches` is a list of matched-line snippets.
+- **Errors:** `ValueError` on a blank `pattern`, an invalid regex, or a missing corpus
+  (`MAILRAG_EML_ROOT` unset and `~/rag_eml` absent).
+
+```jsonc
+// grep_email("210,000,000")
+[
+  { "subject": "Global Partnership Staff call recap",
+    "from": "Eric.Levander@windriver.com", "to": "team@windriver.com",
+    "date": "Wed, 30 Jul 2025 …", "message_id": "<abc@windriver.com>",
+    "attachment_names": ["Q3 MBO targets partner team.xlsx"],
+    "matches": ["…20% of the $210 million annual plan…"],
+    "path": "/Users/you/rag_eml/Inbox/Wind River/… .eml" }
+]
+```
+
+> **Scope note.** `grep_email` searches the message **subject + decoded body**
+> only. It does **not** yet read attachment *bytes* — a spreadsheet cell or PDF
+> text buried in an `.xlsx`/`.pdf` will not match, though the attachment's
+> filename is reported in `attachment_names`. Attachment content indexing is
+> tracked separately (issue #80).
 
 ### `answer_question(query, collection=None, k=3)`
 
 The full RAG answer path: retrieve threads, then ground a single-LLM-call answer
-over the top-`k`.
+over the top-`k`. Before the LLM call it runs a **one-shot healthcheck** on the
+configured endpoint + key (issue #83), so a mis-configured LLM fails at init with
+a clear, actionable message naming **`RAG_LLM_API_KEY`** — not a raw 401 on every
+query. The healthcheck is scoped to this path only: `search_email` and `grep_email`
+keep working even when the LLM is down.
 
 - **Args:**
   - `query` (str, required) — the question to answer.
   - `collection` (str, optional) — corpus to answer from; defaults to the resolved default.
   - `k` (int, default 3) — number of retrieved threads to ground the answer on.
 - **Returns:** `{answer: str, sources: [{thread_id, subject}]}`.
-- **Errors:** `ValueError` on a blank `query`, `k < 1`, or an unconfigured corpus.
+- **Errors:** `ValueError` on a blank `query`, `k < 1`, or an unconfigured corpus;
+  `LLMHealthcheckError` (with a `RAG_LLM_API_KEY` / `RAG_LLM_API_BASE` /
+  `RAG_LLM_MODEL` hint) when the LLM endpoint is unreachable or rejects the key.
 
 ```jsonc
 // answer_question("how much was the March Acme invoice?", collection="work-rag")
@@ -173,8 +248,19 @@ Config mirrors `./mailrag ask` and is resolved from flags/environment:
 | Collection | `collection` arg → `$MAILRAG_COLLECTION` → latest onboarding manifest | Per-call `collection` overrides the env default. |
 | Qdrant URL | `--qdrant-url` (CLI) → `$MAILRAG_QDRANT_URL` → `$QDRANT_URL` → `http://localhost:6333` | `MAILRAG_QDRANT_URL` lets a host server target `localhost` without inheriting a container-oriented `QDRANT_URL` from `.env` (the [issue #29](https://github.com/fmasi/mailrag/issues/29) gotcha). |
 | Attachment store | `$RAG_ATTACH_STORE` → `~/.mailrag/attachments` | Same default and store the CLI `attachments` verbs use; corpus-wide. |
-| Answer LLM | the unified `Settings.llm` stack via the usual `RAG_*` env vars | Used only by `answer_question`. See [`BACKENDS.md`](BACKENDS.md). |
+| Answer LLM endpoint | `$RAG_LLM_API_BASE` (alias `$RAG_LLM_BASE_URL`) → `http://localhost:1234/v1` | Used only by `answer_question`. See [`BACKENDS.md`](BACKENDS.md). |
+| Answer LLM key | `$RAG_LLM_API_KEY` → `lm-studio` placeholder | **Set this in the MCP server config if your endpoint enforces auth** — the `lm-studio` placeholder is for auth-less local servers and is rejected with a 401 otherwise (issue #83). The startup healthcheck names it on failure. |
+| Answer LLM model | `$RAG_LLM_MODEL` | Required for `answer_question`; the healthcheck names it when unset. |
+| Raw corpus (grep) | `$MAILRAG_EML_ROOT` → `~/rag_eml` | The directory of raw `.eml` files `grep_email` scans. Must be the corpus you onboarded. |
 | Attachment OCR backend | `ocr` arg → `$RAG_ATTACH_EXTRACTOR` → `llm` | `$RAG_ATTACH_MAX_PAGES` bounds how many PDF pages OCR renders. |
+
+> **`answer_question` startup healthcheck.** The first `answer_question` call
+> verifies the LLM endpoint + key are reachable and authorized, and raises a
+> clear `LLMHealthcheckError` (naming `RAG_LLM_API_KEY` / `RAG_LLM_API_BASE` /
+> `RAG_LLM_MODEL`) if not — instead of leaking an opaque provider 401. The
+> non-LLM tools (`search_email`, `grep_email`, `list_collections`,
+> `list_attachments`, `get_attachment`) do **not** depend on the LLM and keep
+> working when it is down.
 
 ## Running it
 
@@ -193,7 +279,8 @@ python -m src.mcp_server
 Run it in the `mailrag` conda env, and set `HF_HUB_OFFLINE=1` once the bge-m3
 weights are cached so `search_email` / `answer_question` embed the query from
 cache without contacting the Hub (see [`SETUP.md § 2`](SETUP.md#2-the-mailrag-environment)).
-The process speaks MCP over stdio and blocks until the client disconnects.
+`grep_email` uses no embeddings at all, so it works even before the weights are
+cached. The process speaks MCP over stdio and blocks until the client disconnects.
 
 ## Registering with an MCP client
 
@@ -210,12 +297,20 @@ Adjust the paths to your checkout.
 claude mcp add mailrag \
   --env MAILRAG_COLLECTION=work-rag \
   --env MAILRAG_QDRANT_URL=http://localhost:6333 \
+  --env MAILRAG_EML_ROOT=/Users/you/rag_eml \
+  --env RAG_LLM_API_BASE=http://localhost:1234/v1 \
+  --env RAG_LLM_API_KEY=your-endpoint-key \
+  --env RAG_LLM_MODEL=your-chat-model-id \
   --env PYTHONPATH=/Users/you/Git/mailrag \
   -- /opt/miniconda3/envs/mailrag/bin/python -m src.mcp_server
 ```
 
 Everything after `--` is the launch command. `list_collections` then lets the agent
-discover corpora even if you leave `MAILRAG_COLLECTION` unset.
+discover corpora even if you leave `MAILRAG_COLLECTION` unset. **Set
+`RAG_LLM_API_KEY`** (and `RAG_LLM_MODEL`) if your LLM endpoint enforces auth —
+`answer_question` runs a startup healthcheck and fails loudly with a clear message
+naming these vars rather than a raw 401 (issue #83). `MAILRAG_EML_ROOT` points
+`grep_email` at the raw `.eml` corpus.
 
 ### opencode
 
@@ -234,7 +329,11 @@ Add a `local` MCP entry to `opencode.jsonc`:
       "environment": {
         "PYTHONPATH": "/Users/you/Git/mailrag",
         "MAILRAG_COLLECTION": "work-rag",
-        "MAILRAG_QDRANT_URL": "http://localhost:6333"
+        "MAILRAG_QDRANT_URL": "http://localhost:6333",
+        "MAILRAG_EML_ROOT": "/Users/you/rag_eml",
+        "RAG_LLM_API_BASE": "http://localhost:1234/v1",
+        "RAG_LLM_API_KEY": "your-endpoint-key",
+        "RAG_LLM_MODEL": "your-chat-model-id"
       }
     }
   }
@@ -254,7 +353,11 @@ Add a `local` MCP entry to `opencode.jsonc`:
       "env": {
         "PYTHONPATH": "/Users/you/Git/mailrag",
         "MAILRAG_COLLECTION": "work-rag",
-        "MAILRAG_QDRANT_URL": "http://localhost:6333"
+        "MAILRAG_QDRANT_URL": "http://localhost:6333",
+        "MAILRAG_EML_ROOT": "/Users/you/rag_eml",
+        "RAG_LLM_API_BASE": "http://localhost:1234/v1",
+        "RAG_LLM_API_KEY": "your-endpoint-key",
+        "RAG_LLM_MODEL": "your-chat-model-id"
       }
     }
   }
@@ -271,8 +374,10 @@ tools are the agent-facing subset.
 | Capability | CLI verb | MCP tool | Why it lives where it does |
 |------------|----------|----------|----------------------------|
 | Discover indexed corpora | *(implicit)* | `list_collections` | Read-only lookup — cheap and safe for agents. |
-| Search threads | `ask` / `query` (retrieval) | `search_email` | Pure query; the agent's raw-material path. |
-| Grounded answer | `ask` / `query` | `answer_question` | Pure query + one LLM call; the agent's answer path. |
+| Search threads (bounded) | `ask` / `query` (retrieval) | `search_email` | Pure query; snippet + metadata, the agent's raw-material path. |
+| Fetch a full thread | *(implicit)* | `get_thread` | Full-body opt-in companion to the bounded `search_email`. |
+| Literal / regex needle hunt | `grep` (raw files) | `grep_email` | No embeddings; exact match over the raw corpus (numbers, IDs, error strings). |
+| Grounded answer | `ask` / `query` | `answer_question` | Pure query + one LLM call (with a startup healthcheck); the agent's answer path. |
 | List attachments | `attachments list` | `list_attachments` | Read-only metadata lookup. |
 | Read attachment text | `attachments get --text` | `get_attachment` | Read-only text extraction (never raw bytes over MCP). |
 | Build an assistant end-to-end | `onboard` | — CLI only | Long-running ingest + validation; needs models/flags, not an agent round-trip. |

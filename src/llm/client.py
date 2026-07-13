@@ -18,6 +18,11 @@ from __future__ import annotations
 import os
 import threading
 
+# The historical placeholder used against auth-less local servers (LM Studio,
+# Ollama). It is a valid bearer *only* for servers that ignore auth. When a real
+# key is required and this sentinel is sent, the server answers 401 (issue #83).
+_PLACEHOLDER_KEY = "lm-studio"
+
 # Generous context window so LlamaIndex never silently truncates our cleanup
 # prompts (the old raw-OpenAI path did no truncation). Cleanup prompts are small
 # (~a few thousand chars); this just disables OpenAILike's defensive trimming.
@@ -42,9 +47,31 @@ def resolve_llm_api_base() -> str:
 
 
 def _resolve_api_key() -> str:
-    """Endpoint API key; ``lm-studio`` placeholder keeps the OpenAI client happy
-    against auth-less local servers."""
-    return os.getenv("RAG_LLM_API_KEY", "").strip() or "lm-studio"
+    """Endpoint API key.
+
+    Reads ``RAG_LLM_API_KEY`` and falls back to the ``lm-studio`` placeholder,
+    which keeps the OpenAI client happy against **auth-less** local servers. If
+    the endpoint actually enforces auth (some LM Studio / NIM / cloud configs
+    do), the placeholder is rejected with a 401 — that is issue #83, and the
+    remedy is to set ``RAG_LLM_API_KEY`` in the environment / MCP server config.
+    ``healthcheck()`` surfaces that as a clear, actionable error at startup
+    rather than an opaque 401 per query.
+    """
+    return os.getenv("RAG_LLM_API_KEY", "").strip() or _PLACEHOLDER_KEY
+
+
+def using_placeholder_key() -> bool:
+    """True when no real ``RAG_LLM_API_KEY`` is configured (sentinel in use)."""
+    return _resolve_api_key() == _PLACEHOLDER_KEY
+
+
+class LLMHealthcheckError(RuntimeError):
+    """Raised when the configured LLM endpoint/key is not usable.
+
+    Carries a human-actionable message (naming ``RAG_LLM_API_KEY`` when a 401 /
+    auth failure is the likely cause) so the MCP server / answer path can fail
+    loudly at init instead of returning a raw 401 on every query.
+    """
 
 
 class _LLMClient:
@@ -101,9 +128,82 @@ def default_model() -> str:
     return os.getenv("RAG_LLM_MODEL", "").strip()
 
 
+def _looks_like_auth_error(exc: BaseException) -> bool:
+    """Heuristic: does ``exc`` look like a 401/403 auth failure?
+
+    We match on the string form because the OpenAILike stack wraps the
+    underlying ``openai`` error in a variety of exception types; a substring
+    check on the status/keywords is robust across those wrappers.
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        marker in text
+        for marker in ("401", "403", "unauthorized", "malformed", "api key", "api token", "invalid")
+    )
+
+
+def _auth_hint() -> str:
+    """The actionable remediation line appended to auth-failure messages."""
+    if using_placeholder_key():
+        return (
+            "the endpoint requires authentication but no RAG_LLM_API_KEY is set "
+            "(the 'lm-studio' placeholder was sent and rejected). Set RAG_LLM_API_KEY "
+            "in the environment / MCP server config to a valid key for this endpoint."
+        )
+    return (
+        "RAG_LLM_API_KEY is set but was rejected by the endpoint. Check the key value "
+        "and that it is valid for this RAG_LLM_API_BASE."
+    )
+
+
 def chat(client: _LLMClient, model: str, prompt: str, temperature: float = 0.0) -> str:
-    """Send a single-turn prompt through the OpenAILike LLM; return stripped text."""
-    return client.llm(model, temperature).complete(prompt).text.strip()
+    """Send a single-turn prompt through the OpenAILike LLM; return stripped text.
+
+    On an authentication failure (e.g. the sentinel key rejected with 401) the
+    raw error is re-raised as :class:`LLMHealthcheckError` with a clear message
+    naming ``RAG_LLM_API_KEY``, rather than leaking an opaque provider 401.
+    """
+    try:
+        return client.llm(model, temperature).complete(prompt).text.strip()
+    except Exception as exc:  # noqa: BLE001 - re-raised with a clearer message
+        if _looks_like_auth_error(exc):
+            raise LLMHealthcheckError(
+                f"LLM request rejected by {client.base_url}: {_auth_hint()}"
+            ) from exc
+        raise
+
+
+def healthcheck(client: _LLMClient | None = None, *, model: str | None = None) -> None:
+    """Verify the configured LLM endpoint + key are reachable and authorized.
+
+    Sends one tiny completion. On success returns ``None``. On failure raises
+    :class:`LLMHealthcheckError` with an actionable message — auth failures name
+    ``RAG_LLM_API_KEY``; a missing model names ``RAG_LLM_MODEL``; anything else
+    reports the endpoint that could not be reached. Callers (the MCP server's
+    answer path) use this to fail loudly at startup instead of per-query.
+
+    ``client`` / ``model`` are injectable for tests so no live endpoint is hit.
+    """
+    client = client or make_client()
+    model = model if model is not None else default_model()
+    if not model:
+        raise LLMHealthcheckError(
+            "no chat model configured: set RAG_LLM_MODEL to the model id served by "
+            f"{client.base_url}"
+        )
+    try:
+        client.llm(model, 0.0).complete("ping")
+    except LLMHealthcheckError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - classified into a clear message
+        if _looks_like_auth_error(exc):
+            raise LLMHealthcheckError(
+                f"LLM endpoint {client.base_url} rejected the credentials: {_auth_hint()}"
+            ) from exc
+        raise LLMHealthcheckError(
+            f"LLM endpoint {client.base_url} (model {model!r}) is unreachable: {exc}. "
+            "Check RAG_LLM_API_BASE and that the server is running."
+        ) from exc
 
 
 def chat_vision(

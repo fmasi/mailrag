@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 
 from src.attachments.store import AttachmentStore
 from src.llm.answer import answer_from_threads
+from src.mcp_server.grep import grep_email as _grep_email
 from src.onboard import latest_manifest_collection
 from src.query.hybrid import build_hybrid_searcher
 
@@ -48,6 +49,12 @@ SERVER_NAME = "mailrag"
 DEFAULT_QDRANT_URL = "http://localhost:6333"
 DEFAULT_ATTACH_STORE = "~/.mailrag/attachments"
 VALID_MODES = ("hybrid", "dense", "sparse")
+
+# search_email output bounding (issue #84): default to a compact snippet window
+# around the query match plus metadata, never the full thread body. A hard cap
+# guarantees a single call can never emit an unbounded payload.
+DEFAULT_SEARCH_MAX_CHARS = 500
+HARD_SEARCH_MAX_CHARS = 4000
 
 # Cache built searchers by (collection, qdrant_url, mode) so repeated tool calls
 # in one server session reuse the same Qdrant client / index wiring.
@@ -122,14 +129,84 @@ def get_searcher(
     return searcher
 
 
-def _thread_to_dict(ctx) -> Dict[str, Any]:
-    """Serialize a ``ThreadContext`` into a JSON-friendly result row."""
+def _thread_snippet(text: str, query: str, max_chars: int) -> str:
+    """A bounded window of ``text`` centred on the first ``query`` term hit.
+
+    Keeps the payload small (issue #84): when ``text`` fits within ``max_chars``
+    it is returned whole; otherwise a ``max_chars``-wide window is centred on the
+    earliest matching query token (falling back to the head of the text when no
+    token matches), with ``…`` markers where content was elided.
+    """
+    text = text or ""
+    if len(text) <= max_chars:
+        return text
+    # Find the earliest position any query token appears (case-insensitive).
+    lowered = text.lower()
+    best = -1
+    for token in {t for t in query.lower().split() if len(t) >= 3}:
+        pos = lowered.find(token)
+        if pos != -1 and (best == -1 or pos < best):
+            best = pos
+    if best == -1:
+        window = text[:max_chars]
+        return window + "…"
+    start = max(0, best - max_chars // 2)
+    end = start + max_chars
+    return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
+
+
+def _thread_meta(ctx) -> Dict[str, Any]:
+    """Envelope metadata for a thread's constituent emails (bounded output).
+
+    Surfaces subject/date/from/to/message-id and attachment filenames so an
+    agent can decide whether to pull the full body via ``get_thread`` — without
+    the tool ever emitting the whole thread text by default (issue #84).
+    """
+    emails = list(getattr(ctx, "emails", []) or [])
+    first = emails[0] if emails else None
+    last = emails[-1] if emails else None
+    attachments: List[str] = []
+    for e in emails:
+        for name in getattr(e, "attachment_names", []) or []:
+            if name not in attachments:
+                attachments.append(name)
     return {
+        "date": getattr(first, "date", "") if first else "",
+        "last_date": getattr(last, "date", "") if last else "",
+        "from": getattr(first, "sender", "") if first else "",
+        "to": getattr(first, "to", "") if first else "",
+        "message_ids": [getattr(e, "message_id", "") for e in emails],
+        "attachment_names": attachments,
+    }
+
+
+def _thread_to_dict(ctx, query: str = "", max_chars: int = DEFAULT_SEARCH_MAX_CHARS) -> Dict[str, Any]:
+    """Serialize a ``ThreadContext`` into a **bounded** JSON result row.
+
+    Returns a snippet window (``snippet``) plus metadata instead of the full
+    thread body (issue #84). The full body is available on request via
+    ``get_thread(thread_id, ...)`` / ``search_email(..., full=True)``.
+    """
+    row = {
+        "thread_id": ctx.thread_id,
+        "subject": ctx.subject,
+        "num_emails": len(ctx.emails),
+        "snippet": _thread_snippet(ctx.text, query, max_chars),
+    }
+    row.update(_thread_meta(ctx))
+    return row
+
+
+def _thread_to_full_dict(ctx) -> Dict[str, Any]:
+    """Serialize a ``ThreadContext`` with the **full** thread text (opt-in path)."""
+    row = {
         "thread_id": ctx.thread_id,
         "subject": ctx.subject,
         "num_emails": len(ctx.emails),
         "text": ctx.text,
     }
+    row.update(_thread_meta(ctx))
+    return row
 
 
 def list_collections(qdrant_url: Optional[str] = None, *, client=None) -> List[Dict[str, Any]]:
@@ -179,42 +256,119 @@ def search_email(
     collection: Optional[str] = None,
     top_k: int = 5,
     mode: str = "hybrid",
+    max_chars: int = DEFAULT_SEARCH_MAX_CHARS,
+    full: bool = False,
     *,
     searcher=None,
 ) -> List[Dict[str, Any]]:
-    """Retrieve the email threads most relevant to ``query``.
+    """Retrieve the email threads most relevant to ``query`` (bounded output).
 
     Runs retrieval (``mode``: ``hybrid``/``dense``/``sparse``) and expands the hits
-    into attributed threads, returning up to ``top_k`` of them as structured rows
-    (``thread_id``, ``subject``, ``num_emails``, ``text``). No LLM call.
+    into attributed threads, returning up to ``top_k`` **bounded** rows. Each row
+    carries a ``snippet`` window (± context centred on the query match, capped by
+    ``max_chars``) plus metadata — subject, date, from, to, message-ids and
+    attachment names — instead of the full thread body (issue #84).
+
+    Set ``full=True`` (or call ``get_thread``) to retrieve the whole thread text
+    when you actually need it. ``max_chars`` is clamped to ``[1, {hard}]`` so a
+    single call can never emit an unbounded payload.
 
     ``collection`` selects the corpus (defaults to the resolved collection).
     ``searcher`` is injectable for tests. Raises ``ValueError`` on invalid input or
     an unconfigured corpus.
-    """
+    """.replace("{hard}", str(HARD_SEARCH_MAX_CHARS))
     if not query or not query.strip():
         raise ValueError("query must be a non-empty string")
     if top_k < 1:
         raise ValueError("top_k must be >= 1")
     if mode not in VALID_MODES:
         raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
+    if max_chars < 1:
+        raise ValueError("max_chars must be >= 1")
+    max_chars = min(max_chars, HARD_SEARCH_MAX_CHARS)
     searcher = searcher or get_searcher(collection, mode=mode)
     contexts = searcher.search_threads(query)
-    return [_thread_to_dict(c) for c in contexts[:top_k]]
+    if full:
+        return [_thread_to_full_dict(c) for c in contexts[:top_k]]
+    return [_thread_to_dict(c, query=query, max_chars=max_chars) for c in contexts[:top_k]]
+
+
+def get_thread(
+    thread_id: str,
+    collection: Optional[str] = None,
+    mode: str = "hybrid",
+    *,
+    searcher=None,
+) -> Dict[str, Any]:
+    """Fetch the **full** text of a single thread by ``thread_id`` (opt-in).
+
+    The full-body companion to the bounded ``search_email`` (issue #84): given a
+    ``thread_id`` returned by ``search_email``, return that thread's complete
+    attributed text plus metadata. Resolves the thread by re-running retrieval
+    for ``thread_id`` and selecting the matching context (no full-corpus dump).
+
+    ``searcher`` is injectable for tests. Raises ``ValueError`` on a blank id, an
+    unknown thread, or an unconfigured corpus.
+    """
+    if not thread_id or not thread_id.strip():
+        raise ValueError("thread_id must be a non-empty string")
+    if mode not in VALID_MODES:
+        raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
+    searcher = searcher or get_searcher(collection, mode=mode)
+    contexts = searcher.search_threads(thread_id)
+    for c in contexts:
+        if c.thread_id == thread_id:
+            return _thread_to_full_dict(c)
+    raise ValueError(f"unknown thread {thread_id!r}")
+
+
+def grep_email(
+    pattern: str,
+    collection: Optional[str] = None,
+    max_matches: int = 50,
+    regex: bool = False,
+) -> List[Dict[str, Any]]:
+    """Literal / regex search over the raw email corpus — no embeddings (issue #82).
+
+    Thin wrapper over :func:`src.mcp_server.grep.grep_email`: walks the raw ``.eml``
+    corpus, decodes each body (QP/base64 + HTML→text), and returns matching lines
+    plus message metadata (subject/from/to/date/message-id/attachment names). The
+    escape hatch for needle hunts (numbers, IDs, emails, error strings) where dense
+    retrieval is blind. Attachment *contents* are not searched (issue #80).
+
+    Raises ``ValueError`` on a blank pattern, an invalid regex, or a missing corpus.
+    """
+    return _grep_email(pattern, collection=collection, max_matches=max_matches, regex=regex)
 
 
 def answer_question(
     query: str,
     collection: Optional[str] = None,
     k: int = 3,
+    mode: str = "hybrid",
     *,
     searcher=None,
+    healthcheck: bool = True,
 ) -> Dict[str, Any]:
     """Answer ``query`` with a grounded RAG answer over retrieved email threads.
 
     Retrieves threads then grounds a single-LLM-call answer over the top-``k``
     (``answer_from_threads``). Returns ``{"answer": str, "sources": [...]}`` where
     each source is the ``thread_id``/``subject`` that fed the answer.
+
+    Retrieval goes through the **same** ``get_searcher(collection, mode=...)`` /
+    ``search_threads(query)`` path as ``search_email`` — same ``mode`` default and
+    the result is materialised to a list *before* it is both fed to the LLM and
+    sliced for ``sources`` — so for the same query+collection the sources here are
+    always a subset of what ``search_email`` returns. (Previously a lazy/consumed
+    context sequence or a mode mismatch could yield an empty ``sources`` while
+    ``search_email`` returned hits.)
+
+    Before calling the LLM it runs a one-shot :func:`src.llm.client.healthcheck`
+    (unless ``healthcheck=False``) so a mis-configured endpoint / key fails with a
+    clear, actionable message naming ``RAG_LLM_API_KEY`` — rather than a raw 401
+    (issue #83). The healthcheck is scoped to this LLM path only; ``search_email``
+    / ``grep_email`` stay usable even when the LLM is down.
 
     ``collection`` selects the corpus (defaults to the resolved collection). Raises
     ``ValueError`` on invalid input or an unconfigured corpus.
@@ -223,8 +377,17 @@ def answer_question(
         raise ValueError("query must be a non-empty string")
     if k < 1:
         raise ValueError("k must be >= 1")
-    searcher = searcher or get_searcher(collection)
-    contexts = searcher.search_threads(query)
+    if mode not in VALID_MODES:
+        raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
+    if healthcheck:
+        from src.llm.client import healthcheck as _llm_healthcheck
+
+        _llm_healthcheck()
+    searcher = searcher or get_searcher(collection, mode=mode)
+    # Materialise once: the SAME list feeds the answer and the sources, so the
+    # two can never diverge (e.g. a generator consumed by answer_from_threads
+    # before sources is computed).
+    contexts = list(searcher.search_threads(query))
     answer = answer_from_threads(query, contexts, k=k)
     sources = [{"thread_id": c.thread_id, "subject": c.subject} for c in contexts[:k]]
     return {"answer": answer, "sources": sources}
@@ -338,16 +501,70 @@ def build_server():
         collection: Optional[str] = None,
         top_k: int = 5,
         mode: str = "hybrid",
+        max_chars: int = DEFAULT_SEARCH_MAX_CHARS,
+        full: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Search the indexed email corpus and return the most relevant threads.
+        """Search the indexed email corpus; return relevant threads (bounded).
+
+        Each hit is a compact ``snippet`` window around the match plus metadata
+        (subject, date, from, to, message-ids, attachment names) — NOT the full
+        thread body. Use ``get_thread`` or ``full=True`` for the whole text.
 
         Args:
             query: Natural-language search query.
             collection: Corpus to search (default: server-resolved collection).
             top_k: Maximum number of threads to return (default 5).
             mode: Retrieval leg — ``hybrid`` (default), ``dense`` or ``sparse``.
+            max_chars: Snippet window size per hit (default 500, hard cap 4000).
+            full: Return the full thread text instead of a snippet (default False).
         """
-        return search_email(query, collection=collection, top_k=top_k, mode=mode)
+        return search_email(
+            query,
+            collection=collection,
+            top_k=top_k,
+            mode=mode,
+            max_chars=max_chars,
+            full=full,
+        )
+
+    @server.tool(name="get_thread")
+    def _tool_get_thread(
+        thread_id: str,
+        collection: Optional[str] = None,
+        mode: str = "hybrid",
+    ) -> Dict[str, Any]:
+        """Fetch the FULL text of one thread by id (full-body companion to search).
+
+        Args:
+            thread_id: Thread id from a ``search_email`` hit.
+            collection: Corpus to read (default: server-resolved collection).
+            mode: Retrieval leg used to resolve the thread (default ``hybrid``).
+        """
+        return get_thread(thread_id, collection=collection, mode=mode)
+
+    @server.tool(name="grep_email")
+    def _tool_grep_email(
+        pattern: str,
+        collection: Optional[str] = None,
+        max_matches: int = 50,
+        regex: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Literal/regex search over the raw email corpus — no embeddings.
+
+        The escape hatch for exact needle hunts (numbers, IDs, emails, error
+        strings) where dense retrieval is blind. Returns matched line snippets
+        plus message metadata. Searches subject + decoded body only; attachment
+        *contents* are not yet covered.
+
+        Args:
+            pattern: Literal string, or a regex when ``regex=True``.
+            collection: Accepted for symmetry (grep is corpus-directory based).
+            max_matches: Max matching messages (default 50, hard cap 500).
+            regex: Treat ``pattern`` as a Python regex (default False = literal).
+        """
+        return grep_email(
+            pattern, collection=collection, max_matches=max_matches, regex=regex
+        )
 
     @server.tool(name="answer_question")
     def _tool_answer_question(

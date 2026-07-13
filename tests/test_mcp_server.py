@@ -133,15 +133,14 @@ class TestSearchEmail(unittest.TestCase):
         rows = server.search_email("invoices?", top_k=2, searcher=searcher)
         self.assertEqual(searcher.calls, ["invoices?"])
         self.assertEqual(len(rows), 2)
-        self.assertEqual(
-            rows[0],
-            {
-                "thread_id": "t1",
-                "subject": "Invoice March",
-                "num_emails": 2,
-                "text": "thread one body",
-            },
-        )
+        # Bounded shape (issue #84): a snippet + metadata, not the full body.
+        self.assertEqual(rows[0]["thread_id"], "t1")
+        self.assertEqual(rows[0]["subject"], "Invoice March")
+        self.assertEqual(rows[0]["num_emails"], 2)
+        self.assertEqual(rows[0]["snippet"], "thread one body")  # short body: verbatim
+        self.assertNotIn("text", rows[0])  # full body is opt-in only
+        self.assertIn("attachment_names", rows[0])
+        self.assertIn("message_ids", rows[0])
         self.assertEqual(rows[1]["thread_id"], "t2")
 
     def test_empty_results_return_empty_list(self):
@@ -174,6 +173,147 @@ class TestSearchEmail(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.search_email("q", mode="bogus", searcher=_FakeSearcher([]))
 
+    def test_long_body_is_bounded_to_snippet_window(self):
+        # A 5000-char body must be windowed to max_chars around the match.
+        body = ("x" * 2000) + " TARGETWORD " + ("y" * 3000)
+        thread = _FakeThread("t1", "S", body)
+        rows = server.search_email(
+            "targetword", max_chars=200, searcher=_FakeSearcher([thread])
+        )
+        snippet = rows[0]["snippet"]
+        self.assertLessEqual(len(snippet), 200 + 2)  # + ellipsis markers
+        self.assertIn("targetword", snippet.lower())
+
+    def test_max_chars_is_hard_capped(self):
+        body = "z" * 20000
+        thread = _FakeThread("t1", "S", body)
+        rows = server.search_email(
+            "nomatch", max_chars=999999, searcher=_FakeSearcher([thread])
+        )
+        # Even a huge requested max_chars is clamped to the hard cap.
+        self.assertLessEqual(len(rows[0]["snippet"]), server.HARD_SEARCH_MAX_CHARS + 1)
+
+    def test_bad_max_chars_rejected(self):
+        with self.assertRaises(ValueError):
+            server.search_email("q", max_chars=0, searcher=_FakeSearcher([_FakeThread("t", "s", "b")]))
+
+    def test_full_returns_whole_body(self):
+        body = "full body here " * 100
+        thread = _FakeThread("t1", "S", body)
+        rows = server.search_email("body", full=True, searcher=_FakeSearcher([thread]))
+        self.assertEqual(rows[0]["text"], body)
+        self.assertNotIn("snippet", rows[0])
+
+
+class TestGetThread(unittest.TestCase):
+    def test_returns_full_body_for_matching_thread(self):
+        threads = _threads()
+        out = server.get_thread("t2", searcher=_FakeSearcher(threads))
+        self.assertEqual(out["thread_id"], "t2")
+        self.assertEqual(out["text"], "thread two body")
+        self.assertIn("attachment_names", out)
+
+    def test_unknown_thread_raises(self):
+        with self.assertRaises(ValueError):
+            server.get_thread("nope", searcher=_FakeSearcher(_threads()))
+
+    def test_blank_thread_id_rejected(self):
+        with self.assertRaises(ValueError):
+            server.get_thread("  ", searcher=_FakeSearcher(_threads()))
+
+
+class TestGrepEmailTool(unittest.TestCase):
+    def test_delegates_to_grep_module(self):
+        with mock.patch(
+            "src.mcp_server.server._grep_email", return_value=[{"subject": "hit"}]
+        ) as grep:
+            rows = server.grep_email("210,000,000", max_matches=5, regex=False)
+        grep.assert_called_once_with(
+            "210,000,000", collection=None, max_matches=5, regex=False
+        )
+        self.assertEqual(rows[0]["subject"], "hit")
+
+
+class TestAnswerQuestionHealthcheck(unittest.TestCase):
+    def test_healthcheck_runs_before_llm_by_default(self):
+        searcher = _FakeSearcher(_threads())
+        with (
+            mock.patch("src.llm.client.healthcheck", return_value=None) as hc,
+            mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
+        ):
+            server.answer_question("q", searcher=searcher)
+        hc.assert_called_once()
+
+    def test_healthcheck_failure_surfaces_clear_error(self):
+        from src.llm.client import LLMHealthcheckError
+
+        searcher = _FakeSearcher(_threads())
+        with (
+            mock.patch(
+                "src.llm.client.healthcheck",
+                side_effect=LLMHealthcheckError("set RAG_LLM_API_KEY"),
+            ),
+            mock.patch("src.mcp_server.server.answer_from_threads") as answer,
+        ):
+            with self.assertRaises(LLMHealthcheckError) as ctx:
+                server.answer_question("q", searcher=searcher)
+        self.assertIn("RAG_LLM_API_KEY", str(ctx.exception))
+        answer.assert_not_called()  # never reached the LLM
+
+    def test_healthcheck_can_be_disabled(self):
+        searcher = _FakeSearcher(_threads())
+        with (
+            mock.patch("src.llm.client.healthcheck") as hc,
+            mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
+        ):
+            server.answer_question("q", searcher=searcher, healthcheck=False)
+        hc.assert_not_called()
+
+
+class TestSearchAnswerParity(unittest.TestCase):
+    """search_email and answer_question must retrieve the SAME threads.
+
+    Regression for the reported bug where search_email returned hits but
+    answer_question returned 0 sources / an empty answer for the same
+    query+collection.
+    """
+
+    def test_same_query_yields_same_thread_set(self):
+        threads = _threads()
+        # Both call sites resolve to the SAME searcher (same collection/mode), so
+        # search_email and answer_question retrieve the same thread set.
+        fake = _FakeSearcher(threads)
+        with (
+            mock.patch("src.mcp_server.server.get_searcher", return_value=fake) as gs,
+            mock.patch("src.mcp_server.server.answer_from_threads", return_value="grounded"),
+        ):
+            hits = server.search_email("project deadline", top_k=3)
+            ans = server.answer_question("project deadline", k=3, healthcheck=False)
+        # Both resolved a searcher for the same (default) collection + hybrid mode.
+        self.assertEqual(
+            gs.call_args_list,
+            [mock.call(None, mode="hybrid"), mock.call(None, mode="hybrid")],
+        )
+        search_ids = {r["thread_id"] for r in hits}
+        source_ids = {s["thread_id"] for s in ans["sources"]}
+        self.assertTrue(source_ids)  # not empty when search_email found hits
+        self.assertTrue(source_ids <= search_ids)  # sources are a subset of hits
+
+    def test_sources_derive_from_materialised_list_not_generator(self):
+        # A generator-returning searcher must not leave sources empty: the fix
+        # materialises contexts before both consuming and slicing them.
+        threads = _threads()
+
+        class _GenSearcher:
+            def search_threads(self, query):
+                return (t for t in threads)  # a one-shot generator
+
+        with mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"):
+            out = server.answer_question(
+                "q", k=2, searcher=_GenSearcher(), healthcheck=False
+            )
+        self.assertEqual([s["thread_id"] for s in out["sources"]], ["t1", "t2"])
+
 
 class TestAnswerQuestion(unittest.TestCase):
     def test_calls_answer_from_threads_with_top_k(self):
@@ -181,7 +321,9 @@ class TestAnswerQuestion(unittest.TestCase):
         with mock.patch(
             "src.mcp_server.server.answer_from_threads", return_value="GROUNDED"
         ) as answer:
-            out = server.answer_question("when due?", k=2, searcher=searcher)
+            out = server.answer_question(
+                "when due?", k=2, searcher=searcher, healthcheck=False
+            )
         self.assertEqual(searcher.calls, ["when due?"])
         # answer_from_threads receives the full context list + k (it truncates).
         args, kwargs = answer.call_args
@@ -196,7 +338,7 @@ class TestAnswerQuestion(unittest.TestCase):
             "src.mcp_server.server.answer_from_threads",
             return_value="No relevant threads retrieved.",
         ) as answer:
-            out = server.answer_question("q", searcher=_FakeSearcher([]))
+            out = server.answer_question("q", searcher=_FakeSearcher([]), healthcheck=False)
         answer.assert_called_once()
         self.assertEqual(out["answer"], "No relevant threads retrieved.")
         self.assertEqual(out["sources"], [])
@@ -215,8 +357,8 @@ class TestAnswerQuestion(unittest.TestCase):
             mock.patch("src.mcp_server.server.get_searcher", return_value=searcher) as get_searcher,
             mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
         ):
-            server.answer_question("q", collection="work-rag", k=1)
-        get_searcher.assert_called_once_with("work-rag")
+            server.answer_question("q", collection="work-rag", k=1, healthcheck=False)
+        get_searcher.assert_called_once_with("work-rag", mode="hybrid")
 
 
 class _FakeCollDesc:
@@ -445,6 +587,8 @@ class TestServerRegistration(unittest.TestCase):
             {
                 "list_collections",
                 "search_email",
+                "get_thread",
+                "grep_email",
                 "answer_question",
                 "list_attachments",
                 "get_attachment",
@@ -453,7 +597,15 @@ class TestServerRegistration(unittest.TestCase):
         self.assertEqual(set(by_name["list_collections"].inputSchema.get("properties", {})), set())
         self.assertEqual(
             set(by_name["search_email"].inputSchema["properties"]),
-            {"query", "collection", "top_k", "mode"},
+            {"query", "collection", "top_k", "mode", "max_chars", "full"},
+        )
+        self.assertEqual(
+            set(by_name["get_thread"].inputSchema["properties"]),
+            {"thread_id", "collection", "mode"},
+        )
+        self.assertEqual(
+            set(by_name["grep_email"].inputSchema["properties"]),
+            {"pattern", "collection", "max_matches", "regex"},
         )
         self.assertEqual(
             set(by_name["answer_question"].inputSchema["properties"]),
@@ -493,6 +645,7 @@ class TestServerRegistration(unittest.TestCase):
         with (
             mock.patch("src.mcp_server.server.get_searcher", return_value=searcher),
             mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
+            mock.patch("src.llm.client.healthcheck", return_value=None),
         ):
             _, structured = asyncio.run(
                 srv.call_tool("answer_question", {"query": "when?", "k": 1})
