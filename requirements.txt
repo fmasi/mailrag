@@ -9,6 +9,9 @@ llama-index-vector-stores-qdrant
 # Data ingestion and processing
 datasets
 huggingface-hub
+# Structure-aware attachment chunking (#89): pandas splits spreadsheets by
+# row-groups so large sheets aren't truncated at bge-m3's 8192-token limit.
+pandas
 
 # Vector storage and utilities
 python-dotenv

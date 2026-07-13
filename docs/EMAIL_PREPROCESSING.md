@@ -336,9 +336,33 @@ During the build (`src/pipeline/build.py`), for every `.eml` being indexed,
 `build_attachment_documents` (`src/indexing/attachment_docs.py`) extracts each
 attachment's text with the existing handler registry
 (`src/attachments/extract` — `.xlsx`/`.csv` cells, `.pdf` text layer, `.docx`,
-`.pptx`, image OCR) and emits a **separate** LlamaIndex `Document` per attachment.
+`.pptx`, image OCR) and emits **separate** LlamaIndex `Document`s per attachment.
 Keeping attachment documents separate from the body means the chunker never mixes
 a terse body with a 500-row sheet in one chunk.
+
+### Structure-aware chunking (issue #89)
+
+A flattened spreadsheet has no sentence boundaries, so the shared body
+`SentenceSplitter` used to emit **one giant chunk** for a big sheet — and bge-m3
+truncates anything past 8192 tokens, silently dropping the tail rows (observed in a
+rebuild: `Token indices sequence length is longer than the specified maximum
+(30830 > 8192)`). To fix this, each attachment is split by its **own format's units**
+*before* embedding, in `src/indexing/attachment_chunking.py`:
+
+| Format | Split unit |
+|---|---|
+| Spreadsheet (`.xlsx`/`.csv`) | **row-groups**, one stream per sheet/tab, with the **header row repeated in every chunk** so each chunk is a self-describing mini-table (rows are never cut mid-row) |
+| PDF | one chunk **per page** (an over-budget page is prose-split) |
+| PPTX | one chunk **per slide** |
+| DOCX | one chunk **per heading/section** (falling back to paragraph groups) |
+| Fallback | the token-aware prose splitter for prose-like attachments, or when a format parse fails / its library is missing |
+
+Every emitted chunk is sized under a **hard token budget** (the profile
+`chunk_size`, always well below 8192), so the downstream `SentenceSplitter` leaves it
+intact — **no attachment content is ever truncated at embed time**. A small
+attachment still yields a single chunk (no regression). The parse runs on the
+attachment's **raw bytes** (re-parsed by pandas/pypdf/python-pptx/python-docx),
+because the text extractors drop the structural markers the chunker needs.
 
 Each attachment chunk carries payload that traces the hit back to its email:
 
@@ -348,6 +372,7 @@ Each attachment chunk carries payload that traces the hit back to its email:
 | `attachment_name` | the (decoded) filename, e.g. `Q3 MBO targets partner team.xlsx` |
 | `parent_message_id` | the `Message-ID` of the carrying email |
 | `thread_id` | same value as the email's body chunks, so a thread joins its files |
+| `chunk_index` | 0-based position when an attachment split into multiple chunks (absent for single-chunk attachments) |
 
 Disable with `build.run(..., index_attachments=False)` if you only want body text.
 
