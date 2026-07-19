@@ -56,6 +56,14 @@ The point was never a single app — it's a private, open stack of context I own
 - **Hybrid retrieval** — bge-m3 dense + sparse vectors (RRF-fused) in Qdrant (also
   supports local persistence and Pinecone). Gets both the concept and the rare exact
   token — acronyms, IDs, reference numbers.
+- **Attachments, extracted and indexed** — text is pulled from PDFs, Office files
+  (Word/Excel/PowerPoint), HTML and images, with OCR for scans and screenshots (local
+  Tesseract, or a local vision model as the privacy-first default). Each attachment is then
+  chunked by its *own* structure: spreadsheets by row-group with the header repeated in every
+  chunk, PDFs by page, decks by slide. A figure buried in a 500-row sheet stays searchable
+  instead of being truncated at the embedder's token limit. Chunks carry a back-reference to
+  their email and thread, and agents can pull the raw text over MCP. On by default for the
+  `.eml` path. OCR is optional and falls through cleanly when its reader isn't installed.
 - **Local-LLM `summarize`** — optional per-email summary + noise judgement from a local
   LLM, content-addressed and cached, so re-runs are free.
 - **A measured methodology** — a 360-query retrieval eval that prices each technique,
@@ -274,7 +282,8 @@ Programme"), at the cost of extra queries per search.
 | `src/data/` | `NormalizedEmail` model, multi-source `load_emails` API |
 | `src/data/loaders/` | Pluggable source loaders (enron, mail_archive_x, azure_blob) |
 | `src/ingest/` | Embedding (bge-m3), sparse vectors, hybrid Qdrant upsert |
-| `src/indexing/` | Index creation/management |
+| `src/indexing/` | Index creation/management + structure-aware attachment chunking |
+| `src/attachments/` | Attachment extraction (PDF/Office/HTML/image) + OCR (Tesseract / local vision model) |
 | `src/storage/` | Persistence (local / Pinecone / Qdrant) |
 | `src/query/` | Retrieval + RAG query engine |
 | `src/mcp_server/` | Multi-collection MCP (stdio) server: discovery, search, answer, attachments |
