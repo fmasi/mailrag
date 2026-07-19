@@ -59,9 +59,10 @@ The point was never a single app — it's a private, open stack of context I own
 - **Local-LLM `summarize`** — optional per-email summary + noise judgement from a local
   LLM, content-addressed and cached, so re-runs are free.
 - **A measured methodology** — a 360-query retrieval eval that prices each technique,
-  controls for confounds, reports significance, and in several cases *overturned* the
-  intuitive choice. The core techniques were later confirmed against a public,
-  human-judged benchmark.
+  controls for confounds, and reports significance, overturning the intuitive choice more
+  than once. It also caught its own headline overstating: an early +6pp gain was half a
+  quantization artifact, worth only **+3pp** once the control re-ran at matched precision.
+  The core techniques were later confirmed against a public, human-judged benchmark.
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
 
 ## Quickstart (thread-aware contextual RAG over the public Enron dataset)
@@ -198,7 +199,12 @@ write-up:
 
 **How the eval was run.** The eval set is **360 synthetic queries** (144 terse / 144 content /
 72 spanning), each generated from a known email so the **recall ladder is scored against hard
-gold labels — no LLM judge in the loop**. A *separate* answer-quality lens does use a local LLM
+gold labels — no LLM judge in the loop**. Generating a query from its answer email risks
+circularity (the query could echo the target's exact tokens), so the queries come from body
+content under a rule that bans artifact/metadata questions plus a validation pass, and the
+load-bearing guard is external: the ordering holds on public **Enron-QA** (questions written
+independently of this generator) and on TREC's real human judgments, below. A *separate*
+answer-quality lens does use a local LLM
 judge, calibrated against a stronger reference model (Cohen's κ = **0.52** on the 0–3 scale,
 **0.80** binary at the relevance threshold actually used; Spearman 0.74). The core techniques
 were cross-checked on the **TREC Legal Track's real human judgments** and on public **Enron-QA**,
