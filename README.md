@@ -10,15 +10,18 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
-> **What it buys you.** On a real ~32k-email corporate mailbox, stacking the retrieval
-> techniques takes **recall@5 from 46% (plain dense) to 93%** — and the two biggest levers
-> aren't a fancier model: a per-email contextual summary (**+13**) and reconstructing the whole
-> thread instead of hunting one message (**+29**). As a yardstick the email-tuned hybrid is
-> benchmarked against NVIDIA's general-purpose retrieval stack: it wins on email, while NVIDIA's
-> stack wins on broad legal e-discovery (TREC) — same systems, opposite winners, task-dependent.
-> Numbers are author-reported on a *private* mailbox (cross-checked on public Enron-QA, same
-> ordering); the 93% is thread-level recall (see caveats) and the public `make demo` reproduces
-> the *method*. Full write-up and reproducible scripts in the
+> **What it buys you.** A generic RAG treats every email as an isolated document. On a real
+> ~32k-email corporate mailbox that plain-dense baseline finds the right message only **46%** of
+> the time (recall@5). mailrag is built for how email actually works: it answers from the whole
+> **thread**, not one message, and that takes recall@5 to **93%**. The metric shifts from
+> message-level to thread-level *on purpose* — for a conversation the thread is the right unit of
+> truth. Reconstructing it is the single biggest lever (**+29**, from a 64% message-level base),
+> just ahead of a per-email contextual summary (**+13**). Neither is a fancier embedding model.
+> As a yardstick the email-tuned hybrid is benchmarked against NVIDIA's general-purpose retrieval
+> stack: it wins on email, while NVIDIA's stack wins on broad legal e-discovery (TREC) — same
+> systems, opposite winners, task-dependent. Numbers are author-reported on a *private* mailbox
+> (cross-checked on public Enron-QA, same ordering). `make demo` reproduces the *method* on
+> public Enron data, not the private figures. Full write-up and scripts in the
 > [case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
 ## Why this exists
@@ -56,9 +59,10 @@ The point was never a single app — it's a private, open stack of context I own
 - **Local-LLM `summarize`** — optional per-email summary + noise judgement from a local
   LLM, content-addressed and cached, so re-runs are free.
 - **A measured methodology** — a 360-query retrieval eval that prices each technique,
-  controls for confounds, reports significance, and in several cases *overturned* the
-  intuitive choice. The core techniques were later confirmed against a public,
-  human-judged benchmark.
+  controls for confounds, and reports significance, overturning the intuitive choice more
+  than once. It also caught its own headline overstating: an early +6pp gain was half a
+  quantization artifact, worth only **+3pp** once the control re-ran at matched precision.
+  The core techniques were later confirmed against a public, human-judged benchmark.
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
 
 ## Quickstart (thread-aware contextual RAG over the public Enron dataset)
@@ -191,11 +195,16 @@ write-up:
 | **+ LLM noise removal** | precision — catches the ~⅓ of noise regex can't, and clears junk out of the top results (measured below) | one-time LLM cost (see above) |
 | **+ contextual retrieval** (prepend each email's summary before embedding — the `C′` / `work-rag-ctx-*` collection) | short/terse emails match by *gist*; the best ranked arm *and* the end-to-end winner | one extra embedded collection to build/maintain |
 | **+ cross-encoder reranker** | small precision lift on pointed queries (**+2.5 R@5**) | **demotes the answer on thread-spanning queries** (and hurt outright under the earlier LLM-judged eval, §9); off by default |
-| **+ thread reconstruction** (pull the full conversation of each top hit) | **recall@5 62% → 93%** — match a small unit, answer from its whole thread | larger context per query (tunable: expand top-N threads) |
+| **+ thread reconstruction** (pull the full conversation of each top hit) | **message-level recall@5 64% → thread-level 93%** — match a small unit, answer from its whole thread | larger context per query (tunable: expand top-N threads) |
 
 **How the eval was run.** The eval set is **360 synthetic queries** (144 terse / 144 content /
 72 spanning), each generated from a known email so the **recall ladder is scored against hard
-gold labels — no LLM judge in the loop**. A *separate* answer-quality lens does use a local LLM
+gold labels — no LLM judge in the loop**. Generating a query from its answer email risks
+circularity (the query could echo the target's exact tokens), so the queries come from body
+content under a rule that bans artifact/metadata questions plus a validation pass, and the
+load-bearing guard is external: the ordering holds on public **Enron-QA** (questions written
+independently of this generator) and on TREC's real human judgments, below. A *separate*
+answer-quality lens does use a local LLM
 judge, calibrated against a stronger reference model (Cohen's κ = **0.52** on the 0–3 scale,
 **0.80** binary at the relevance threshold actually used; Spearman 0.74). The core techniques
 were cross-checked on the **TREC Legal Track's real human judgments** and on public **Enron-QA**,
@@ -203,8 +212,10 @@ which agreed on ordering. Significance tests and confound controls are in
 [`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29):
 
 - **Thread reconstruction is the biggest single win — and needs no LLM.** Matching a small unit
-  and returning its whole conversation lifts **recall@5 from 62% → 93%** (+29) — it trades
-  "find the needle" for "find the right thread," which the conversation then answers.
+  and returning its whole conversation lifts **recall@5 from 64% (message-level) → 93%
+  (thread-level)** (+29) — it trades "find the needle" for "find the right thread," which the
+  conversation then answers. The target shifts from one message to its thread by design: for a
+  conversation, the thread is the right unit of truth.
 - **Thread-aware *summaries* help where they're designed to — terse replies.** *(Note:
   "thread-aware" names two things — the retrieval expansion above, and this
   summary-conditioning step; see the
@@ -243,8 +254,9 @@ scored on the 360 queries against hard gold labels (no LLM judge), reproducible 
 ★ The last step switches from "find the exact email" to "find its *thread*" — a legitimately
 easier, more useful target (thread-recall). The two biggest levers (thread reconstruction +29,
 contextual summary +13) are both about understanding the conversation, not a fancier embedding
-model. Same ordering on public Enron-QA; the NVIDIA dense+rerank yardstick trails on email
-(57% R@5 vs the hybrid's 62%) but wins on TREC legal e-discovery — task-fit, not brand. The
+model. Same ordering on public Enron-QA. The NVIDIA dense+rerank yardstick trails on email
+(57% R@5 vs the reranked hybrid's 64% — a like-for-like, both-reranked comparison) but wins on
+TREC legal e-discovery — task-fit, not brand. The
 value isn't any single trick; it's the disciplined stack and the rigor to prove every layer.
 
 **Worked example.** Searching for the salon partner programme by its acronym (`"SPP"`)
@@ -280,7 +292,7 @@ workflow file to pin):
 
 | Gate | Required? | What it enforces | Run locally |
 |------|-----------|------------------|-------------|
-| `pytest` | ✅ required | Full test suite + a coverage floor of **85%** (current ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
+| `pytest` | ✅ required | Full test suite + a coverage floor of **85%** (current ~89%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
 | `CodeQL` | ✅ required | Static security analysis — GitHub **default setup** (managed, no workflow file) | (runs on GitHub) |
 | `ruff (lint + format)` | advisory | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
 | `mypy (type check)` | advisory | Type-checks `src/` (lenient: `ignore_missing_imports`; CI runs deps-free so third-party imports are `Any` and results are deterministic; per-module opt-outs for legacy modules) | `poetry run mypy src/` |
