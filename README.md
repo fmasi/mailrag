@@ -333,6 +333,7 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
    - [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — the multi-collection stdio MCP server: the `list_collections` / `search_email` / `answer_question` / `list_attachments` / `get_attachment` tools, collection discovery & selection, config, client setup (Claude Code / opencode), and the CLI↔MCP capability matrix.
    - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
    - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
+   - [`docs/CHUNKING.md`](docs/CHUNKING.md) — how one email becomes two kinds of chunk: a body chunk with its summary baked into the vector, and summary-free attachment chunks split by their own structure (spreadsheet rows, PDF pages, slides), stitched back together at query time by `thread_id`.
    - [`docs/RETRIEVAL_GUIDE.md`](docs/RETRIEVAL_GUIDE.md) — the retrieval stack end-to-end: hybrid fusion, contextual retrieval, reranking, and thread-aware *retrieval* (small→big expansion).
    - [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) — the measured findings behind the case study: cleanup economics, regex-vs-LLM, the labeled-eval ladder (§9–§13), and the corpus-portability result (§14). Start with its [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first) for the `C`/`C′` labels and the two senses of "thread-aware".
 

@@ -27,6 +27,8 @@ map — this is the canonical reading order.
    - **[`ARCHITECTURE.md`](ARCHITECTURE.md)** — design decisions and extension points.
    - **[`EMAIL_PREPROCESSING.md`](EMAIL_PREPROCESSING.md)** — reply-chain stripping, posting
      styles, and chunk-size tuning.
+   - **[`CHUNKING.md`](CHUNKING.md)** — the two chunk kinds (body-with-summary vs summary-free
+     attachment) and how `thread_id` stitches them back together at query time.
    - **[`RETRIEVAL_GUIDE.md`](RETRIEVAL_GUIDE.md)** — the retrieval stack end-to-end: dense vs
      learned-sparse, hybrid + RRF, reranking, and **thread-aware retrieval** (small→big expansion).
    - **[`EXPERIMENTS.md`](EXPERIMENTS.md)** — the measured findings: the cleanup funnel, the
