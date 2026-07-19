@@ -248,8 +248,9 @@ scored on the 360 queries against hard gold labels (no LLM judge), reproducible 
 ★ The last step switches from "find the exact email" to "find its *thread*" — a legitimately
 easier, more useful target (thread-recall). The two biggest levers (thread reconstruction +29,
 contextual summary +13) are both about understanding the conversation, not a fancier embedding
-model. Same ordering on public Enron-QA; the NVIDIA dense+rerank yardstick trails on email
-(57% R@5 vs the hybrid's 62%) but wins on TREC legal e-discovery — task-fit, not brand. The
+model. Same ordering on public Enron-QA. The NVIDIA dense+rerank yardstick trails on email
+(57% R@5 vs the reranked hybrid's 64% — a like-for-like, both-reranked comparison) but wins on
+TREC legal e-discovery — task-fit, not brand. The
 value isn't any single trick; it's the disciplined stack and the rigor to prove every layer.
 
 **Worked example.** Searching for the salon partner programme by its acronym (`"SPP"`)
