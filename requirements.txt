@@ -28,5 +28,11 @@ textual
 # MCP server (src/mcp_server): expose the query path over Model Context Protocol
 mcp
 
+# Continuous sync (src/sync, issue #101): PyYAML reads accounts.yaml; imapclient
+# is the IMAP leg (ENABLE / CONDSTORE / CHANGEDSINCE, which imaplib lacks).
+# imapclient is only needed for the IMAP source — Maildir sync works without it.
+PyYAML
+imapclient
+
 # pytest for testing
 pytest

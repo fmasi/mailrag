@@ -41,6 +41,7 @@ keep), never both.
 | `onboard` | One-shot, zero-config build from an `.eml` directory. | — | — |
 | `run` | Execute a persona recipe end-to-end (headless). Needs `--persona`, and `--model` for any LLM step. | per recipe | via `index` |
 | `wizard` | Full-screen guided pipeline (persona → scope → review → live run). `--classic` for the old prompt flow. | per recipe | via `index` |
+| `sync` | Fetch new mail from a live account and index the delta, so a collection stays fresh instead of frozen at its export date. See [`SYNC.md`](SYNC.md). | small LLM (delta only) | no |
 | `mcp` | Run the stdio MCP server over an indexed collection, so any agent can query it. See [`MCP_SERVER.md`](MCP_SERVER.md). | — | no |
 | `attachments` | `build` / `list` / `get` an email's attachments (extract + OCR text). See [`SETUP.md § 9`](SETUP.md#9-attachment-extraction). | free · OCR LLM | no |
 
