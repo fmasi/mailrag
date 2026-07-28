@@ -81,6 +81,15 @@ differently, but stitched back together at query time by a shared `thread_id`.
    keeps the **untouched surface `text`** (the summary/numeric tokens are in the *vector*,
    not shown back to you) plus all the metadata.
 
+   The point's **id is deterministic** — `uuid5(namespace, "<doc_key>:<chunk_index>")`, where
+   `doc_key` comes from the email's stable `message_key` and `chunk_index` is the chunk's
+   position *within its own email*. Ids are assigned **before** the corpus-wide dedup pass, so
+   an unrelated email elsewhere in the run can never shift them. The payload also carries
+   `message_key` (shared by an email's body **and** attachment chunks, so one filter deletes
+   the whole email) and `content_hash` (the chunk's exact-text sha256). That is what makes
+   re-indexing idempotent and incremental sync possible — see
+   [`VERBS.md § index is incremental`](VERBS.md#index-is-incremental).
+
 ## Why it's designed this way
 
 - The attachment vector staying **summary-free** is deliberate: it's matched purely on what's

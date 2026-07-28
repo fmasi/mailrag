@@ -42,6 +42,7 @@ _TRANSFORMERS_STUB, _FAKE_TOKENIZER, _FAKE_TOKENIZER_CLS = _install_fake_transfo
 # Now it's safe to import the module under test.
 from src.data.models import NormalizedEmail  # noqa: E402
 from src.indexing.contextual_index import build_contextual_index  # noqa: E402
+from src.indexing.point_ids import content_hash  # noqa: E402
 
 
 def _email(body, subject="Re: plan", mid="<a@x>"):
@@ -214,3 +215,143 @@ class TestBuildContextualIndex(unittest.TestCase):
         ensure.assert_not_called()
         upsert.assert_not_called()
         fake_embedder.encode.assert_not_called()
+
+
+class TestIncrementalAppend(unittest.TestCase):
+    """Append mode (recreate=False) — the indexing half of continuous sync (#101).
+
+    Re-indexing the same mail must not duplicate chunks, and re-indexing changed
+    mail must not leave the old chunks behind.
+    """
+
+    def _build(self, emails, **kwargs):
+        """Run a build with Qdrant fully mocked; return (upserted_points, mocks)."""
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 1024
+        fake_embedder.encode.side_effect = lambda texts, **kw: (
+            [[0.1] * 1024 for _ in texts],
+            [{"7": 0.9} for _ in texts],
+        )
+        upserted = []
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection") as ensure,
+            mock.patch("src.indexing.contextual_index.hq.ensure_payload_indexes") as ensure_idx,
+            mock.patch("src.indexing.contextual_index.hq.delete_by_message_keys") as delete,
+            mock.patch(
+                "src.indexing.contextual_index.hq.upsert",
+                side_effect=lambda c, n, pts: upserted.extend(pts),
+            ),
+        ):
+            res = build_contextual_index(
+                emails,
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+                **kwargs,
+            )
+        return upserted, res, ensure, ensure_idx, delete
+
+    def test_same_email_yields_the_same_point_ids_across_runs(self):
+        body = "the quarterly plan and the budget for the coming year"
+        first, _, _, _, _ = self._build([_email(body)], recreate=False)
+        second, _, _, _, _ = self._build([_email(body)], recreate=False)
+        self.assertTrue(first)
+        self.assertEqual([p.id for p in first], [p.id for p in second])
+
+    def test_point_ids_are_unaffected_by_other_emails_in_the_run(self):
+        """The property that makes a 40-email delta safe to index into a
+        20,000-email collection."""
+        target = _email("the quarterly plan and the budget", mid="<target@x>")
+        alone, _, _, _, _ = self._build([target], recreate=False)
+        crowded, _, _, _, _ = self._build(
+            [
+                _email("something else entirely about logistics", mid="<other@x>"),
+                _email("the quarterly plan and the budget", mid="<target@x>"),
+            ],
+            recreate=False,
+        )
+        crowded_target = [p for p in crowded if p.payload.get("message_key") == "target@x"]
+        self.assertEqual([p.id for p in alone], [p.id for p in crowded_target])
+
+    def test_append_deletes_the_emails_existing_points_before_upserting(self):
+        _, _, _, _, delete = self._build([_email("a body about the plan")], recreate=False)
+        delete.assert_called_once()
+        self.assertEqual(list(delete.call_args[0][2]), ["a@x"])
+
+    def test_append_backfills_payload_indexes_on_a_preexisting_collection(self):
+        """A collection built before message_key existed has no index for it, so
+        the delete filter would fail without this."""
+        _, _, _, ensure_idx, _ = self._build([_email("a body about the plan")], recreate=False)
+        ensure_idx.assert_called_once()
+
+    def test_recreate_mode_does_not_delete(self):
+        """A full rebuild drops the collection outright — a per-email delete would
+        be wasted work against an empty collection."""
+        _, _, _, ensure_idx, delete = self._build([_email("a body")], recreate=True)
+        delete.assert_not_called()
+        ensure_idx.assert_not_called()
+
+    def test_every_point_carries_message_key_and_content_hash(self):
+        points, _, _, _, _ = self._build([_email("a body about the plan")], recreate=False)
+        self.assertTrue(points)
+        for p in points:
+            self.assertEqual(p.payload["message_key"], "a@x")
+            self.assertEqual(p.payload["content_hash"], content_hash(p.payload["text"]))
+
+    def test_point_ids_are_unique_within_a_run(self):
+        emails = [
+            _email(f"a distinct body number {i} about the plan", mid=f"<m{i}@x>") for i in range(5)
+        ]
+        points, _, _, _, _ = self._build(emails, recreate=False)
+        self.assertEqual(len(points), len({p.id for p in points}))
+
+    def _build_against_legacy(self, **kwargs):
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 1024
+        fake_embedder.encode.side_effect = lambda texts, **kw: (
+            [[0.1] * 1024 for _ in texts],
+            [{"7": 0.9} for _ in texts],
+        )
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_payload_indexes"),
+            mock.patch("src.indexing.contextual_index.hq.has_legacy_points", return_value=True),
+            mock.patch("src.indexing.contextual_index.hq.delete_by_message_keys") as delete,
+            mock.patch("src.indexing.contextual_index.hq.upsert") as upsert,
+        ):
+            res = build_contextual_index(
+                [_email("a body about the plan")],
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+                **kwargs,
+            )
+            return res, delete, upsert
+
+    def test_append_into_a_legacy_collection_is_refused(self):
+        """Duplicating a 20k-email collection is the worst failure here, so the
+        default is to stop and ask for one rebuild."""
+        with self.assertRaises(RuntimeError) as ctx:
+            self._build_against_legacy(recreate=False)
+        self.assertIn("--recreate", str(ctx.exception))
+
+    def test_the_refusal_happens_before_anything_is_written(self):
+        with self.assertRaises(RuntimeError):
+            self._build_against_legacy(recreate=False)
+        # nothing upserted, nothing deleted — the collection is untouched
+        with mock.patch("src.indexing.contextual_index.hq.upsert") as upsert:
+            self.assertFalse(upsert.called)
+
+    def test_the_guard_can_be_overridden(self):
+        res, _, upsert = self._build_against_legacy(recreate=False, allow_legacy_append=True)
+        self.assertGreaterEqual(res.chunks, 1)
+        self.assertTrue(upsert.called)
+
+    def test_the_guard_does_not_apply_to_a_full_rebuild(self):
+        res, _, upsert = self._build_against_legacy(recreate=True)
+        self.assertGreaterEqual(res.chunks, 1)
+        self.assertTrue(upsert.called)

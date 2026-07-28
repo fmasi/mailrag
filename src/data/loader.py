@@ -50,9 +50,9 @@ def load_emails(
         )
 
     normalized_emails = loader.load(num_samples=num_samples)
-    documents = [
-        email.to_document(doc_id=f"{email.source}_{i}") for i, email in enumerate(normalized_emails)
-    ]
+    # doc_id defaults to the stable ``body:<message_key>``; the old positional
+    # ``<source>_<i>`` shifted whenever the corpus order did (issue #101).
+    documents = [email.to_document() for email in normalized_emails]
     return documents
 
 

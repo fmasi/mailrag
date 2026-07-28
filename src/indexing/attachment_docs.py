@@ -43,6 +43,7 @@ _MAX_ATTACH_NAME_LEN = 512
 # or the LLM context — mirrors NormalizedEmail.to_document()'s excluded set.
 _EXCLUDED_KEYS = [
     "source_id",
+    "message_key",
     "thread_id",
     "message_id",
     "parent_message_id",
@@ -52,9 +53,11 @@ _EXCLUDED_KEYS = [
 ]
 
 
-def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, str, bytes, str]]:
-    """Return ``(filename, text, message_id, thread_id, data, mime)`` for every
-    attachment in *path* that yielded non-empty text. The raw ``data`` bytes and
+def _extract_texts_for_eml(
+    path: str, extractor
+) -> List[tuple[str, str, str, str, bytes, str, str]]:
+    """Return ``(filename, text, message_id, thread_id, data, mime, message_key)`` for
+    every attachment in *path* that yielded non-empty text. The raw ``data`` bytes and
     ``mime`` are carried through so the structure-aware chunker can re-parse the
     attachment by its own format units (issue #89). Never raises — a malformed .eml
     yields []."""
@@ -69,6 +72,9 @@ def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, st
     thread_id = compute_thread_id(
         message_id, e.in_reply_to or "", e.references or "", subject=e.subject or ""
     )
+    # Same key the email's body chunks carry, so deleting an email's points before
+    # re-upserting takes its attachment chunks with it (issue #101).
+    msg_key = e.message_key()
 
     try:
         with open(path, "rb") as fh:
@@ -77,7 +83,7 @@ def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, st
     except Exception:
         return []
 
-    out: List[tuple[str, str, str, str, bytes, str]] = []
+    out: List[tuple[str, str, str, str, bytes, str, str]] = []
     for part in msg.walk():
         if part.is_multipart():
             continue
@@ -100,7 +106,15 @@ def _extract_texts_for_eml(path: str, extractor) -> List[tuple[str, str, str, st
             # ``data`` is bytes here (decode=True on a leaf part) — narrow it for the
             # typed tuple so the structure-aware chunker receives raw bytes.
             out.append(
-                (filename or "(unnamed)", result.text, message_id, thread_id, bytes(data), mime)
+                (
+                    filename or "(unnamed)",
+                    result.text,
+                    message_id,
+                    thread_id,
+                    bytes(data),
+                    mime,
+                    msg_key,
+                )
             )
     return out
 
@@ -150,7 +164,7 @@ def build_attachment_documents(
 
     docs: List[Document] = []
     for path in eml_paths:
-        for filename, text, message_id, thread_id, data, mime in _extract_texts_for_eml(
+        for filename, text, message_id, thread_id, data, mime, msg_key in _extract_texts_for_eml(
             path, extractor
         ):
             base_meta: dict = {
@@ -159,6 +173,8 @@ def build_attachment_documents(
                 "thread_id": thread_id,
                 "source": "attachment",
                 "source_id": path,
+                # Shared with the parent email's body chunks (issue #101).
+                "message_key": msg_key,
             }
             if message_id:
                 base_meta["parent_message_id"] = message_id
@@ -184,7 +200,10 @@ def build_attachment_documents(
                     Document(
                         text=chunk,
                         metadata=metadata,
-                        doc_id=f"attachment_{message_id or path}_{filename}_{idx}",
+                        # Stable doc key: derived from the parent email's identity,
+                        # never from its position in the run, so the deterministic
+                        # point ids built from it survive re-indexing (issue #101).
+                        doc_id=f"att:{msg_key}:{filename}:{idx}",
                         excluded_embed_metadata_keys=_EXCLUDED_KEYS,
                         excluded_llm_metadata_keys=_EXCLUDED_KEYS,
                     )

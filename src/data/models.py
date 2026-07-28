@@ -50,9 +50,39 @@ class NormalizedEmail:
     # )
     # doc = email.to_document(doc_id="enron_0")
 
-    def to_document(self, doc_id: str) -> Document:
-        """Convert to a LlamaIndex Document with consistent metadata."""
+    def message_key(self) -> str:
+        """Stable identity for this email: normalized Message-ID, else content hash.
+
+        Delegates to :func:`src.data.identity.message_key` so the indexer, the
+        Pass-2 cache and (later) the sync ledger all agree on what "the same
+        email" means across re-exports and ingest paths.
+        """
+        from .identity import message_key as _message_key
+
+        return _message_key(
+            sender=self.sender,
+            subject=self.subject,
+            date=self.date,
+            body=self.body,
+            message_id=self.message_id or "",
+        )
+
+    def to_document(self, doc_id: Optional[str] = None) -> Document:
+        """Convert to a LlamaIndex Document with consistent metadata.
+
+        ``doc_id`` defaults to ``body:<message_key>`` — a *stable* key, unlike the
+        positional ``<source>_<i>`` ids callers used to pass. Deterministic point
+        ids are derived from it (see ``src/indexing/point_ids.py``), so passing a
+        run-dependent id here reintroduces duplicate chunks on re-index.
+        """
+        key = self.message_key()
+        if doc_id is None:
+            doc_id = f"body:{key}"
         metadata = {
+            # Stable per-email identity, indexed as a Qdrant payload keyword so an
+            # incremental run can delete exactly this email's chunks (body AND
+            # attachments, which carry the same key) before re-upserting them.
+            "message_key": key,
             "sender": _truncate(self.sender, _MAX_SENDER_LEN),
             "subject": _truncate(self.subject, _MAX_SUBJECT_LEN),
             "date": self.date.isoformat() if self.date else "unknown",
@@ -106,6 +136,7 @@ class NormalizedEmail:
         # semantic value and their length can exceed the chunk size.
         excluded_keys = [
             "source_id",
+            "message_key",
             "to",
             "to_full",
             "cc",

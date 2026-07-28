@@ -61,6 +61,7 @@ def _cmd_index(args):
         limit=args.limit,
         embed_summary=args.embed_summary,
         noise_min_confidence=args.noise_confidence,
+        allow_legacy_append=args.allow_legacy_append,
     )
     prof.save(args.profile)
     print(f"DONE: {res.chunks} chunks -> '{res.collection}'")
@@ -363,7 +364,18 @@ def _configure_mcp(p):
 
 def _configure_index(p):
     _add_profile_arg(p)
-    p.add_argument("--recreate", action="store_true")
+    p.add_argument(
+        "--recreate",
+        action="store_true",
+        help="drop and rebuild the collection; omit to index INCREMENTALLY "
+        "(each email's existing chunks are replaced, so re-running is safe)",
+    )
+    p.add_argument(
+        "--allow-legacy-append",
+        action="store_true",
+        help="append into a collection built before deterministic ids even though "
+        "that duplicates every chunk (default: refuse and ask for one --recreate)",
+    )
     p.add_argument("--limit", type=int, default=None)
     p.add_argument(
         "--embed-summary",

@@ -62,3 +62,28 @@ def email_identity(
 
     mid = normalize_message_id(message_id or "") or None
     return mid, content_sha256(sender=sender, subject=subject, date=date, body=body)
+
+
+def message_key(
+    *,
+    sender: str = "",
+    subject: str = "",
+    date: Union[datetime, str, None] = None,
+    body: str = "",
+    message_id: str = "",
+) -> str:
+    """Return the single stable key identifying this email.
+
+    The normalized ``Message-ID`` when the email has one, else the
+    ``content_sha256`` — i.e. the same precedence the Pass-2 cache uses to find a
+    judgment for a re-exported file, collapsed into one value.
+
+    This is what deterministic point ids and delete-before-upsert are keyed on, so
+    an email keeps the same identity across re-exports, across folders, and across
+    the backup-import vs live-sync ingest paths. Header-less corpora (e.g. the
+    public HF Enron dump) still get a stable key from their content.
+    """
+    mid, csha = email_identity(
+        sender=sender, subject=subject, date=date, body=body, message_id=message_id
+    )
+    return mid or csha

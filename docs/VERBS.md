@@ -36,7 +36,7 @@ keep), never both.
 | `calibrate` | Judge a small **sample** with the rubric and bucket the suspected mistakes — the gate before any full LLM run. | small LLM | no |
 | `summarize` | LLM **summary/context** for the emails you keep (the noise verdict comes free in the same call). The expensive step. | big LLM | no (verdict) |
 | `prune` | Apply the `tag`/`scan`/`judge` drops **before** the LLM pass, so the LLM only ever runs on the keep set. | free | marks drops |
-| `index` | Embed (BGE-M3 dense + sparse) and store in Qdrant. **The only step that actually removes the dropped mail.** | GPU | yes |
+| `index` | Embed (BGE-M3 dense + sparse) and store in Qdrant. **The only step that actually removes the dropped mail.** Incremental by default; `--recreate` rebuilds from scratch. | GPU | yes |
 | `ask` | Answer a question against an indexed collection (hybrid retrieval → thread expansion → grounded answer). | LLM at query time | — |
 | `onboard` | One-shot, zero-config build from an `.eml` directory. | — | — |
 | `run` | Execute a persona recipe end-to-end (headless). Needs `--persona`, and `--model` for any LLM step. | per recipe | via `index` |
@@ -46,6 +46,35 @@ keep), never both.
 
 Every verb is invoked through the repo-root shim — `./mailrag <verb>` (there is no
 installed console command; Poetry stays `package-mode = false`).
+
+### `index` is incremental
+
+Re-running `index` over a corpus that has grown does **not** duplicate what is
+already there, and does not require rebuilding the collection:
+
+```bash
+./mailrag index --profile personal.json --embed-summary   # incremental (default)
+./mailrag index --profile personal.json --recreate        # full rebuild
+```
+
+Each email carries a stable `message_key` — its normalized `Message-ID`, or a
+content hash when it has none — and every chunk's Qdrant point id is derived from
+that key plus the chunk's position *within its own email*. So the same email always
+lands on the same point ids no matter what else is in the run, and an incremental
+pass deletes an email's existing points before upserting its new ones. Re-indexing
+unchanged mail is a no-op; re-indexing changed mail leaves no stale chunks behind;
+an email's attachment chunks share its key and are replaced with it.
+
+Combined with the content-hash Pass-2 cache, that makes "index the 40 emails that
+arrived since Tuesday" cheap: no LLM calls for mail already judged, and no full
+re-embed. This is the foundation continuous sync builds on
+([#101](https://github.com/fmasi/mailrag/issues/101)).
+
+> **One-time rebuild.** Collections built before deterministic ids carry random
+> point ids and no `message_key`, so appending to them would *duplicate* every
+> chunk rather than replace it. `index` detects this and refuses, pointing you at
+> a single `--recreate` run — which costs no LLM calls, since every judgment is
+> already cached. `--allow-legacy-append` overrides the check if you really want it.
 
 > Older verb names still work for one release as hidden aliases:
 > `select→scope`, `profile→measure`, `pass1→tag`, `explore→scan`, `pass2→summarize`,

@@ -15,6 +15,7 @@ from llama_index.core.schema import MetadataMode
 
 from src.data.dedup import dedup_by_content
 from src.data.noise_filter import NoiseFilter
+from src.indexing.point_ids import assign_deterministic_ids, content_hash
 from src.ingest import hybrid_qdrant as hq
 from src.ingest.embed_text import embed_max_length, prepend_summary
 from src.ingest.numeric import augment_numeric
@@ -46,6 +47,7 @@ def build_contextual_index(
     qdrant_url: str = "http://localhost:6333",
     apply_noise_filter: bool = True,
     extra_docs: Optional[List] = None,
+    allow_legacy_append: bool = False,
 ) -> BuildResult:
     """Clean -> (inject summaries) -> split -> dedup -> bge-m3 hybrid embed -> upsert.
 
@@ -81,7 +83,11 @@ def build_contextual_index(
     upsert_batch:
         Number of Qdrant points to upsert per batch.
     recreate:
-        Drop and recreate the collection before indexing when True.
+        Drop and recreate the collection before indexing when True.  When False
+        the run is **incremental**: the collection is left in place and each
+        indexed email's existing points are deleted before its new ones are
+        upserted, so re-indexing the same mail is idempotent and re-indexing
+        changed mail leaves no stale chunks (issue #101).
     qdrant_url:
         URL of the Qdrant instance.
     extra_docs:
@@ -92,6 +98,11 @@ def build_contextual_index(
         ``content_kind="attachment"`` / ``attachment_name`` / ``parent_message_id``
         payload so an attachment hit traces back to its email. Kept separate from
         the body documents so a terse 4-line body never dilutes a 500-row sheet.
+    allow_legacy_append:
+        Permit an incremental run into a collection built before deterministic ids
+        existed.  Off by default because such a run *duplicates* every chunk rather
+        than replacing it (see ``hq.has_legacy_points``); the fix is a one-time
+        ``recreate=True`` rebuild, which costs no LLM calls.
 
     Returns
     -------
@@ -118,7 +129,10 @@ def build_contextual_index(
     # 3. Convert to LlamaIndex Documents. Attachment documents (issue #80) are
     # appended as their own Documents so they chunk independently of the body —
     # a 4-line body must not be split into the same chunk as a 500-row sheet.
-    docs = [e.to_document(doc_id=f"{e.source}_{i}") for i, e in enumerate(emails)]
+    # doc_id is left to default to the stable ``body:<message_key>`` — the old
+    # positional ``<source>_<i>`` id changed whenever the corpus order changed,
+    # which made the point ids derived from it change too (issue #101).
+    docs = [e.to_document() for e in emails]
     if extra_docs:
         docs.extend(extra_docs)
     if not docs:
@@ -140,6 +154,11 @@ def build_contextual_index(
     )
     nodes = splitter.get_nodes_from_documents(docs, show_progress=False)
 
+    # 4b. Deterministic point ids (issue #101). Assigned BEFORE the dedup pass:
+    # dedup is corpus-order-dependent, so deriving a chunk's ordinal after it would
+    # let an unrelated email elsewhere in the run shift this email's ids.
+    assign_deterministic_ids(nodes)
+
     # 5. Exact-content deduplication
     nodes = dedup_by_content(nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE))
     if not nodes:
@@ -157,6 +176,26 @@ def build_contextual_index(
         hq.ensure_hybrid_collection(client, collection, dim=dim, recreate=recreate)
     else:
         hq.ensure_dense_collection(client, collection, dim=dim, recreate=recreate)
+
+    # 6b. Append mode (recreate=False): this is an *incremental* run into a
+    # collection that may already hold these emails. Delete their existing points
+    # first so the upsert is a true replacement — deterministic ids make re-writing
+    # a chunk idempotent, but only a delete removes a chunk that no longer exists
+    # (an email re-processed into fewer chunks would leave a stale tail).
+    # ensure_payload_indexes backfills the message_key index on collections built
+    # before it existed, since the delete filter depends on it.
+    if not recreate:
+        if not allow_legacy_append and hq.has_legacy_points(client, collection):
+            raise RuntimeError(
+                f"collection '{collection}' holds points written before deterministic "
+                "ids (no message_key payload). Appending would duplicate every chunk "
+                "instead of replacing it. Rebuild it once with recreate=True "
+                f"(`mailrag index --profile <p> --recreate`) — this costs no LLM calls, "
+                "every judgment is already cached — or pass allow_legacy_append=True "
+                "to index anyway and accept the duplicates."
+            )
+        hq.ensure_payload_indexes(client, collection)
+        hq.delete_by_message_keys(client, collection, (d.metadata.get("message_key") for d in docs))
 
     enc_max_len = embed_max_length(chunk_size, embed_summary, override=embed_max_length_override)
 
@@ -181,6 +220,9 @@ def build_contextual_index(
         for n, dv, lw in zip(batch, dense, sparse):
             payload = dict(n.metadata)
             payload["text"] = n.get_content(metadata_mode=MetadataMode.NONE)
+            # Durable counterpart to the in-run content dedup: lets a later delta
+            # run recognise a chunk it already holds (issue #101).
+            payload["content_hash"] = content_hash(payload["text"])
             if hybrid:
                 idx, val = lexical_weights_to_sparse(lw)
                 points.append(hq.make_point(n.node_id, dv, idx, val, payload))
