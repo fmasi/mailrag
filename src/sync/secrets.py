@@ -38,15 +38,27 @@ def resolve_secret(ref: str) -> str:
     bare literal.
     """
     if not ref or ":" not in ref:
+        # NEVER echo the rejected value: if it is a literal, it is the password,
+        # and this message reaches the sync log and the run record in the state
+        # DB, replayed on every scheduled tick.
         raise SecretError(
-            f"secret must be a reference, not a literal value (got {'empty' if not ref else ref!r}); "
+            "secret must be a reference, not a literal value "
+            f"({'it is empty' if not ref else 'value withheld'}); "
             f"use one of {', '.join(s + ':...' for s in _SCHEMES)}"
         )
     scheme, _, target = ref.partition(":")
     scheme = scheme.strip().lower()
     target = target.strip()
+    # Validate the scheme BEFORE quoting it back. A value like "hunter2:" parses
+    # as scheme="hunter2" — echoing that leaks the password just as surely as
+    # echoing the whole reference would.
+    if scheme not in _SCHEMES:
+        raise SecretError(
+            f"unknown secret scheme (value withheld); expected one of "
+            f"{', '.join(s + ':...' for s in _SCHEMES)}"
+        )
     if not target:
-        raise SecretError(f"secret reference {ref!r} names no target")
+        raise SecretError(f"secret reference with scheme {scheme!r} names no target")
 
     if scheme == "env":
         value = os.environ.get(target)
@@ -65,10 +77,7 @@ def resolve_secret(ref: str) -> str:
             raise SecretError(f"secret file {path} is empty")
         return value
 
-    if scheme == "keychain":
-        return _from_keychain(target)
-
-    raise SecretError(f"unknown secret scheme {scheme!r}; expected one of {', '.join(_SCHEMES)}")
+    return _from_keychain(target)  # the only remaining validated scheme
 
 
 def _from_keychain(service: str) -> str:

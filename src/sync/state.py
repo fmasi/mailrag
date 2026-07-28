@@ -262,6 +262,29 @@ class SyncState:
         self._conn.commit()
         return len(keys)
 
+    def record_poison(self, account_id: str, *, folder: str, source_uid: str, error: str) -> str:
+        """Durably park a message that could not even be parsed. Returns its key.
+
+        :meth:`record_error` cannot serve this case: it is an UPDATE keyed on
+        ``message_key``, and a message that failed to parse has neither a key nor
+        a row. So one is synthesised from its server location, which is the only
+        identity such a message has. Without this the cursor advances past a
+        poison message that was never recorded anywhere, ``counts()`` reports
+        zero errors, and the message is unrecoverable short of a full
+        re-enumeration.
+        """
+        key = f"!poison:{folder}:{source_uid}"
+        self._conn.execute(
+            """INSERT INTO messages
+                   (account_id, message_key, folder, source_uid, fetched_at, error,
+                    judged_at, indexed_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(account_id, message_key) DO UPDATE SET error=excluded.error""",
+            (account_id, key, folder, source_uid, _now(), error[:2000], _now(), _now()),
+        )
+        self._conn.commit()
+        return key
+
     def record_error(self, account_id: str, message_key: str, error: str) -> None:
         """Park a poison message with its error, without blocking the folder.
 

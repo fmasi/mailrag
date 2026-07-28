@@ -58,6 +58,7 @@ def run_pass(
     limit: Optional[int] = None,
     progress: bool = False,
     workers: int = 1,
+    on_outcome: Optional[Callable[[str, str], None]] = None,
 ) -> Dict[str, int]:
     """Sweep *paths*, summarizing uncached files. Returns outcome counts.
 
@@ -68,8 +69,20 @@ def run_pass(
     When *workers* > 1, load+summarize (network-bound LLM calls) run in a thread
     pool with that many in-flight requests; all SQLite cache reads/writes stay on
     the calling thread so the single connection is never touched concurrently.
+
+    *on_outcome* is called as ``on_outcome(path, outcome)`` for every path, with
+    outcome in ``{"cached", "done", "error"}``.  Aggregate counts alone cannot
+    tell a caller WHICH files succeeded — and with ``workers > 1`` results do not
+    even arrive in input order — so any caller that records per-message state
+    must use this rather than inferring from the counts.
     """
     counts = {"cached": 0, "done": 0, "error": 0}
+
+    def _record(path: str, outcome: str) -> None:
+        counts[outcome] += 1
+        if on_outcome is not None:
+            on_outcome(path, outcome)
+
     paths = list(paths)
     if limit is not None:
         paths = paths[:limit]
@@ -99,7 +112,7 @@ def run_pass(
         for path in paths:
             sha = file_sha256(path)
             if cache.has(sha):
-                counts["cached"] += 1
+                _record(path, "cached")
                 _tick()
             else:
                 todo.append((path, sha))
@@ -117,17 +130,17 @@ def run_pass(
                 try:
                     path, sha, record, mid, chash = fut.result()
                     cache.put(sha, record, model=model, message_id=mid, content_sha256=chash)
-                    counts["done"] += 1
+                    _record(path, "done")
                 except Exception as exc:  # leave uncached so a rerun retries it
                     print(f"  pass2 error on {futures[fut][0]}: {exc}")
-                    counts["error"] += 1
+                    _record(futures[fut][0], "error")
                 _tick()
         if bar is not None:
             bar.close()
         return counts
 
     for path in paths:
-        counts[process_file(path, cache, load_email, summarize, model)] += 1
+        _record(path, process_file(path, cache, load_email, summarize, model))
         _tick()
     if bar is not None:
         bar.close()

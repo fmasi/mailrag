@@ -418,3 +418,77 @@ class TestIncrementalAppend(unittest.TestCase):
     def test_a_full_rebuild_ignores_the_existing_policy(self):
         _res, points = self._build_with_policy("a-different-policy", recreate=True)
         self.assertTrue(points)
+
+
+class TestDedupDeleteInteraction(unittest.TestCase):
+    """The corpus-wide dedup runs AFTER ids are assigned, so an email can finish
+    with zero surviving chunks. The delete set must come from what survives, or
+    that email's existing points are erased and nothing replaces them (#101
+    review finding)."""
+
+    def _build(self, emails, **kwargs):
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 1024
+        fake_embedder.encode.side_effect = lambda texts, **kw: (
+            [[0.1] * 1024 for _ in texts],
+            [{"7": 0.9} for _ in texts],
+        )
+        upserted = []
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_payload_indexes"),
+            mock.patch("src.indexing.contextual_index.hq.has_legacy_points", return_value=False),
+            mock.patch("src.indexing.contextual_index.hq.collection_policy", return_value=""),
+            mock.patch("src.indexing.contextual_index.hq.delete_by_message_keys") as delete,
+            mock.patch(
+                "src.indexing.contextual_index.hq.upsert",
+                side_effect=lambda c, n, pts: upserted.extend(pts),
+            ),
+        ):
+            res = build_contextual_index(
+                emails,
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+                **kwargs,
+            )
+        return res, upserted, delete
+
+    def test_an_email_absorbed_by_dedup_does_not_have_its_points_deleted(self):
+        """Two emails with byte-identical bodies: the second contributes no
+        surviving chunk, so deleting its existing points would erase it."""
+        body = "Backup completed successfully."
+        res, points, delete = self._build(
+            [_email(body, mid="<a@x>"), _email(body, mid="<b@x>")], recreate=False
+        )
+        deleted = set(delete.call_args[0][2])
+        written = {p.payload["message_key"] for p in points}
+        self.assertEqual(deleted, written)
+        self.assertNotIn("b@x", deleted)
+
+    def test_such_an_email_is_reported_as_not_indexed(self):
+        """So the sync ledger leaves it pending instead of recording success."""
+        body = "Backup completed successfully."
+        res, _points, _delete = self._build(
+            [_email(body, mid="<a@x>"), _email(body, mid="<b@x>")], recreate=False
+        )
+        self.assertIn("a@x", res.indexed_message_keys)
+        self.assertNotIn("b@x", res.indexed_message_keys)
+
+    def test_normal_emails_are_all_reported_as_indexed(self):
+        res, _points, _delete = self._build(
+            [
+                _email("first distinct body about the plan", mid="<a@x>"),
+                _email("second quite different body about budgets", mid="<b@x>"),
+            ],
+            recreate=False,
+        )
+        self.assertEqual(set(res.indexed_message_keys), {"a@x", "b@x"})
+
+    def test_the_delete_set_never_exceeds_what_is_written(self):
+        res, points, delete = self._build(
+            [_email("a body about the quarterly plan", mid="<a@x>")], recreate=False
+        )
+        self.assertTrue(set(delete.call_args[0][2]) <= {p.payload["message_key"] for p in points})

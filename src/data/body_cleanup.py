@@ -136,24 +136,44 @@ def strip_tracking_params(text: str) -> str:
 
 # RFC 3676 §4.3: a line containing exactly "-- " delimits the signature block.
 # Tolerant of the trailing space being stripped in transit, which is common.
-_SIGNATURE = re.compile(r"\n-- ?\n[\s\S]*\Z")
+# Anchored to the LAST such delimiter (via the negative lookahead) so a "--"
+# used earlier as a thematic break cannot swallow the rest of the message.
+_SIGNATURE = re.compile(r"\n-- ?\n(?:(?!\n-- ?\n)[\s\S])*\Z")
 
 # Below this many characters of surviving body, a signature strip is more
 # likely to have eaten the message than cleaned it — a two-line "Thanks,\n--\nJ"
 # reply is mostly signature, and keeping it whole beats indexing an empty body.
 _MIN_BODY_AFTER_SIGNATURE = 40
 
+# A real signature is small. These bound what may be REMOVED — the guard that
+# actually matters, since measuring only what is kept lets a long tail after a
+# stray "--" divider be deleted from a long message without tripping anything
+# (found in review of #101).
+_MAX_SIGNATURE_CHARS = 600
+_MAX_SIGNATURE_LINES = 12
+
 
 def strip_signature_block(text: str) -> str:
-    """Remove a trailing ``-- `` signature block, unless it is most of the message.
+    """Remove a trailing ``-- `` signature block — conservatively.
 
-    The guard is the point: signature stripping is normally a clear win, but on
-    a terse reply it can leave nothing behind, and an empty body is worse for
-    retrieval than a signature is.
+    Three guards, because this rule deletes user content outright:
+
+    * it matches only the LAST ``-- `` delimiter, so an earlier one used as a
+      divider cannot take the rest of the message with it;
+    * what is removed must look like a signature (bounded length and line
+      count), not like prose that happened to follow a divider;
+    * what remains must still be a usable body — a "Thanks!" reply is mostly
+      signature, and an empty body retrieves worse than a signature does.
     """
     if not text:
         return text
-    stripped = _SIGNATURE.sub("", text)
+    match = _SIGNATURE.search(text)
+    if match is None:
+        return text
+    removed = match.group(0)
+    if len(removed) > _MAX_SIGNATURE_CHARS or removed.count("\n") > _MAX_SIGNATURE_LINES:
+        return text
+    stripped = text[: match.start()]
     if len(stripped.strip()) < _MIN_BODY_AFTER_SIGNATURE:
         return text
     return stripped

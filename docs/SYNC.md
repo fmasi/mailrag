@@ -58,7 +58,13 @@ accounts:
     exclude_roles: [junk, trash]
     cadence: 12h
     start_from: "2026-08-01"   # optional — see below
+    embed_summary: true        # MUST match how the collection was built
 ```
+
+`embed_summary` must match the collection. `mailrag index` without
+`--embed-summary` produces a different index policy, and sync appending under
+the other setting is refused (correctly, but confusingly). If your backfill ran
+without summaries, set `embed_summary: false` here.
 
 ### `start_from`: don't re-download history you already have
 
@@ -122,8 +128,23 @@ and anything it couldn't do is picked up next time:
 | Unavailable | Behaviour |
 |-------------|-----------|
 | Network / IMAP | warn, exit cleanly, retry on the next tick |
-| LLM endpoint | mail is still fetched and spooled; judging deferred |
+| LLM endpoint | mail is still fetched and spooled; judging deferred — and **indexing waits too**, because `indexed_at` is set once and never cleared, so indexing unjudged mail would freeze a summary-less vector permanently |
 | Qdrant | mail is still fetched and judged; indexing deferred |
+
+Two failures are deliberately *not* treated as outages, because retrying cannot
+fix them and a silent "deferred" every 12 hours would hide them forever:
+
+- a collection that predates deterministic point ids, and
+- a collection built under a different index policy (see `embed_summary` below).
+
+Both are reported as `index REFUSED (needs operator action)` and are checked
+*before* the delta is loaded, judged and OCR'd — so a refusal costs one round
+trip rather than repeating the whole delta's work on every tick.
+
+A message that cannot be parsed at all is **parked**: recorded in the ledger
+under a synthetic key with its error, excluded from the judge and index stages,
+and counted by `--status`. The cursor still advances past it, so one poison
+message never wedges a folder.
 
 This deliberately inverts `onboard`'s fail-fast, which is right for a six-hour
 build and wrong for a background refresh. Nothing is lost, because the ledger

@@ -87,6 +87,11 @@ class AccountConfig:
     # IS the backfill, wrong when a backup export already covers history. Set it
     # to the export's end date so nothing is missed and nothing is re-fetched.
     start_from: Optional[str] = None
+    # Must match how the target collection was built: the index-policy guard
+    # rejects an append whose embed_summary differs, and the two are trivially
+    # easy to get out of step (a backfill run without --embed-summary followed
+    # by a sync that assumes it).
+    embed_summary: bool = True
     options: Dict[str, Any] = field(default_factory=dict)
 
     def start_from_date(self):
@@ -160,6 +165,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
         "folder_roles",
         "cadence",
         "start_from",
+        "embed_summary",
         "options",
     }
     unknown = set(data) - known
@@ -181,6 +187,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
         folder_roles={str(k): str(v) for k, v in (data.get("folder_roles") or {}).items()},
         cadence=str(data.get("cadence", "12h")),
         start_from=(str(data["start_from"]) if data.get("start_from") else None),
+        embed_summary=bool(data.get("embed_summary", True)),
         options=dict(data.get("options") or {}),
     )
     if "include_roles" in data:

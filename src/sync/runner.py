@@ -42,6 +42,15 @@ log = logging.getLogger(__name__)
 CURSOR_COMMIT_EVERY = 20
 
 
+class PermanentIndexError(RuntimeError):
+    """The index stage refused for a reason retrying cannot fix.
+
+    A legacy collection or an index-policy mismatch needs an operator decision
+    (usually one ``--recreate``). Treating it as a transient outage would hide a
+    permanent failure behind a "deferred" line, silently, every cadence tick.
+    """
+
+
 @dataclass
 class SyncReport:
     """What one run did — the payload behind the CLI's summary line."""
@@ -141,6 +150,12 @@ def _fetch_folder(account, source, state, spool, folder: Folder, cursor, report,
             # parsed will never parse, and leaving the watermark behind it would
             # re-fetch it — and stall everything after it — on every future run.
             log.warning("could not spool %s/%s: %s", folder.name, message.source_uid, exc)
+            # Record it before moving on, or the message vanishes: no ledger row,
+            # no .eml, no UID anywhere, and --status honestly reporting 0 errors.
+            # judged_at/indexed_at are pre-set so it never enters those stages.
+            state.record_poison(
+                account.id, folder=folder.name, source_uid=message.source_uid, error=str(exc)
+            )
             report.messages.append(f"{folder.name}/{message.source_uid}: {exc}")
             report.errors += 1
             cursor = source.advance(cursor, message)
@@ -201,30 +216,54 @@ def judge_pending(
     if not pending:
         return report
 
-    paths = [r["eml_path"] for r in pending if r["eml_path"]]
-    if not paths:
+    by_path = {r["eml_path"]: r["message_key"] for r in pending if r["eml_path"]}
+    if not by_path:
         return report
+
+    # Collected per path, because the aggregate counts cannot say WHICH files
+    # succeeded — and with workers > 1 results do not arrive in input order.
+    # Inferring it positionally (as this did) marks failed messages judged and
+    # leaves successful ones pending, permanently, since judged_at is never
+    # cleared. Found in review of #101.
+    succeeded: List[str] = []
+    errored_paths: List[str] = []
+
+    def on_outcome(path: str, outcome: str) -> None:
+        if outcome in ("done", "cached"):
+            succeeded.append(path)
+        else:
+            errored_paths.append(path)
 
     try:
-        counts = (run_pass_fn or _default_run_pass)(
-            profile=profile, paths=paths, model=model, workers=workers
+        (run_pass_fn or _default_run_pass)(
+            profile=profile,
+            paths=list(by_path),
+            model=model,
+            workers=workers,
+            on_outcome=on_outcome,
         )
     except Exception as exc:  # noqa: BLE001 — an unreachable LLM is expected, not exceptional
-        log.warning("judge stage unavailable (%s); %d message(s) deferred", exc, len(paths))
+        log.warning("judge stage unavailable (%s); %d message(s) deferred", exc, len(by_path))
         report.skipped_stages.append("judge")
         report.messages.append(f"judge deferred: {exc}")
+        # Whatever completed before the failure is still durably cached, so
+        # crediting it costs nothing and avoids re-paying for it next run.
+        if succeeded:
+            report.judged += state.mark_judged(
+                account.id, [by_path[p] for p in succeeded if p in by_path]
+            )
         return report
 
-    # Only mark what actually got a judgment; errors stay pending so the next run
-    # retries them rather than indexing them unjudged forever.
-    errored = int(counts.get("error", 0))
-    judged_rows = pending if not errored else pending[: max(0, len(pending) - errored)]
-    report.judged += state.mark_judged(account.id, [r["message_key"] for r in judged_rows])
-    report.errors += errored
+    report.judged += state.mark_judged(account.id, [by_path[p] for p in succeeded if p in by_path])
+    for path in errored_paths:
+        key = by_path.get(path)
+        if key:
+            state.record_error(account.id, key, "pass-2 judge failed")
+    report.errors += len(errored_paths)
     return report
 
 
-def _default_run_pass(*, profile, paths, model, workers):
+def _default_run_pass(*, profile, paths, model, workers, on_outcome=None):
     """Bridge to the existing Pass-2 machinery, scoped to the delta's files."""
     from src.llm import client as llm_client  # noqa: PLC0415
     from src.llm import rubrics, summary  # noqa: PLC0415
@@ -249,6 +288,7 @@ def _default_run_pass(*, profile, paths, model, workers):
             model,
             progress=False,
             workers=workers,
+            on_outcome=on_outcome,
         )
     finally:
         cache.close()
@@ -262,6 +302,8 @@ def index_pending(
     embedder,
     report: Optional[SyncReport] = None,
     index_fn: Optional[Callable] = None,
+    require_judged: bool = True,
+    embed_summary: bool = True,
 ) -> SyncReport:
     """Index spooled-but-unindexed mail into the account's collection, incrementally.
 
@@ -271,34 +313,93 @@ def index_pending(
     """
     report = report or SyncReport(account_id=account.id)
     pending = state.pending(account.id, "indexed")
-    paths = [r["eml_path"] for r in pending if r["eml_path"]]
-    if not paths:
+
+    if require_judged:
+        # Indexing unjudged mail is permanent: indexed_at is set once and never
+        # cleared, so an email indexed during an LLM outage would keep its
+        # summary-less vector forever even after the summary arrived. Wait for
+        # the judge stage instead — the mail is safe on disk meanwhile.
+        deferred = [r for r in pending if r["judged_at"] is None]
+        pending = [r for r in pending if r["judged_at"] is not None]
+        if deferred:
+            report.messages.append(f"{len(deferred)} message(s) awaiting judge before indexing")
+
+    by_path = {r["eml_path"]: r["message_key"] for r in pending if r["eml_path"]}
+    if not by_path:
         return report
 
     try:
-        chunks = (index_fn or _default_index)(
-            profile=profile, embedder=embedder, paths=paths, collection=account.collection
+        result = (index_fn or _default_index)(
+            profile=profile,
+            embedder=embedder,
+            paths=list(by_path),
+            collection=account.collection,
+            embed_summary=embed_summary,
         )
+    except PermanentIndexError as exc:
+        # An operator-fixable refusal (legacy collection, policy mismatch). Filing
+        # it as a transient outage would repeat it silently every cadence tick.
+        log.error("index stage refused: %s", exc)
+        report.messages.append(f"index REFUSED (needs operator action): {exc}")
+        report.errors += 1
+        return report
     except Exception as exc:  # noqa: BLE001 — Qdrant in Docker is routinely down
-        log.warning("index stage unavailable (%s); %d message(s) deferred", exc, len(paths))
+        log.warning("index stage unavailable (%s); %d message(s) deferred", exc, len(by_path))
         report.skipped_stages.append("index")
         report.messages.append(f"index deferred: {exc}")
         return report
 
-    report.indexed += state.mark_indexed(account.id, [r["message_key"] for r in pending])
+    chunks, indexed_keys = result if isinstance(result, tuple) else (result, None)
+    # Mark only what the indexer actually wrote. An email whose chunks were all
+    # absorbed by the corpus-wide dedup produces no points, and recording it as
+    # indexed would strand it (found in review of #101).
+    keys = (
+        list(by_path.values())
+        if indexed_keys is None
+        else [k for k in by_path.values() if k in indexed_keys]
+    )
+    skipped = len(by_path) - len(keys)
+    report.indexed += state.mark_indexed(account.id, keys)
     report.messages.append(f"indexed {chunks} chunk(s)")
+    if skipped:
+        report.messages.append(f"{skipped} message(s) produced no chunks (left pending)")
     return report
 
 
-def _default_index(*, profile, embedder, paths, collection):
-    """Load the delta's files and append them to the collection."""
+def _default_index(*, profile, embedder, paths, collection, embed_summary=True):
+    """Load the delta's files and append them to the collection.
+
+    Returns ``(chunks, indexed_message_keys)``. The guards are checked BEFORE the
+    expensive load/pass-2/OCR work, so a permanent refusal costs one round trip
+    rather than re-doing the whole delta on every scheduled tick.
+    """
     from src.data.loaders.mail_archive_x import MailArchiveXLoader  # noqa: PLC0415
     from src.data.noise_filter import NoiseFilter  # noqa: PLC0415
     from src.indexing.attachment_docs import build_attachment_documents  # noqa: PLC0415
     from src.indexing.contextual_index import build_contextual_index  # noqa: PLC0415
+    from src.indexing.policy import describe_mismatch, policy_fingerprint  # noqa: PLC0415
+    from src.ingest import hybrid_qdrant as hq  # noqa: PLC0415
     from src.llm.cache import Pass2Cache  # noqa: PLC0415
     from src.llm.pass2 import apply_pass2  # noqa: PLC0415
     from src.pipeline import pass1  # noqa: PLC0415
+
+    # Fail fast on the operator-fixable refusals, before any work is done.
+    client = hq.get_client(profile.qdrant_url)
+    if hq.has_legacy_points(client, collection):
+        raise PermanentIndexError(
+            f"collection '{collection}' predates deterministic point ids; appending would "
+            "duplicate every chunk. Rebuild once with `mailrag index --recreate`."
+        )
+    existing_policy = hq.collection_policy(client, collection)
+    incoming = policy_fingerprint(
+        chunk_size=profile.chunk_size,
+        chunk_overlap=profile.chunk_overlap,
+        embed_summary=embed_summary,
+        embedder_name=type(embedder).__name__,
+        dim=getattr(embedder, "dim", 1024),
+    )
+    if existing_policy and existing_policy != incoming:
+        raise PermanentIndexError(describe_mismatch(collection, existing_policy, incoming))
 
     emails = MailArchiveXLoader(eml_files=list(paths)).load()
     emails, _stats = pass1.run(emails, NoiseFilter.from_project_rules())
@@ -320,13 +421,13 @@ def _default_index(*, profile, embedder, paths, collection):
         embedder=embedder,
         chunk_size=profile.chunk_size,
         chunk_overlap=profile.chunk_overlap,
-        embed_summary=True,
+        embed_summary=embed_summary,
         recreate=False,  # incremental — see issue #101 slice 1
         qdrant_url=profile.qdrant_url,
         apply_noise_filter=False,
         extra_docs=attachment_docs,
     )
-    return result.chunks
+    return result.chunks, result.indexed_message_keys
 
 
 def sync_account(
@@ -340,6 +441,7 @@ def sync_account(
     workers: int = 1,
     fetch_only: bool = False,
     limit: Optional[int] = None,
+    embed_summary: bool = True,
 ) -> SyncReport:
     """Run one full sync for one account. Never raises for an expected outage.
 
@@ -364,12 +466,29 @@ def sync_account(
 
         # Stages below still run on whatever is already spooled, so an outage in
         # one stage never strands mail that an earlier run fetched.
-        if not fetch_only and profile is not None and model:
-            judge_pending(
-                account, state, profile=profile, model=model, workers=workers, report=report
-            )
+        judged_configured = bool(model)
+        if not fetch_only and profile is not None:
+            if judged_configured:
+                judge_pending(
+                    account, state, profile=profile, model=model, workers=workers, report=report
+                )
+            elif state.pending(account.id, "judged"):
+                # Without a model there IS no judge stage. Say so — reporting a
+                # clean "ok" while silently indexing unjudged mail hides the
+                # single most consequential thing about the run.
+                report.skipped_stages.append("judge (no --model)")
         if not fetch_only and profile is not None and embedder is not None:
-            index_pending(account, state, profile=profile, embedder=embedder, report=report)
+            index_pending(
+                account,
+                state,
+                profile=profile,
+                embedder=embedder,
+                report=report,
+                # With no judge stage configured, waiting for judgments that will
+                # never come would mean never indexing at all.
+                require_judged=judged_configured,
+                embed_summary=embed_summary,
+            )
 
         state.finish_run(
             run_id,

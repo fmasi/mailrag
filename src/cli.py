@@ -646,6 +646,7 @@ def _cmd_sync(args):
                 workers=args.workers,
                 fetch_only=args.fetch_only,
                 limit=args.limit,
+                embed_summary=account.embed_summary,
             )
             print(f"{account.id}: {report.summary()}")
             if report.skipped_stages:

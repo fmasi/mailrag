@@ -6,6 +6,7 @@ genuine integration tests of the orchestration — no fake source, no network.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import tempfile
@@ -30,6 +31,27 @@ def _eml(message_id: str, subject="Hi", body="A body with some words in it.") ->
     m["Date"] = "Tue, 15 Jan 2026 09:30:00 +0000"
     m.set_content(body)
     return bytes(m)
+
+
+@contextlib.contextmanager
+def _spool_rejecting(marker: str):
+    """Make Spool.write raise for the message whose bytes contain *marker*.
+
+    Simulates a message the loader cannot parse. Injected at the spool rather
+    than seeded on disk because MaildirSource skips empty/unreadable files
+    before the spool is ever consulted.
+    """
+    from src.sync.spool import Spool, SpoolError
+
+    real = Spool.write
+
+    def fake(self, raw):
+        if marker.encode() in raw:
+            raise SpoolError("could not parse message")
+        return real(self, raw)
+
+    with mock.patch.object(Spool, "write", fake):
+        yield
 
 
 class _RunnerTest(unittest.TestCase):
@@ -129,15 +151,20 @@ class TestFetchStage(_RunnerTest):
         self.assertEqual(self._sync(limit=2).fetched, 2)
 
     def test_an_unparseable_message_is_parked_without_blocking_the_folder(self):
-        """The msgvault lesson: a poison message must never wedge the watermark."""
+        """The msgvault lesson: a poison message must never wedge the watermark.
+
+        The spool is made to reject the middle message directly — an empty file
+        is skipped by MaildirSource before the spool is reached, so seeding one
+        would exercise nothing.
+        """
         self._deliver("m1", "<1@x>", mtime=1000)
-        with open(os.path.join(self.maildir, "cur", "bad"), "wb") as fh:
-            fh.write(b"")
-        os.utime(os.path.join(self.maildir, "cur", "bad"), (1500, 1500))
+        self._deliver("bad", "<bad@x>", mtime=1500)
         self._deliver("m2", "<2@x>", mtime=2000)
-        report = self._sync()
+        with _spool_rejecting("bad@x"):
+            report = self._sync()
         # The good mail on both sides of the poison message still arrives.
         self.assertEqual(report.fetched, 2)
+        self.assertEqual(report.errors, 1)
 
     def test_a_dead_source_defers_instead_of_failing_the_run(self):
         """No network is the normal state of a laptop, not an exception."""
@@ -199,8 +226,10 @@ class TestJudgeStage(_RunnerTest):
         self._sync()
         seen = {}
 
-        def fake_run_pass(*, profile, paths, model, workers):
+        def fake_run_pass(*, profile, paths, model, workers, on_outcome=None):
             seen["paths"] = paths
+            for p in paths:
+                on_outcome(p, "done")
             return {"cached": 0, "done": len(paths), "error": 0}
 
         report = judge_pending(
@@ -239,19 +268,65 @@ class TestJudgeStage(_RunnerTest):
         )
         self.assertEqual(report.judged, 0)
 
-    def test_errors_stay_pending_for_the_next_run(self):
+    def test_only_the_paths_that_succeeded_are_marked_judged(self):
+        """The defect this replaces: outcomes were inferred by slicing a
+        positional prefix off the pending list, so a FAILED message was marked
+        judged (permanently, since judged_at is never cleared) while a
+        SUCCESSFUL one stayed pending."""
         for i in range(3):
             self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
         self._sync()
+        rows = {r["eml_path"]: r["message_key"] for r in self.state.pending("acct", "judged")}
+        paths = sorted(rows)
+        failing = paths[0]  # the FIRST path fails — the slice used to mark it judged
+
+        def fake_run_pass(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "error" if p == failing else "done")
+            return {"cached": 0, "done": len(paths) - 1, "error": 1}
+
         report = judge_pending(
             self.account,
             self.state,
             profile=self._profile(),
             model="m",
-            run_pass_fn=lambda **kw: {"cached": 0, "done": 2, "error": 1},
+            run_pass_fn=fake_run_pass,
         )
         self.assertEqual(report.judged, 2)
-        self.assertEqual(self.state.counts("acct")["pending_judge"], 1)
+        still_pending = {r["message_key"] for r in self.state.pending("acct", "judged")}
+        self.assertEqual(still_pending, {rows[failing]})
+
+    def test_a_failed_judge_is_recorded_as_an_error(self):
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+
+        def fake_run_pass(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "error")
+            return {"cached": 0, "done": 0, "error": len(paths)}
+
+        judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=fake_run_pass
+        )
+        self.assertEqual(self.state.counts("acct")["errors"], 1)
+
+    def test_work_completed_before_a_mid_sweep_failure_is_credited(self):
+        """The Pass-2 cache already holds those judgments; re-paying for them
+        because the sweep died afterwards would be pure waste."""
+        for i in range(3):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+
+        def dies_halfway(*, profile, paths, model, workers, on_outcome=None):
+            on_outcome(paths[0], "done")
+            raise ConnectionError("LM Studio went away")
+
+        report = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=dies_halfway
+        )
+        self.assertIn("judge", report.skipped_stages)
+        self.assertEqual(report.judged, 1)
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 2)
 
 
 class TestIndexStage(_RunnerTest):
@@ -263,9 +338,9 @@ class TestIndexStage(_RunnerTest):
         self._sync()
         seen = {}
 
-        def fake_index(*, profile, embedder, paths, collection):
+        def fake_index(*, profile, embedder, paths, collection, embed_summary=True):
             seen.update(paths=paths, collection=collection)
-            return 3
+            return 3, None
 
         report = index_pending(
             self.account,
@@ -273,6 +348,7 @@ class TestIndexStage(_RunnerTest):
             profile=self._profile(),
             embedder=mock.Mock(),
             index_fn=fake_index,
+            require_judged=False,
         )
         self.assertEqual(report.indexed, 1)
         self.assertEqual(seen["collection"], "test-collection")
@@ -296,6 +372,7 @@ class TestIndexStage(_RunnerTest):
             profile=self._profile(),
             embedder=mock.Mock(),
             index_fn=broken,
+            require_judged=False,
         )
         self.assertIn("index", report.skipped_stages)
         self.assertEqual(self.state.counts("acct")["pending_index"], 1)
@@ -310,13 +387,15 @@ class TestIndexStage(_RunnerTest):
             profile=self._profile(),
             embedder=mock.Mock(),
             index_fn=lambda **kw: (_ for _ in ()).throw(ConnectionError("down")),
+            require_judged=False,
         )
         report = index_pending(
             self.account,
             self.state,
             profile=self._profile(),
             embedder=mock.Mock(),
-            index_fn=lambda **kw: 3,
+            index_fn=lambda **kw: (3, None),
+            require_judged=False,
         )
         self.assertEqual(report.indexed, 1)
         self.assertEqual(self.state.counts("acct")["pending_index"], 0)
@@ -412,3 +491,123 @@ class TestScopeRoles(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewRegressions(_RunnerTest):
+    """One test per defect found by the #101 code review. Each fails on the
+    pre-fix code, so none of them can quietly stop protecting anything."""
+
+    def _profile(self):
+        return mock.Mock(
+            pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x", rubric="p"
+        )
+
+    def test_unjudged_mail_is_not_indexed_when_a_judge_stage_is_configured(self):
+        """indexed_at is set once and never cleared, so indexing during an LLM
+        outage would permanently freeze a summary-less vector."""
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        called = {}
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: called.setdefault("yes", True) or (1, None),
+            require_judged=True,
+        )
+        self.assertNotIn("yes", called)
+        self.assertEqual(report.indexed, 0)
+        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+
+    def test_judged_mail_is_indexed_once_the_judgment_arrives(self):
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        self.state.mark_judged(
+            "acct", [r["message_key"] for r in self.state.pending("acct", "judged")]
+        )
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: (1, None),
+            require_judged=True,
+        )
+        self.assertEqual(report.indexed, 1)
+
+    def test_a_message_that_produced_no_chunks_is_left_pending(self):
+        """An email fully absorbed by the corpus-wide dedup writes nothing;
+        marking it indexed would strand it forever."""
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: (0, frozenset()),  # nothing survived
+            require_judged=False,
+        )
+        self.assertEqual(report.indexed, 0)
+        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+
+    def test_a_permanent_refusal_is_not_reported_as_a_transient_outage(self):
+        """A policy/legacy refusal needs an operator; filing it as 'deferred'
+        would repeat it silently on every cadence tick."""
+        from src.sync.runner import PermanentIndexError
+
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+
+        def refuses(**_kw):
+            raise PermanentIndexError("collection was built under a different policy")
+
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=refuses,
+            require_judged=False,
+        )
+        self.assertNotIn("index", report.skipped_stages)
+        self.assertEqual(report.errors, 1)
+        self.assertTrue(any("REFUSED" in m for m in report.messages))
+
+    def test_a_run_without_a_model_reports_the_missing_judge_stage(self):
+        """Otherwise the run says 'ok' while indexing mail nothing ever judged."""
+        self._deliver("m1", "<1@x>", mtime=1000)
+        report = sync_account(
+            self.account,
+            state=self.state,
+            source_factory=build_source,
+            profile=self._profile(),
+            embedder=None,
+            model="",
+        )
+        self.assertTrue(any("judge" in s for s in report.skipped_stages))
+        self.assertNotEqual(report.status, STATUS_OK)
+
+    def test_an_unspoolable_message_is_durably_recorded(self):
+        """Before the fix the cursor advanced past it leaving no ledger row, no
+        .eml and no UID — unrecoverable, with --status reporting 0 errors."""
+        self._deliver("bad", "<bad@x>", mtime=1500)
+        with _spool_rejecting("bad@x"):
+            report = self._sync()
+        self.assertEqual(report.errors, 1)
+        self.assertEqual(self.state.counts("acct")["errors"], 1)
+
+    def test_a_parked_poison_message_never_enters_the_judge_or_index_stages(self):
+        self._deliver("bad", "<bad@x>", mtime=1500)
+        with _spool_rejecting("bad@x"):
+            self._sync()
+        self.assertEqual(self.state.pending("acct", "judged"), [])
+        self.assertEqual(self.state.pending("acct", "indexed"), [])
+
+    def test_parking_is_idempotent_across_re_enumeration(self):
+        self._deliver("bad", "<bad@x>", mtime=1500)
+        with _spool_rejecting("bad@x"):
+            self._sync()
+        self.state.record_poison("acct", folder="INBOX", source_uid="bad", error="again")
+        self.assertEqual(self.state.counts("acct")["errors"], 1)

@@ -30,6 +30,11 @@ class BuildResult:
     collection: str
     kept_emails: int
     chunks: int
+    # message_keys that actually produced points in THIS run. Callers that track
+    # per-message state (the sync ledger) must mark only these as indexed — an
+    # email whose chunks were all removed by the corpus-wide dedup contributes
+    # nothing, and recording it as indexed would strand it forever.
+    indexed_message_keys: frozenset = frozenset()
 
 
 def build_contextual_index(
@@ -160,10 +165,18 @@ def build_contextual_index(
     # let an unrelated email elsewhere in the run shift this email's ids.
     assign_deterministic_ids(nodes)
 
-    # 5. Exact-content deduplication
+    # 5. Exact-content deduplication. NOTE this is corpus-wide: a chunk whose
+    # exact text already appeared under a DIFFERENT email is dropped here, so an
+    # email can finish this step contributing zero nodes.
     nodes = dedup_by_content(nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE))
     if not nodes:
         return BuildResult(collection=collection, kept_emails=kept_emails, chunks=0)
+
+    # 5b. The set of emails that will actually be written. Derived from the
+    # SURVIVING nodes, never from `docs`: deleting an email's existing points and
+    # then upserting nothing for it would erase it from the collection while the
+    # caller believed it had been indexed (found in review of #101).
+    surviving_keys = frozenset(k for k in (n.metadata.get("message_key") for n in nodes) if k)
 
     # 6. Prepare the Qdrant collection. Size it from the embedder so a non-bge-m3
     # embedder (e.g. a NIM at 2048-d) gets a correctly-sized collection (default
@@ -209,7 +222,11 @@ def build_contextual_index(
         if existing_policy and existing_policy != fingerprint:
             raise RuntimeError(describe_mismatch(collection, existing_policy, fingerprint))
         hq.ensure_payload_indexes(client, collection)
-        hq.delete_by_message_keys(client, collection, (d.metadata.get("message_key") for d in docs))
+        # Only emails that survive to upsert get their old points removed. An
+        # email fully absorbed by the dedup keeps whatever it already had —
+        # stale beats absent, and it is reported as un-indexed so the caller
+        # does not record success.
+        hq.delete_by_message_keys(client, collection, surviving_keys)
 
     enc_max_len = embed_max_length(chunk_size, embed_summary, override=embed_max_length_override)
 
@@ -246,4 +263,9 @@ def build_contextual_index(
         hq.upsert(client, collection, points)
         done += len(batch)
 
-    return BuildResult(collection=collection, kept_emails=kept_emails, chunks=done)
+    return BuildResult(
+        collection=collection,
+        kept_emails=kept_emails,
+        chunks=done,
+        indexed_message_keys=surviving_keys,
+    )

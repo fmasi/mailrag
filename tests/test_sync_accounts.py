@@ -231,9 +231,13 @@ class TestResolveSecret(unittest.TestCase):
         with self.assertRaises(SecretError):
             resolve_secret("")
 
-    def test_an_unknown_scheme_is_refused(self):
-        with self.assertRaises(SecretError):
+    def test_an_unknown_scheme_is_refused_without_echoing_it(self):
+        """A value like "hunter2:" parses as scheme="hunter2" — echoing the
+        scheme back would leak the password (#101 review finding)."""
+        with self.assertRaises(SecretError) as ctx:
             resolve_secret("vault:secret/mail")
+        self.assertNotIn("vault", str(ctx.exception))
+        self.assertNotIn("secret/mail", str(ctx.exception))
 
     def test_a_scheme_with_no_target_is_refused(self):
         with self.assertRaises(SecretError):
@@ -268,3 +272,45 @@ class TestResolveSecret(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSecretRedaction(unittest.TestCase):
+    """The 'plaintext rejected' guard used to interpolate the rejected literal —
+    i.e. the password — into an error the runner writes to ~/.mailrag/sync.log
+    and persists in sync_runs.message, replayed every cadence tick (#101 review
+    finding)."""
+
+    def test_a_rejected_literal_is_never_echoed(self):
+        secret = "hunter2-correct-horse-battery"
+        with self.assertRaises(SecretError) as ctx:
+            resolve_secret(secret)
+        self.assertNotIn(secret, str(ctx.exception))
+        self.assertIn("withheld", str(ctx.exception))
+
+    def test_a_malformed_reference_does_not_echo_its_value(self):
+        with self.assertRaises(SecretError) as ctx:
+            resolve_secret("hunter2-correct-horse:")
+        self.assertNotIn("hunter2", str(ctx.exception))
+
+    def test_the_error_still_says_what_to_do(self):
+        with self.assertRaises(SecretError) as ctx:
+            resolve_secret("hunter2")
+        for scheme in ("keychain:", "env:", "file:"):
+            self.assertIn(scheme, str(ctx.exception))
+
+    def test_an_empty_reference_is_described_as_empty(self):
+        with self.assertRaises(SecretError) as ctx:
+            resolve_secret("")
+        self.assertIn("empty", str(ctx.exception))
+
+
+class TestEmbedSummaryConfig(unittest.TestCase):
+    """Sync hardcoded embed_summary=True, so its policy fingerprint could never
+    match a collection built without --embed-summary; the guard then raised on
+    every run and the catch-all filed it as a Qdrant outage (#101 review)."""
+
+    def test_it_defaults_to_true(self):
+        self.assertTrue(account_from_dict({"id": "a"}).embed_summary)
+
+    def test_it_can_be_turned_off_to_match_the_collection(self):
+        self.assertFalse(account_from_dict({"id": "a", "embed_summary": False}).embed_summary)

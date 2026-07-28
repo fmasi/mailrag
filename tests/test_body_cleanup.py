@@ -218,3 +218,51 @@ class TestLoaderIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSignatureGuardRegressions(unittest.TestCase):
+    """The guard used to measure the KEPT prefix only, so a stray '--' divider
+    early in a long email deleted everything after it (#101 review finding)."""
+
+    def test_a_divider_early_in_a_long_email_does_not_truncate_it(self):
+        body = (
+            "Here is the summary of where we landed after the workshop.\n"
+            "-- \n"
+            + "The first option is to renegotiate the lease, which we costed at 40k. " * 12
+            + "\nThat is the recommendation."
+        )
+        out = strip_signature_block(body)
+        self.assertIn("renegotiate the lease", out)
+        self.assertIn("That is the recommendation", out)
+
+    def test_only_the_last_delimiter_is_used(self):
+        body = (
+            "Point one, which needs to survive intact for this to be a useful test.\n"
+            "-- \n"
+            "Point two, also important and also needing to survive the cleanup pass.\n"
+            "-- \n"
+            "Jane Doe\nCTO"
+        )
+        out = strip_signature_block(body)
+        self.assertIn("Point one", out)
+        self.assertIn("Point two", out)
+        self.assertNotIn("Jane Doe", out)
+
+    def test_an_oversized_trailing_block_is_not_treated_as_a_signature(self):
+        body = "Short intro that clears the minimum body guard comfortably.\n-- \n" + ("x" * 900)
+        self.assertEqual(strip_signature_block(body), body)
+
+    def test_a_many_line_trailing_block_is_not_treated_as_a_signature(self):
+        body = "Short intro that clears the minimum body guard comfortably.\n-- \n" + (
+            "another line of real content\n" * 30
+        )
+        self.assertEqual(strip_signature_block(body), body)
+
+    def test_a_genuine_signature_is_still_removed(self):
+        body = (
+            "Please review the attached plan before Friday and confirm the budget.\n"
+            "-- \nJane Doe\nCTO, Example Ltd\n+44 7000 000000\njane@example.com"
+        )
+        out = strip_signature_block(body)
+        self.assertIn("Please review", out)
+        self.assertNotIn("jane@example.com", out)
