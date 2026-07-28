@@ -349,7 +349,10 @@ class SyncState:
                 "INSERT INTO sync_runs (account_id, started_at, status) VALUES (?,?,?)",
                 (account_id, _now(), STATUS_RUNNING),
             )
-        return int(cur.lastrowid)
+        run_id = cur.lastrowid
+        if run_id is None:  # pragma: no cover - sqlite always sets it after INSERT
+            raise RuntimeError("could not open a sync run: sqlite returned no row id")
+        return int(run_id)
 
     def finish_run(
         self,
