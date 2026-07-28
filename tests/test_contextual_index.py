@@ -355,3 +355,66 @@ class TestIncrementalAppend(unittest.TestCase):
         res, _, upsert = self._build_against_legacy(recreate=True)
         self.assertGreaterEqual(res.chunks, 1)
         self.assertTrue(upsert.called)
+
+    def _build_with_policy(self, existing_policy, **kwargs):
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 1024
+        fake_embedder.encode.side_effect = lambda texts, **kw: (
+            [[0.1] * 1024 for _ in texts],
+            [{"7": 0.9} for _ in texts],
+        )
+        upserted = []
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_payload_indexes"),
+            mock.patch("src.indexing.contextual_index.hq.has_legacy_points", return_value=False),
+            mock.patch(
+                "src.indexing.contextual_index.hq.collection_policy",
+                return_value=existing_policy,
+            ),
+            mock.patch("src.indexing.contextual_index.hq.delete_by_message_keys"),
+            mock.patch(
+                "src.indexing.contextual_index.hq.upsert",
+                side_effect=lambda c, n, pts: upserted.extend(pts),
+            ),
+        ):
+            res = build_contextual_index(
+                [_email("a body about the quarterly plan")],
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+                **kwargs,
+            )
+        return res, upserted
+
+    def test_every_point_is_stamped_with_the_index_policy(self):
+        _res, points = self._build_with_policy("", recreate=True)
+        self.assertTrue(points)
+        stamps = {p.payload["policy_fingerprint"] for p in points}
+        self.assertEqual(len(stamps), 1)
+        self.assertTrue(next(iter(stamps)))
+
+    def test_appending_under_a_different_policy_is_refused(self):
+        """Otherwise two incomparable vector populations end up in one collection
+        with nothing to signal it (#101)."""
+        with self.assertRaises(RuntimeError) as ctx:
+            self._build_with_policy("a-different-policy", recreate=False)
+        self.assertIn("--recreate", str(ctx.exception))
+
+    def test_appending_under_the_same_policy_is_allowed(self):
+        _res, points = self._build_with_policy("", recreate=False)
+        matching = points[0].payload["policy_fingerprint"]
+        _res2, points2 = self._build_with_policy(matching, recreate=False)
+        self.assertTrue(points2)
+
+    def test_a_collection_with_no_recorded_policy_does_not_block_an_append(self):
+        """An empty or pre-fingerprint collection reads as 'unknown'; the legacy
+        guard, not this one, is what handles the pre-deterministic-id case."""
+        _res, points = self._build_with_policy("", recreate=False)
+        self.assertTrue(points)
+
+    def test_a_full_rebuild_ignores_the_existing_policy(self):
+        _res, points = self._build_with_policy("a-different-policy", recreate=True)
+        self.assertTrue(points)

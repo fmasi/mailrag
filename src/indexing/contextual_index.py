@@ -16,6 +16,7 @@ from llama_index.core.schema import MetadataMode
 from src.data.dedup import dedup_by_content
 from src.data.noise_filter import NoiseFilter
 from src.indexing.point_ids import assign_deterministic_ids, content_hash
+from src.indexing.policy import describe_mismatch, policy_fingerprint
 from src.ingest import hybrid_qdrant as hq
 from src.ingest.embed_text import embed_max_length, prepend_summary
 from src.ingest.numeric import augment_numeric
@@ -171,6 +172,13 @@ def build_contextual_index(
     # emit learned sparse weights, so there is no sparse leg to populate.
     hybrid = getattr(embedder, "produces_sparse", True)
     dim = getattr(embedder, "dim", 1024)
+    fingerprint = policy_fingerprint(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        embed_summary=embed_summary,
+        embedder_name=type(embedder).__name__,
+        dim=dim,
+    )
     client = hq.get_client(qdrant_url)
     if hybrid:
         hq.ensure_hybrid_collection(client, collection, dim=dim, recreate=recreate)
@@ -194,6 +202,12 @@ def build_contextual_index(
                 "every judgment is already cached — or pass allow_legacy_append=True "
                 "to index anyway and accept the duplicates."
             )
+        # An append under different preprocessing/chunking rules would put two
+        # incomparable vector populations in one collection with no signal that
+        # it happened (src/indexing/policy.py).
+        existing_policy = hq.collection_policy(client, collection)
+        if existing_policy and existing_policy != fingerprint:
+            raise RuntimeError(describe_mismatch(collection, existing_policy, fingerprint))
         hq.ensure_payload_indexes(client, collection)
         hq.delete_by_message_keys(client, collection, (d.metadata.get("message_key") for d in docs))
 
@@ -223,6 +237,7 @@ def build_contextual_index(
             # Durable counterpart to the in-run content dedup: lets a later delta
             # run recognise a chunk it already holds (issue #101).
             payload["content_hash"] = content_hash(payload["text"])
+            payload["policy_fingerprint"] = fingerprint
             if hybrid:
                 idx, val = lexical_weights_to_sparse(lw)
                 points.append(hq.make_point(n.node_id, dv, idx, val, payload))

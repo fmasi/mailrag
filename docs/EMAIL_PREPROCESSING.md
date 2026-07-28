@@ -395,10 +395,69 @@ numeric ranges and a raw-corpus `grep_email` escape hatch remain open on #82.
 
 ---
 
+## Final body cleanup (`src/data/body_cleanup.py`)
+
+After HTML→text and reply-chain stripping, one more pass removes what those
+stages leave behind. It runs last so it never perturbs the reply heuristics
+above, which key off the raw quoting structure.
+
+| Stage | Removes | Why it earns its place here |
+|-------|---------|------------------------------|
+| base64 / `data:` blobs | inline images that leaked into the text body | mailrag **chunks** and spends one LLM call per email, so a 30 KB blob is several junk chunks, real embedding compute, and burned summarize tokens — not just one diluted vector |
+| URL tracking params | `utm_*`, `fbclid`, `gclid`, `mc_cid`, `_hsenc`, … | thirty copies of one campaign URL become byte-identical, so the exact-content chunk dedup in `src/data/dedup.py` can actually fire — and the junk stops polluting the learned-sparse vocabulary |
+| signature blocks | the RFC 3676 `-- ` delimiter and everything after | boilerplate repeated across every message from a sender |
+| whitespace | trailing spaces, 3+ newline runs, horizontal runs | HTML→text bloat |
+
+Two details worth knowing, because each rule is aggressive enough to destroy
+real content if it overreaches:
+
+- **base64 vs URL paths.** `/` is in both the base64 alphabet and every URL
+  path, so a single threshold either eats URLs or misses real base64. Two
+  patterns are used instead: slash-free runs at 200+ characters (every `/` in a
+  URL resets the run), and slash-bearing runs at 300+ (a long signed S3 URL
+  almost always hits a `.`, `?`, `&`, `_` or `-` first, while an inline image
+  runs to thousands).
+- **signatures on terse replies.** A "Thanks!" reply is mostly signature, so
+  the strip is skipped when it would leave under 40 characters — an empty body
+  retrieves worse than a signature does.
+
+Only known tracking keys are dropped. An unknown query parameter may be an
+order id or a document reference, and silently removing it would make the mail
+*less* searchable.
+
+> **Credit.** The two-threshold base64 strategy and the tracking-parameter key
+> list are adapted from [msgvault](https://github.com/kenn-io/msgvault)
+> (`internal/vector/embed/preprocess.go`, MIT, © 2025-2026 Wes McKinney).
+> Reimplemented in Python, but the insight is theirs — see [`NOTICE`](../NOTICE).
+
+---
+
 ## Re-indexing after changes
 
-Stripping changes the *content* that gets embedded. If you change stripping
-patterns or chunk size, you must wipe the existing index and re-index:
+Stripping changes the *content* that gets embedded, so changing a stripping
+pattern or the chunk size means the existing vectors were produced under
+different rules than the new ones.
+
+**mailrag now enforces this for you.** Every point carries a
+`policy_fingerprint` — a hash of the preprocessing version, chunk-policy
+version, chunk size, overlap, `embed_summary`, and the embedder
+(`src/indexing/policy.py`). An incremental run checks it before writing and
+refuses when it differs, naming both fingerprints and the fix. Without that
+guard, an append after a cleanup change would quietly put two incomparable
+vector populations in one collection, and retrieval would keep "working" while
+ranking them against each other.
+
+If you change body cleanup, bump `PREPROCESS_VERSION`; if you change the chunk
+layout or id derivation, bump `CHUNK_POLICY_VERSION`. Both are deliberately
+manual — whether a change alters the resulting vectors is a judgement the code
+cannot make for itself.
+
+> **Credit.** Versioning the preprocessing/chunk policy into a generation
+> fingerprint, so a change stales the index rather than silently mixing
+> layouts, is msgvault's idea (`internal/vector/config.go`). See
+> [`NOTICE`](../NOTICE).
+
+To rebuild from scratch:
 
 ```bash
 # Wipe Qdrant collection

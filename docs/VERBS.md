@@ -71,6 +71,13 @@ arrived since Tuesday" cheap: no LLM calls for mail already judged, and no full
 re-embed. This is the foundation continuous sync builds on
 ([#101](https://github.com/fmasi/mailrag/issues/101)).
 
+> **Policy guard.** Every point also records the rules it was produced under —
+> preprocessing version, chunk policy, chunk size/overlap, `--embed-summary`,
+> embedder. An incremental run refuses if the collection was built under
+> different ones, rather than silently mixing two incomparable populations of
+> vectors in the same collection. See
+> [`EMAIL_PREPROCESSING.md § Re-indexing after changes`](EMAIL_PREPROCESSING.md#re-indexing-after-changes).
+
 > **One-time rebuild.** Collections built before deterministic ids carry random
 > point ids and no `message_key`, so appending to them would *duplicate* every
 > chunk rather than replace it. `index` detects this and refuses, pointing you at

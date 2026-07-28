@@ -47,6 +47,9 @@ def _payload_indexes():
         # "do I already hold this exact chunk?" without re-embedding it.
         ("message_key", models.PayloadSchemaType.KEYWORD),
         ("content_hash", models.PayloadSchemaType.KEYWORD),
+        # The preprocessing/chunking rules a point was produced under, so an
+        # incremental run can refuse to mix policies (src/indexing/policy.py).
+        ("policy_fingerprint", models.PayloadSchemaType.KEYWORD),
     ]
 
 
@@ -151,6 +154,26 @@ def has_legacy_points(client: QdrantClient, name: str, sample: int = 64) -> bool
     except Exception:  # noqa: BLE001 — collection absent or unreachable
         return False
     return any("message_key" not in (getattr(p, "payload", None) or {}) for p in points)
+
+
+def collection_policy(client: QdrantClient, name: str) -> str:
+    """Return the index-policy fingerprint *name* was built under, or "".
+
+    Sampling one point is enough: a collection is only ever written by runs that
+    agreed on the policy, because this is the check that enforces it. An empty
+    string means "unknown" — an empty collection, an unreachable server, or one
+    built before fingerprints existed — and callers must treat that as "no
+    objection" rather than as a mismatch.
+    """
+    try:
+        points, _ = client.scroll(
+            collection_name=name, limit=1, with_payload=True, with_vectors=False
+        )
+    except Exception:  # noqa: BLE001 — collection absent or unreachable
+        return ""
+    for p in points or []:
+        return str((getattr(p, "payload", None) or {}).get("policy_fingerprint") or "")
+    return ""
 
 
 def delete_by_message_keys(client: QdrantClient, name: str, keys: Iterable[str]) -> int:
