@@ -609,6 +609,11 @@ def _cmd_sync(args):
                         f" (fetched {last['fetched']}, judged {last['judged']},"
                         f" indexed {last['indexed']})"
                     )
+                    if last["message"]:
+                        # Where "index REFUSED (needs operator action)" lives —
+                        # printing only the status would hide the one line that
+                        # says what to do.
+                        print(f"  note: {last['message']}")
                     stale = _staleness_hours(last["completed_at"], datetime.now(timezone.utc))
                     if stale is not None and stale > 48:
                         # The safety net for a scheduler that has silently failed —
@@ -649,8 +654,14 @@ def _cmd_sync(args):
                 embed_summary=account.embed_summary,
             )
             print(f"{account.id}: {report.summary()}")
-            if report.skipped_stages:
-                rc = max(rc, 1)  # non-zero so a scheduler's log makes the outage visible
+            for msg in report.messages:
+                if "REFUSED" in msg:
+                    print(f"  !! {msg}", file=sys.stderr)
+            # Errors count too: a PERMANENT refusal deliberately does not set a
+            # skipped stage, and exiting 0 would record it in the scheduler's log
+            # as a clean tick — the opposite of escalating it.
+            if report.skipped_stages or report.errors:
+                rc = max(rc, 1)
         return rc
     finally:
         state.close()

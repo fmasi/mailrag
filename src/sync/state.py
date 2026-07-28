@@ -73,6 +73,15 @@ CREATE INDEX IF NOT EXISTS idx_messages_pending_index
     ON messages(account_id, indexed_at);
 CREATE INDEX IF NOT EXISTS idx_messages_content ON messages(account_id, content_sha256);
 
+CREATE TABLE IF NOT EXISTS poison (
+    account_id  TEXT NOT NULL,
+    folder      TEXT NOT NULL,
+    source_uid  TEXT NOT NULL,
+    error       TEXT NOT NULL DEFAULT '',
+    seen_at     TEXT NOT NULL,
+    PRIMARY KEY (account_id, folder, source_uid)
+);
+
 CREATE TABLE IF NOT EXISTS sync_runs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id    TEXT NOT NULL,
@@ -255,35 +264,75 @@ class SyncState:
         if not keys:
             return 0
         now = _now()
+        # Clearing `error` is the point of doing this in one statement: a message
+        # that failed once and succeeded on retry must stop being counted, or the
+        # error total only ever grows and stops meaning anything.
         self._conn.executemany(
-            f"UPDATE messages SET {column}=? WHERE account_id=? AND message_key=?",
+            f"UPDATE messages SET {column}=?, error=NULL WHERE account_id=? AND message_key=?",
             [(now, account_id, k) for k in keys],
         )
         self._conn.commit()
         return len(keys)
 
-    def record_poison(self, account_id: str, *, folder: str, source_uid: str, error: str) -> str:
-        """Durably park a message that could not even be parsed. Returns its key.
+    def record_poison(self, account_id: str, *, folder: str, source_uid: str, error: str) -> None:
+        """Durably park a message that could not even be parsed.
 
-        :meth:`record_error` cannot serve this case: it is an UPDATE keyed on
-        ``message_key``, and a message that failed to parse has neither a key nor
-        a row. So one is synthesised from its server location, which is the only
-        identity such a message has. Without this the cursor advances past a
-        poison message that was never recorded anywhere, ``counts()`` reports
-        zero errors, and the message is unrecoverable short of a full
-        re-enumeration.
+        Its own table, deliberately. :meth:`record_error` cannot serve this case
+        — it is an UPDATE keyed on ``message_key``, which an unparseable message
+        does not have — but synthesising a key into the ``messages`` table would
+        put a *sender-controlled* string in the same namespace as real keys: a
+        crafted ``Message-ID`` could collide with a poison row and be silently
+        suppressed. Keyed instead on the only identity such a message has, its
+        location on the server.
         """
-        key = f"!poison:{folder}:{source_uid}"
         self._conn.execute(
-            """INSERT INTO messages
-                   (account_id, message_key, folder, source_uid, fetched_at, error,
-                    judged_at, indexed_at)
-               VALUES (?,?,?,?,?,?,?,?)
-               ON CONFLICT(account_id, message_key) DO UPDATE SET error=excluded.error""",
-            (account_id, key, folder, source_uid, _now(), error[:2000], _now(), _now()),
+            """INSERT INTO poison (account_id, folder, source_uid, error, seen_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(account_id, folder, source_uid) DO UPDATE SET
+                   error=excluded.error, seen_at=excluded.seen_at""",
+            (account_id, folder, source_uid, error[:2000], _now()),
         )
         self._conn.commit()
-        return key
+
+    def poison_count(self, account_id: str) -> int:
+        """How many messages are parked as unparseable."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM poison WHERE account_id=?", (account_id,)
+        ).fetchone()
+        return row["n"] or 0
+
+    def clear_indexed(self, account_id: str, message_keys: Iterable[str]) -> int:
+        """Send messages back to the index queue. Returns how many were reset.
+
+        ``indexed_at`` is otherwise write-once, which strands anything indexed
+        before its summary existed: the vector stays summary-less forever even
+        after a later run judges it. Judging therefore un-indexes, so the next
+        index pass rewrites the point with its summary (cheap — deterministic
+        ids make it a replacement, not a duplicate).
+        """
+        keys = [k for k in dict.fromkeys(message_keys) if k]
+        if not keys:
+            return 0
+        cur = self._conn.executemany(
+            "UPDATE messages SET indexed_at=NULL WHERE account_id=? AND message_key=? "
+            "AND indexed_at IS NOT NULL",
+            [(account_id, k) for k in keys],
+        )
+        self._conn.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    def indexed_keys(self, account_id: str, message_keys: Iterable[str]) -> List[str]:
+        """Which of *message_keys* are already marked indexed."""
+        keys = [k for k in dict.fromkeys(message_keys) if k]
+        if not keys:
+            return []
+        marks = ",".join("?" * len(keys))
+        rows = self._conn.execute(
+            f"SELECT message_key FROM messages WHERE account_id=? AND indexed_at IS NOT NULL "
+            f"AND message_key IN ({marks})",
+            [account_id, *keys],
+        ).fetchall()
+        return [r["message_key"] for r in rows]
 
     def record_error(self, account_id: str, message_key: str, error: str) -> None:
         """Park a poison message with its error, without blocking the folder.
@@ -325,7 +374,9 @@ class SyncState:
             "total": row["total"] or 0,
             "pending_judge": row["pending_judge"] or 0,
             "pending_index": row["pending_index"] or 0,
-            "errors": row["errors"] or 0,
+            # Poison messages never became ledger rows, so they must be counted
+            # from their own table or --status under-reports the real trouble.
+            "errors": (row["errors"] or 0) + self.poison_count(account_id),
         }
 
     # ------------------------------------------------------------- sync_runs

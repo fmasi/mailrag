@@ -38,7 +38,11 @@ from typing import Optional
 #   2 — added base64/data-URI stripping, URL tracking-param stripping,
 #       signature-block stripping, whitespace normalization
 #       (src/data/body_cleanup.py)
-PREPROCESS_VERSION = 2
+#   3 — signature stripping made conservative and idempotent: it now fires only
+#       when there is exactly one "-- " delimiter and the removed block is
+#       signature-shaped. Version 2 bodies were cleaned under the old rule, so
+#       they must not share a fingerprint with these.
+PREPROCESS_VERSION = 3
 
 # Bump when the chunk layout changes shape for identical preprocessed text —
 # a different splitter, a change to how attachments are split, or a change to

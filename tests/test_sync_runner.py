@@ -82,6 +82,13 @@ class _RunnerTest(unittest.TestCase):
             os.utime(path, (mtime, mtime))
         return path
 
+    def _keys_for(self, paths):
+        """The message_keys the ledger holds for these spool paths — what a real
+        indexer reports back as handled."""
+        rows = {r["eml_path"]: r["message_key"] for r in self.state.pending("acct", "indexed")}
+        rows.update({r["eml_path"]: r["message_key"] for r in self.state.pending("acct", "judged")})
+        return {rows[p] for p in paths if p in rows}
+
     def _sync(self, **kw):
         kw.setdefault("fetch_only", True)
         return sync_account(self.account, state=self.state, source_factory=build_source, **kw)
@@ -340,7 +347,7 @@ class TestIndexStage(_RunnerTest):
 
         def fake_index(*, profile, embedder, paths, collection, embed_summary=True):
             seen.update(paths=paths, collection=collection)
-            return 3, None
+            return 3, self._keys_for(paths)
 
         report = index_pending(
             self.account,
@@ -394,7 +401,7 @@ class TestIndexStage(_RunnerTest):
             self.state,
             profile=self._profile(),
             embedder=mock.Mock(),
-            index_fn=lambda **kw: (3, None),
+            index_fn=lambda **kw: (3, self._keys_for(kw["paths"])),
             require_judged=False,
         )
         self.assertEqual(report.indexed, 1)
@@ -513,7 +520,9 @@ class TestReviewRegressions(_RunnerTest):
             self.state,
             profile=self._profile(),
             embedder=mock.Mock(),
-            index_fn=lambda **kw: called.setdefault("yes", True) or (1, None),
+            index_fn=lambda **kw: (
+                called.setdefault("yes", True) or (1, self._keys_for(kw["paths"]))
+            ),
             require_judged=True,
         )
         self.assertNotIn("yes", called)
@@ -531,7 +540,7 @@ class TestReviewRegressions(_RunnerTest):
             self.state,
             profile=self._profile(),
             embedder=mock.Mock(),
-            index_fn=lambda **kw: (1, None),
+            index_fn=lambda **kw: (1, self._keys_for(kw["paths"])),
             require_judged=True,
         )
         self.assertEqual(report.indexed, 1)
@@ -611,3 +620,138 @@ class TestReviewRegressions(_RunnerTest):
             self._sync()
         self.state.record_poison("acct", folder="INBOX", source_uid="bad", error="again")
         self.assertEqual(self.state.counts("acct")["errors"], 1)
+
+    def test_a_poison_row_cannot_be_impersonated_by_a_crafted_message_id(self):
+        """Poison rows live in their own table, so a sender-controlled Message-ID
+        cannot collide with one and get itself silently suppressed."""
+        self.state.record_poison("acct", folder="INBOX", source_uid="7", error="bad")
+        self.assertFalse(self.state.have_message("acct", "!poison:INBOX:7"))
+        self.state.record_fetched("acct", message_key="!poison:INBOX:7", folder="INBOX")
+        self.assertTrue(self.state.have_message("acct", "!poison:INBOX:7"))
+        self.assertEqual(len(self.state.pending("acct", "judged")), 1)
+
+
+class TestSecondRoundRegressions(_RunnerTest):
+    """Defects introduced BY the first round of fixes, found by the verification
+    council. Each fails on the first-round code."""
+
+    def _profile(self):
+        return mock.Mock(
+            pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x", rubric="p"
+        )
+
+    def test_mail_dropped_as_noise_does_not_stay_pending_forever(self):
+        """The indexer legitimately drops confident noise before chunking, so it
+        never appears in the written set. Marking only what was written left a
+        backlog that grew every tick and never drained."""
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        # The indexer reports it as HANDLED even though it wrote nothing for it.
+        keys = {r["message_key"] for r in self.state.pending("acct", "indexed")}
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: (0, keys),
+            require_judged=False,
+        )
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(self.state.counts("acct")["pending_index"], 0)
+
+    def test_a_dedup_loser_is_still_left_pending_to_retry(self):
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: (0, set()),
+            require_judged=False,
+        )
+        self.assertEqual(report.indexed, 0)
+        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+
+    def test_mail_indexed_before_being_judged_is_requeued_when_judged(self):
+        """indexed_at was write-once, so a summary arriving later could never
+        reach the vector."""
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        keys = {r["message_key"] for r in self.state.pending("acct", "indexed")}
+        index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: (1, keys),
+            require_judged=False,  # the no-model path
+        )
+        self.assertEqual(self.state.counts("acct")["pending_index"], 0)
+
+        def judges(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "done")
+            return {"cached": 0, "done": len(paths), "error": 0}
+
+        report = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=judges
+        )
+        self.assertEqual(report.judged, 1)
+        # Back in the index queue, so the summary actually reaches the vector.
+        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+
+    def test_a_missing_spool_file_does_not_stall_the_account(self):
+        """A deterministic failure at the same position aborted the sweep on every
+        run; with indexing gated on judging that froze the whole account."""
+        for i in range(3):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+        rows = self.state.pending("acct", "judged")
+        os.unlink(rows[0]["eml_path"])
+
+        def judges_the_rest(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "done")
+            return {"cached": 0, "done": len(paths), "error": 0}
+
+        report = judge_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            model="m",
+            run_pass_fn=judges_the_rest,
+        )
+        self.assertEqual(report.judged, 2)
+        self.assertEqual(report.errors, 1)
+        # The missing file must not be handed to the sweep at all.
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 1)
+
+    def test_a_transient_error_is_cleared_once_the_message_succeeds(self):
+        """Otherwise --status's error count only ever grows and stops meaning
+        anything."""
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        key = self.state.pending("acct", "judged")[0]["message_key"]
+        self.state.record_error("acct", key, "one-off LLM timeout")
+        self.assertEqual(self.state.counts("acct")["errors"], 1)
+        self.state.mark_judged("acct", [key])
+        self.assertEqual(self.state.counts("acct")["errors"], 0)
+
+    def test_a_permanent_refusal_makes_the_cli_exit_non_zero(self):
+        """It deliberately does not set a skipped stage, so an exit code derived
+        only from skipped_stages recorded the tick as a clean success."""
+        from src.sync.runner import PermanentIndexError
+
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: (_ for _ in ()).throw(PermanentIndexError("policy mismatch")),
+            require_judged=False,
+        )
+        self.assertEqual(report.skipped_stages, [])
+        self.assertGreater(report.errors, 0)  # what the CLI now derives rc from

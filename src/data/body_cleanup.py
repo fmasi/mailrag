@@ -136,41 +136,46 @@ def strip_tracking_params(text: str) -> str:
 
 # RFC 3676 §4.3: a line containing exactly "-- " delimits the signature block.
 # Tolerant of the trailing space being stripped in transit, which is common.
-# Anchored to the LAST such delimiter (via the negative lookahead) so a "--"
-# used earlier as a thematic break cannot swallow the rest of the message.
-_SIGNATURE = re.compile(r"\n-- ?\n(?:(?!\n-- ?\n)[\s\S])*\Z")
+_SIGNATURE_DELIM = re.compile(r"\n-- ?\n")
 
 # Below this many characters of surviving body, a signature strip is more
 # likely to have eaten the message than cleaned it — a two-line "Thanks,\n--\nJ"
 # reply is mostly signature, and keeping it whole beats indexing an empty body.
 _MIN_BODY_AFTER_SIGNATURE = 40
 
-# A real signature is small. These bound what may be REMOVED — the guard that
-# actually matters, since measuring only what is kept lets a long tail after a
-# stray "--" divider be deleted from a long message without tripping anything
-# (found in review of #101).
+# A real signature is small. These bound what may be REMOVED — measuring only
+# what is kept lets a long tail after a stray "--" divider be deleted from a
+# long message without tripping anything.
 _MAX_SIGNATURE_CHARS = 600
 _MAX_SIGNATURE_LINES = 12
 
 
 def strip_signature_block(text: str) -> str:
-    """Remove a trailing ``-- `` signature block — conservatively.
+    """Remove a trailing ``-- `` signature block — conservatively, and only once.
 
-    Three guards, because this rule deletes user content outright:
+    Three conditions, all required, because this rule deletes user content:
 
-    * it matches only the LAST ``-- `` delimiter, so an earlier one used as a
-      divider cannot take the rest of the message with it;
-    * what is removed must look like a signature (bounded length and line
-      count), not like prose that happened to follow a divider;
-    * what remains must still be a usable body — a "Thanks!" reply is mostly
-      signature, and an empty body retrieves worse than a signature does.
+    * there is **exactly one** ``-- `` delimiter. Two or more means at least one
+      is being used as a divider, and no rule can tell which. Stripping the last
+      one would also make the function non-idempotent: the earlier delimiter
+      would become "the last one" on a second pass and take more of the body with
+      it — which would change content hashes on re-index and churn the whole
+      collection.
+    * what would be removed looks like a signature — bounded in length and line
+      count — rather than prose that happened to follow a divider;
+    * what remains is still a usable body.
+
+    The cost of this conservatism is that an email containing both a divider and
+    a signature keeps its signature. That is the right trade: a stray signature
+    is noise, a deleted paragraph is data loss.
     """
     if not text:
         return text
-    match = _SIGNATURE.search(text)
-    if match is None:
+    delimiters = list(_SIGNATURE_DELIM.finditer(text))
+    if len(delimiters) != 1:
         return text
-    removed = match.group(0)
+    match = delimiters[0]
+    removed = text[match.start() :]
     if len(removed) > _MAX_SIGNATURE_CHARS or removed.count("\n") > _MAX_SIGNATURE_LINES:
         return text
     stripped = text[: match.start()]

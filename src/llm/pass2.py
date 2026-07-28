@@ -35,7 +35,14 @@ def process_file(
     model: str,
 ) -> str:
     """Summarize+judge one file unless cached. Returns 'cached' | 'done' | 'error'."""
-    sha = file_sha256(path)
+    try:
+        sha = file_sha256(path)
+    except OSError as exc:
+        # A missing/unreadable .eml must not abort the sweep. It is deterministic,
+        # so aborting means the same file kills every future run at the same
+        # position and nothing after it is ever processed.
+        print(f"  pass2 error on {path}: {exc}")
+        return "error"
     if cache.has(sha):
         return "cached"
     try:
@@ -110,7 +117,13 @@ def run_pass(
         # LLM work out; cache.put happens here as each future lands.
         todo = []
         for path in paths:
-            sha = file_sha256(path)
+            try:
+                sha = file_sha256(path)
+            except OSError as exc:  # see process_file: never abort the sweep
+                print(f"  pass2 error on {path}: {exc}")
+                _record(path, "error")
+                _tick()
+                continue
             if cache.has(sha):
                 _record(path, "cached")
                 _tick()

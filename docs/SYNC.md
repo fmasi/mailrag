@@ -102,6 +102,11 @@ gets copied into repos, pasted into issues and swept into backups. Store one wit
 security add-generic-password -U -a you@example.com -s mailrag.imap.personal -w
 ```
 
+Note the trailing `-w` with **no value**: it prompts for the password instead of
+taking it as an argument. mailrag deliberately ships no "store it for me" helper
+— passing a password on a command line puts it in the process table, where any
+local process can read it.
+
 ### Folder scope is expressed in *roles*
 
 iCloud has no `SPECIAL-USE` and uses literal names (`Sent Messages`); Gmail has
@@ -141,10 +146,17 @@ Both are reported as `index REFUSED (needs operator action)` and are checked
 *before* the delta is loaded, judged and OCR'd — so a refusal costs one round
 trip rather than repeating the whole delta's work on every tick.
 
-A message that cannot be parsed at all is **parked**: recorded in the ledger
-under a synthetic key with its error, excluded from the judge and index stages,
-and counted by `--status`. The cursor still advances past it, so one poison
-message never wedges a folder.
+A message that cannot be parsed at all is **parked** in its own table with its
+error and counted by `--status`; the cursor still advances past it, so one
+poison message never wedges a folder. A spooled file that has gone missing is
+likewise skipped and recorded rather than aborting the sweep — a deterministic
+failure would otherwise recur at the same position on every run and, since
+indexing waits on judging, freeze the whole account.
+
+Indexing without a judge stage (no `--model`) is supported, and mail indexed
+that way is **re-queued** once a later run judges it, so its summary does reach
+the vector. Errors are cleared when a message finally succeeds, so the count in
+`--status` reflects outstanding problems rather than accumulating history.
 
 This deliberately inverts `onboard`'s fail-fast, which is right for a six-hour
 build and wrong for a background refresh. Nothing is lost, because the ledger

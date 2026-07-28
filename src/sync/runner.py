@@ -27,6 +27,7 @@ message behind it forever — the one lesson worth taking from msgvault's sync.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
@@ -217,6 +218,16 @@ def judge_pending(
         return report
 
     by_path = {r["eml_path"]: r["message_key"] for r in pending if r["eml_path"]}
+    # A spool file that no longer exists is deterministic: leaving it in the list
+    # means the same failure at the same position on every future run, stalling
+    # the account permanently now that indexing waits on judging.
+    missing = [p for p in by_path if not os.path.exists(p)]
+    for path in missing:
+        state.record_error(account.id, by_path[path], "spooled file is missing")
+        report.errors += 1
+        del by_path[path]
+    if missing:
+        report.messages.append(f"{len(missing)} spooled file(s) missing; skipped")
     if not by_path:
         return report
 
@@ -254,7 +265,14 @@ def judge_pending(
             )
         return report
 
-    report.judged += state.mark_judged(account.id, [by_path[p] for p in succeeded if p in by_path])
+    newly_judged = [by_path[p] for p in succeeded if p in by_path]
+    # Anything already indexed WITHOUT a summary must go back through indexing now
+    # that it has one — indexed_at is otherwise write-once, so the vector would
+    # stay summary-less forever (found in review of the #101 fixes).
+    requeued = state.clear_indexed(account.id, state.indexed_keys(account.id, newly_judged))
+    if requeued:
+        report.messages.append(f"{requeued} message(s) re-queued for indexing with their summary")
+    report.judged += state.mark_judged(account.id, newly_judged)
     for path in errored_paths:
         key = by_path.get(path)
         if key:
@@ -349,20 +367,21 @@ def index_pending(
         report.messages.append(f"index deferred: {exc}")
         return report
 
-    chunks, indexed_keys = result if isinstance(result, tuple) else (result, None)
-    # Mark only what the indexer actually wrote. An email whose chunks were all
-    # absorbed by the corpus-wide dedup produces no points, and recording it as
-    # indexed would strand it (found in review of #101).
-    keys = (
-        list(by_path.values())
-        if indexed_keys is None
-        else [k for k in by_path.values() if k in indexed_keys]
-    )
+    # (chunks, handled_keys) — handled means "the indexer is done with it",
+    # which includes emails it deliberately DROPPED (confident noise) as well as
+    # those it wrote. Marking only what was written would leave every pruned
+    # noise email pending forever, re-loaded on every tick: a backlog that grows
+    # and never drains. Only the dedup losers are left pending, and those
+    # self-heal because their surviving twin is not in the next delta.
+    chunks, handled_keys = result
+    keys = [k for k in by_path.values() if k in handled_keys]
     skipped = len(by_path) - len(keys)
     report.indexed += state.mark_indexed(account.id, keys)
     report.messages.append(f"indexed {chunks} chunk(s)")
     if skipped:
-        report.messages.append(f"{skipped} message(s) produced no chunks (left pending)")
+        report.messages.append(
+            f"{skipped} message(s) deduped against existing mail (retry next run)"
+        )
     return report
 
 
@@ -402,6 +421,7 @@ def _default_index(*, profile, embedder, paths, collection, embed_summary=True):
         raise PermanentIndexError(describe_mismatch(collection, existing_policy, incoming))
 
     emails = MailArchiveXLoader(eml_files=list(paths)).load()
+    loaded_keys = {e.message_key() for e in emails}
     emails, _stats = pass1.run(emails, NoiseFilter.from_project_rules())
 
     if profile.pass2_cache:
@@ -410,6 +430,12 @@ def _default_index(*, profile, embedder, paths, collection, embed_summary=True):
             emails, _dropped = apply_pass2(emails, cache)
         finally:
             cache.close()
+
+    # Everything that reached the indexer. Anything in `loaded_keys` but not here
+    # was deliberately dropped (confident noise, pass-1 rules) and is DONE — not
+    # pending. Anything here that produces no chunks lost the corpus-wide dedup
+    # and should be retried, so it is excluded from `handled` below.
+    reached_indexer = {e.message_key() for e in emails}
 
     attachment_docs = build_attachment_documents(
         [e.source_id for e in emails if getattr(e, "source_id", None)],
@@ -427,7 +453,11 @@ def _default_index(*, profile, embedder, paths, collection, embed_summary=True):
         apply_noise_filter=False,
         extra_docs=attachment_docs,
     )
-    return result.chunks, result.indexed_message_keys
+    # handled = written  ∪  deliberately dropped  ∪  unparseable-at-load.
+    # Only the dedup losers stay pending.
+    deduped_away = reached_indexer - set(result.indexed_message_keys)
+    handled = (loaded_keys | reached_indexer) - deduped_away
+    return result.chunks, handled
 
 
 def sync_account(

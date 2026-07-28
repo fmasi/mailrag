@@ -235,7 +235,10 @@ class TestSignatureGuardRegressions(unittest.TestCase):
         self.assertIn("renegotiate the lease", out)
         self.assertIn("That is the recommendation", out)
 
-    def test_only_the_last_delimiter_is_used(self):
+    def test_more_than_one_delimiter_means_nothing_is_stripped(self):
+        """No rule can tell a divider from a signature delimiter when both are
+        present, so the body is left whole. A stray signature is noise; a deleted
+        paragraph is data loss."""
         body = (
             "Point one, which needs to survive intact for this to be a useful test.\n"
             "-- \n"
@@ -243,10 +246,28 @@ class TestSignatureGuardRegressions(unittest.TestCase):
             "-- \n"
             "Jane Doe\nCTO"
         )
-        out = strip_signature_block(body)
-        self.assertIn("Point one", out)
-        self.assertIn("Point two", out)
-        self.assertNotIn("Jane Doe", out)
+        self.assertEqual(strip_signature_block(body), body)
+
+    def test_stripping_is_idempotent(self):
+        """Non-idempotence would change content hashes on re-index and churn the
+        whole collection — a second pass must never remove more than the first."""
+        bodies = [
+            "Please review the attached plan before Friday.\n-- \nJane Doe\nCTO",
+            "Intro paragraph long enough to clear the guard.\n-- \nmiddle\n-- \nJane Doe",
+            "A body with no delimiter at all, comfortably past the minimum length.",
+            "Thanks!\n-- \nJane Doe\nCTO\nExample Ltd",
+        ]
+        for body in bodies:
+            once = strip_signature_block(body)
+            self.assertEqual(strip_signature_block(once), once, body[:30])
+
+    def test_clean_body_is_idempotent_over_signatures(self):
+        body = (
+            "Intro paragraph that is comfortably long enough to clear the guard.\n"
+            "-- \nshort middle\n-- \nJane Doe\nCTO"
+        )
+        once = clean_body(body)
+        self.assertEqual(clean_body(once), once)
 
     def test_an_oversized_trailing_block_is_not_treated_as_a_signature(self):
         body = "Short intro that clears the minimum body guard comfortably.\n-- \n" + ("x" * 900)

@@ -109,20 +109,8 @@ def _from_keychain(service: str) -> str:
     return value
 
 
-def store_keychain_secret(service: str, account: str, password: str) -> None:
-    """Create/replace a Keychain item — the write half, used by ``sync --setup``.
-
-    ``-U`` updates in place so re-running setup after rotating an app-specific
-    password does not fail on a duplicate item.
-    """
-    if not shutil.which("security"):
-        raise SecretError("the macOS `security` tool is not on PATH")
-    res = subprocess.run(
-        ["security", "add-generic-password", "-U", "-a", account, "-s", service, "-w", password],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if res.returncode != 0:
-        raise SecretError(f"could not store keychain item {service!r}: {res.stderr.strip()}")
+# NOTE: mailrag deliberately provides no "store the password for me" helper.
+# `security add-generic-password -w <password>` puts the plaintext in argv, where
+# any local process can read it from the process table. Users are told to run
+# `security add-generic-password ... -w` WITHOUT a value, which prompts for it
+# instead; see docs/SYNC.md.
