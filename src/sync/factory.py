@@ -21,7 +21,11 @@ def build_source(account: AccountConfig) -> MessageSource:
 
         if not account.path:
             raise ValueError(f"account {account.id!r}: maildir source needs 'path'")
-        return MaildirSource(account.path, folder_roles=account.folder_roles)
+        return MaildirSource(
+            account.path,
+            folder_roles=account.folder_roles,
+            start_from=account.start_from_date(),
+        )
 
     if kind == "imap":
         from src.sync.imap_source import ImapSource  # noqa: PLC0415
@@ -38,6 +42,7 @@ def build_source(account: AccountConfig) -> MessageSource:
             port=account.port,
             ssl=account.ssl,
             folder_roles=account.folder_roles,
+            start_from=account.start_from_date(),
         )
 
     raise ValueError(

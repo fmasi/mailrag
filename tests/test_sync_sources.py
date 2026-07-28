@@ -255,6 +255,8 @@ class FakeIMAPClient:
         self.logged_out = False
         self.fetch_calls = []
         self.fail_fetch_after = None
+        self.since_uids = None  # UIDs a `SINCE <date>` search should return
+        self.fail_since = False
 
     def capabilities(self):
         return self._caps
@@ -274,6 +276,13 @@ class FakeIMAPClient:
 
     def search(self, criteria):
         uids = sorted(self._messages.get(self.selected, {}))
+        head = str(criteria[0]).upper()
+        if head == "SINCE":
+            if self.fail_since:
+                raise RuntimeError("SEARCH failed")
+            return list(self.since_uids or [])
+        if head == "ALL":
+            return uids
         low = int(str(criteria[1]).split(":")[0])
         out = [u for u in uids if u >= low]
         # An IMAP server answering `<n>:*` returns the highest UID even when it is
@@ -466,3 +475,68 @@ class TestImapSource(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStartFrom(_TmpTest):
+    """`start_from` — begin where a backup export ended, instead of downloading
+    the whole mailbox on the first run (issue #101)."""
+
+    def test_maildir_without_start_from_begins_at_the_epoch(self):
+        maildir = os.path.join(self.d, "M")
+        os.makedirs(os.path.join(maildir, "cur"))
+        os.makedirs(os.path.join(maildir, "new"))
+        src = MaildirSource(maildir)
+        self.assertEqual(src.initial_cursor(Folder("INBOX")).value["mtime"], 0.0)
+
+    def test_maildir_start_from_skips_older_mail(self):
+        from datetime import date
+
+        maildir = os.path.join(self.d, "M")
+        os.makedirs(os.path.join(maildir, "cur"))
+        os.makedirs(os.path.join(maildir, "new"))
+        old = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+        new = datetime(2026, 3, 1, tzinfo=timezone.utc).timestamp()
+        _write_maildir_message(maildir, "old", _eml_bytes(message_id="<o@x>"), mtime=old)
+        _write_maildir_message(maildir, "new", _eml_bytes(message_id="<n@x>"), mtime=new)
+
+        src = MaildirSource(maildir, start_from=date(2026, 2, 1))
+        folder = src.open_folder(Folder("INBOX"))
+        got = list(src.fetch_delta(folder, src.initial_cursor(folder)))
+        self.assertEqual([m.source_uid for m in got], ["new"])
+
+    def test_imap_without_start_from_begins_at_uid_zero(self):
+        src = _source(FakeIMAPClient(messages={"INBOX": {1: b"x", 2: b"y"}}))
+        src.open_folder(Folder("INBOX"))
+        self.assertEqual(src.initial_cursor(Folder("INBOX")).value["last_uid"], 0)
+
+    def test_imap_start_from_resolves_a_date_to_a_uid_watermark(self):
+        """Resolved server-side with UID SEARCH SINCE — filtering client-side would
+        still download the whole mailbox to throw most of it away."""
+        from datetime import date
+
+        client = FakeIMAPClient(messages={"INBOX": {i: b"x" for i in range(1, 11)}})
+        client.since_uids = [7, 8, 9, 10]
+        src = _source(client, start_from=date(2026, 7, 1))
+        folder = src.open_folder(Folder("INBOX"))
+        cursor = src.initial_cursor(folder)
+        self.assertEqual(cursor.value["last_uid"], 6)  # just below the oldest match
+
+    def test_imap_start_from_with_no_matches_parks_at_the_newest_message(self):
+        """An empty folder-since-that-date is caught up, not 'fetch everything'."""
+        from datetime import date
+
+        client = FakeIMAPClient(messages={"INBOX": {i: b"x" for i in range(1, 11)}})
+        client.since_uids = []
+        src = _source(client, start_from=date(2026, 7, 1))
+        folder = src.open_folder(Folder("INBOX"))
+        self.assertEqual(src.initial_cursor(folder).value["last_uid"], 10)
+
+    def test_imap_falls_back_to_a_full_sync_if_the_search_fails(self):
+        """Better to re-fetch than to silently skip mail we cannot bound."""
+        from datetime import date
+
+        client = FakeIMAPClient(messages={"INBOX": {1: b"x"}})
+        client.fail_since = True
+        src = _source(client, start_from=date(2026, 7, 1))
+        folder = src.open_folder(Folder("INBOX"))
+        self.assertEqual(src.initial_cursor(folder).value["last_uid"], 0)

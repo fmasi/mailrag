@@ -20,6 +20,7 @@ Example::
         spool_root: ~/mail/personal/incoming
         exclude_roles: [junk, trash]
         cadence: 12h
+        start_from: "2026-08-01"   # skip history a backup export already covers
 """
 
 from __future__ import annotations
@@ -81,7 +82,26 @@ class AccountConfig:
     )
     folder_roles: Dict[str, str] = field(default_factory=dict)  # explicit name -> role overrides
     cadence: str = "12h"
+    # Where a NEVER-SYNCED folder should start, as an ISO date (YYYY-MM-DD).
+    # Without it the first run downloads the entire mailbox — correct when sync
+    # IS the backfill, wrong when a backup export already covers history. Set it
+    # to the export's end date so nothing is missed and nothing is re-fetched.
+    start_from: Optional[str] = None
     options: Dict[str, Any] = field(default_factory=dict)
+
+    def start_from_date(self):
+        """``start_from`` as a ``date``, or None. Raises on an unparseable value."""
+        if not self.start_from:
+            return None
+        from datetime import date  # noqa: PLC0415
+
+        try:
+            return date.fromisoformat(str(self.start_from))
+        except ValueError as exc:
+            raise ValueError(
+                f"account {self.id!r}: start_from {self.start_from!r} is not an ISO date "
+                "(YYYY-MM-DD)"
+            ) from exc
 
     def cadence_seconds(self) -> int:
         return parse_cadence(self.cadence)
@@ -139,6 +159,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
         "exclude_roles",
         "folder_roles",
         "cadence",
+        "start_from",
         "options",
     }
     unknown = set(data) - known
@@ -159,6 +180,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
         path=str(data.get("path", "")),
         folder_roles={str(k): str(v) for k, v in (data.get("folder_roles") or {}).items()},
         cadence=str(data.get("cadence", "12h")),
+        start_from=(str(data["start_from"]) if data.get("start_from") else None),
         options=dict(data.get("options") or {}),
     )
     if "include_roles" in data:
@@ -167,6 +189,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
         cfg.exclude_roles = _coerce_roles(data["exclude_roles"], "exclude_roles", account_id)
 
     cfg.cadence_seconds()  # validate now, not at schedule time
+    cfg.start_from_date()  # ditto: a bad date must not surface mid-run
     for name, role in cfg.folder_roles.items():
         try:
             FolderRole(str(role).lower())

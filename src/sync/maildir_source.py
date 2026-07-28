@@ -40,9 +40,10 @@ class MaildirSource:
 
     name = "maildir"
 
-    def __init__(self, root: str, *, folder_roles: dict | None = None):
+    def __init__(self, root: str, *, folder_roles: dict | None = None, start_from=None):
         self.root = os.path.abspath(os.path.expanduser(root))
         self._folder_roles = folder_roles or {}
+        self._start_from = start_from
 
     # ------------------------------------------------------------------ seam
 
@@ -91,7 +92,13 @@ class MaildirSource:
         return Folder(folder.name, folder.role, generation="maildir")
 
     def initial_cursor(self, folder: Folder) -> Cursor:
-        return Cursor(CURSOR_MTIME, {"mtime": 0.0, "name": ""})
+        """Start at the epoch, or at ``start_from`` when history is already covered."""
+        if self._start_from is None:
+            return Cursor(CURSOR_MTIME, {"mtime": 0.0, "name": ""})
+        cutoff = datetime(
+            self._start_from.year, self._start_from.month, self._start_from.day, tzinfo=timezone.utc
+        )
+        return Cursor(CURSOR_MTIME, {"mtime": cutoff.timestamp(), "name": ""})
 
     def fetch_delta(self, folder: Folder, cursor: Cursor) -> Iterator[RawMessage]:
         """Yield messages newer than the cursor, oldest first.

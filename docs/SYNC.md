@@ -57,7 +57,22 @@ accounts:
     spool_root: ~/mail/personal/incoming
     exclude_roles: [junk, trash]
     cadence: 12h
+    start_from: "2026-08-01"   # optional — see below
 ```
+
+### `start_from`: don't re-download history you already have
+
+With no `start_from`, the first run treats sync **as** the backfill and downloads
+every message in every in-scope folder. That is correct when sync is how the
+collection gets populated, and wrong when a backup export already covers history
+— an iCloud inbox alone can be thousands of messages.
+
+Set `start_from` to the date your export ends and the first run fetches only what
+the export missed. It is resolved **server-side** (`UID SEARCH SINCE`), so the
+watermark is placed without downloading anything first. If a folder has nothing
+since that date it is marked caught up at its newest message; if the search fails,
+mailrag falls back to a full sync rather than silently skipping mail it cannot
+bound.
 
 Multi-account falls out of this: several entries each get their own cursor and
 ledger, and can target their own collection or share one. The same message
@@ -179,6 +194,12 @@ JMAP (`Email/changes`) and Microsoft Graph (delta tokens) without schema changes
 - Roughly five concurrent connections, and Mail.app is probably holding some — so
   mailrag uses exactly one, with no pipelining.
 - Fetches use `BODY.PEEK[]`, so syncing never marks your mail read.
+
+Verified against a live account (2026-07-28): pre-auth `CAPABILITY` advertises 8
+capabilities, post-auth 19 — CONDSTORE, QRESYNC, UIDPLUS, IDLE and ESEARCH all
+appear only after login, and `MOVE` is absent. Of 26 folders, only two carried a
+SPECIAL-USE flag (`\Sent`, `\Trash`); everything else — including `Junk`,
+`Drafts` and `Archive` — was classified by the name table.
 
 ## Reference
 

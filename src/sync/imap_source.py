@@ -69,6 +69,7 @@ class ImapSource:
         port: int = 993,
         ssl: bool = True,
         folder_roles: Optional[dict] = None,
+        start_from=None,
         client=None,
         timeout: int = 60,
     ):
@@ -78,6 +79,7 @@ class ImapSource:
         self.port = port
         self.ssl = ssl
         self._folder_roles = folder_roles or {}
+        self._start_from = start_from
         self._timeout = timeout
         self._client = client  # injectable for tests; otherwise connected lazily
         self._connected = client is not None
@@ -186,8 +188,42 @@ class ImapSource:
         return Folder(name=folder.name, role=folder.role, generation=generation)
 
     def initial_cursor(self, folder: Folder) -> Cursor:
+        """The starting watermark for a folder never synced before.
+
+        With no ``start_from`` this is UID 0 — sync *is* the backfill and the
+        whole folder gets downloaded. When ``start_from`` is set (because a
+        backup export already covers history) the date is resolved to a UID here,
+        so the first run fetches only what the export missed: ``UID SEARCH SINCE``
+        gives the oldest message on/after that date, and the watermark is set
+        just below it. Resolving server-side rather than filtering client-side is
+        the point — otherwise the first run still downloads everything to throw
+        most of it away.
+        """
         kind = CURSOR_UID_MODSEQ if (self._caps and "CONDSTORE" in self._caps) else CURSOR_UID
-        return Cursor(kind, {"last_uid": 0})
+        if self._start_from is None:
+            return Cursor(kind, {"last_uid": 0})
+
+        client = self._connect()
+        if self._selected != folder.name:
+            self.open_folder(folder)
+        since = self._start_from.strftime("%d-%b-%Y")
+        try:
+            uids = [int(u) for u in client.search(["SINCE", since])]
+        except Exception as exc:  # noqa: BLE001 — fall back to a full sync, never to silence
+            log.warning(
+                "SINCE search failed in %s (%s); starting from the beginning", folder.name, exc
+            )
+            return Cursor(kind, {"last_uid": 0})
+
+        if uids:
+            return Cursor(kind, {"last_uid": min(uids) - 1})
+        # Nothing since that date. Park the watermark at the newest message so
+        # the folder is considered caught up and only genuinely new mail arrives.
+        try:
+            existing = [int(u) for u in client.search(["ALL"])]
+        except Exception:  # noqa: BLE001
+            existing = []
+        return Cursor(kind, {"last_uid": max(existing) if existing else 0})
 
     # ----------------------------------------------------------------- fetch
 
