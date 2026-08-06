@@ -236,7 +236,14 @@ scheduler unit:
 
 The most common way this feature fails is a scheduler running mailrag outside its
 conda environment, dying on the first import, silently, for weeks. So pass
-`--conda-env`, and note that the unit always writes a log file. The backstop is
+`--conda-env`, and note that the unit always writes a log file.
+
+The generated unit also pins `RAG_LLM_API_BASE` and `QDRANT_URL` to `localhost`
+in its own environment block. This is not redundant with `.env`: that file is
+written for the **devcontainer**, where `host.docker.internal` resolves — on the
+host it does not, so a unit relying on it would fail every tick forever while
+reporting the LLM and vector store as unavailable. Override with
+`environment={...}` if your endpoints live elsewhere. The backstop is
 `sync --status`, which warns when the last successful sync was over 48 hours ago.
 
 ## Deletes

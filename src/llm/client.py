@@ -57,7 +57,24 @@ def _resolve_api_key() -> str:
     ``healthcheck()`` surfaces that as a clear, actionable error at startup
     rather than an opaque 401 per query.
     """
-    return os.getenv("RAG_LLM_API_KEY", "").strip() or _PLACEHOLDER_KEY
+    raw = os.getenv("RAG_LLM_API_KEY", "").strip()
+    if not raw:
+        return _PLACEHOLDER_KEY
+    # A reference (keychain:/env:/file:) is dereferenced here, so a real token
+    # never has to sit in .env — the same rule the sync account passwords follow.
+    # A literal is still accepted: this variable predates the convention and is
+    # commonly set to a throwaway value for local endpoints.
+    if raw.split(":", 1)[0] in ("keychain", "env", "file"):
+        from src.config.secrets import SecretError, resolve_secret  # noqa: PLC0415
+
+        try:
+            return resolve_secret(raw)
+        except SecretError as exc:
+            raise LLMHealthcheckError(
+                f"RAG_LLM_API_KEY is a {raw.split(':', 1)[0]}: reference that could not be "
+                f"resolved: {exc}"
+            ) from exc
+    return raw
 
 
 def using_placeholder_key() -> bool:

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from src.config.secrets import SecretError, resolve_secret
 from src.sync.accounts import (
     AccountConfig,
     account_from_dict,
@@ -15,7 +16,6 @@ from src.sync.accounts import (
     load_accounts,
     parse_cadence,
 )
-from src.sync.secrets import SecretError, resolve_secret
 from src.sync.sources import FolderRole, resolve_role
 
 
@@ -245,8 +245,8 @@ class TestResolveSecret(unittest.TestCase):
 
     def test_keychain_scheme_shells_out_to_security(self):
         with (
-            mock.patch("src.sync.secrets.shutil.which", return_value="/usr/bin/security"),
-            mock.patch("src.sync.secrets.subprocess.run") as run,
+            mock.patch("src.config.secrets.shutil.which", return_value="/usr/bin/security"),
+            mock.patch("src.config.secrets.subprocess.run") as run,
         ):
             run.return_value = mock.Mock(returncode=0, stdout="hunter2\n", stderr="")
             self.assertEqual(resolve_secret("keychain:mailrag.imap.personal"), "hunter2")
@@ -254,8 +254,8 @@ class TestResolveSecret(unittest.TestCase):
 
     def test_keychain_missing_item_explains_how_to_add_one(self):
         with (
-            mock.patch("src.sync.secrets.shutil.which", return_value="/usr/bin/security"),
-            mock.patch("src.sync.secrets.subprocess.run") as run,
+            mock.patch("src.config.secrets.shutil.which", return_value="/usr/bin/security"),
+            mock.patch("src.config.secrets.subprocess.run") as run,
         ):
             run.return_value = mock.Mock(returncode=44, stdout="", stderr="not found")
             with self.assertRaises(SecretError) as ctx:
@@ -264,7 +264,7 @@ class TestResolveSecret(unittest.TestCase):
 
     def test_keychain_without_security_points_at_the_portable_schemes(self):
         """A Linux user must not hit a macOS-only dead end."""
-        with mock.patch("src.sync.secrets.shutil.which", return_value=None):
+        with mock.patch("src.config.secrets.shutil.which", return_value=None):
             with self.assertRaises(SecretError) as ctx:
                 resolve_secret("keychain:x")
         self.assertIn("env:", str(ctx.exception))

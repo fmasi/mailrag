@@ -7,8 +7,8 @@ the spool or the pipeline changes.
 
 from __future__ import annotations
 
+from src.config.secrets import resolve_secret
 from src.sync.accounts import AccountConfig
-from src.sync.secrets import resolve_secret
 from src.sync.sources import MessageSource
 
 

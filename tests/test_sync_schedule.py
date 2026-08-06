@@ -127,3 +127,57 @@ class TestInstallHint(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSchedulerEnvironment(unittest.TestCase):
+    """A scheduled job inherits almost no environment — and this project's .env
+    is written for the DEVCONTAINER, where `host.docker.internal` resolves. On the
+    host it does not, so a unit without an explicit environment would fail every
+    tick forever while blaming the LLM and the vector store."""
+
+    def _plist(self, **kw):
+        kw.setdefault("interval_seconds", 43200)
+        kw.setdefault("repo_root", "/repo")
+        kw.setdefault("log_path", "/tmp/sync.log")
+        return plistlib.loads(render_launchd_plist(**kw).encode("utf-8"))
+
+    def test_the_launchd_unit_pins_both_endpoints_to_localhost(self):
+        env = self._plist()["EnvironmentVariables"]
+        self.assertEqual(env["RAG_LLM_API_BASE"], "http://localhost:1234/v1")
+        self.assertEqual(env["QDRANT_URL"], "http://localhost:6333")
+
+    def test_no_endpoint_is_left_pointing_at_a_container_hostname(self):
+        for v in self._plist()["EnvironmentVariables"].values():
+            self.assertNotIn("host.docker.internal", v)
+
+    def test_the_environment_can_be_overridden(self):
+        env = self._plist(environment={"QDRANT_URL": "http://otherbox:6333"})[
+            "EnvironmentVariables"
+        ]
+        self.assertEqual(env["QDRANT_URL"], "http://otherbox:6333")
+        # the un-overridden default survives
+        self.assertEqual(env["RAG_LLM_API_BASE"], "http://localhost:1234/v1")
+
+    def test_extra_variables_can_be_added(self):
+        env = self._plist(environment={"RAG_LLM_MAX_RETRIES": "1"})["EnvironmentVariables"]
+        self.assertEqual(env["RAG_LLM_MAX_RETRIES"], "1")
+        self.assertIn("QDRANT_URL", env)
+
+    def test_the_systemd_service_carries_the_same_environment(self):
+        service, _timer = render_systemd_units(
+            interval_seconds=43200, repo_root="/repo", log_path="/tmp/sync.log"
+        )
+        self.assertIn("Environment=RAG_LLM_API_BASE=http://localhost:1234/v1", service)
+        self.assertIn("Environment=QDRANT_URL=http://localhost:6333", service)
+
+    def test_environment_lines_precede_execstart(self):
+        """systemd applies Environment= in order; after ExecStart it would be
+        parsed but is conventionally wrong and easy to misread."""
+        service, _ = render_systemd_units(
+            interval_seconds=43200, repo_root="/repo", log_path="/tmp/sync.log"
+        )
+        lines = service.splitlines()
+        self.assertLess(
+            max(i for i, l in enumerate(lines) if l.startswith("Environment=")),
+            next(i for i, l in enumerate(lines) if l.startswith("ExecStart=")),
+        )

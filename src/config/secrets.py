@@ -1,11 +1,14 @@
-"""Resolve an account's password from a secret **reference**, never a literal.
+"""Resolve a secret from a **reference**, never a literal.
 
-Account config is a file users are likely to copy into a repo, paste into an
-issue, or sync to a backup. So it holds a reference — ``keychain:...``,
-``env:...``, ``file:...`` — and this module dereferences it at connect time. A
-plaintext password in ``accounts.yaml`` is rejected rather than merely
-discouraged: the config is not a safe place for it, and silently accepting one
+Config files get copied into repos, pasted into issues and swept into backups, so
+they hold a reference — ``keychain:...``, ``env:...``, ``file:...`` — and this
+module dereferences it at use time. A plaintext secret is rejected rather than
+merely discouraged: config is not a safe place for one, and silently accepting it
 teaches the wrong habit.
+
+Shared by the sync account passwords (``accounts.yaml``) and the LLM endpoint key
+(``RAG_LLM_API_KEY``), which is why it lives in ``src/config`` rather than under
+``src/sync``.
 
 macOS Keychain is the default on darwin but never the only option — mailrag runs
 on Linux too, and a resolver that only understood ``security(1)`` would make the

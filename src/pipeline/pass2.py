@@ -7,7 +7,7 @@ from src.llm import client as llm_client
 from src.llm import rubrics, summary
 from src.llm.cache import Pass2Cache
 from src.llm.pass2 import run_pass
-from src.llm.provenance import describe_backend, model_fingerprint
+from src.llm.provenance import describe_backend
 
 
 def _make_load_email(body_chars):
@@ -46,14 +46,22 @@ def run(profile, *, model, workers=1, body_chars=4000, limit=None, sample=None, 
     existing = cache.judges()
     if existing:
         print(f"  cache already holds judgments from: {existing}")
-        current = model_fingerprint(prov)
-        others = [k for k in existing if not k.startswith(current)]
-        if others and current:
+        # A DIFFERENT MODEL is the thing that breaks comparability. The same model
+        # with the quant newly recorded is not a second judge — it is better
+        # metadata — so that case is a note, not a warning, or this would cry wolf
+        # on every run for the life of the cache.
+        other_models = {k.split("@")[0].split(" [")[0] for k in existing} - {prov.model}
+        if other_models:
             print(
-                f"  WARNING: this sweep would ADD a second judge to the same corpus.\n"
-                f"           existing: {others}\n"
-                f"           this run: {current}\n"
+                f"  WARNING: this sweep ADDS A SECOND MODEL to the same corpus.\n"
+                f"           existing: {sorted(other_models)}\n"
+                f"           this run: {prov.model}\n"
                 f"           Noise rates across the corpus stop being comparable."
+            )
+        elif any("@" not in k for k in existing):
+            print(
+                "  note: earlier rows predate quantisation recording, so their quant "
+                "is unknown. Same model, so judgments remain comparable."
             )
 
     def summarize(email):

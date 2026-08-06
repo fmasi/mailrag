@@ -169,3 +169,39 @@ class TestCacheRecordsProvenance(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKeyReferenceResolution(unittest.TestCase):
+    """RAG_LLM_API_KEY may be a reference (keychain:/env:/file:). Provenance must
+    resolve it the same way the client does — sending the raw reference as a
+    bearer token yields a 401 and degrades the record to "unknown quant" without
+    saying so, which defeats the point of recording provenance at all."""
+
+    def test_a_reference_is_resolved_before_the_metadata_call(self):
+        seen = {}
+
+        def spy(api_base, model, api_key=""):
+            seen["api_key"] = api_key
+            return {"quantization": "8bit"}
+
+        env = {
+            "RAG_LLM_API_KEY": "env:MY_REAL_TOKEN",
+            "MY_REAL_TOKEN": "the-actual-secret",
+            "RAG_LLM_API_BASE": "http://localhost:1234/v1",
+        }
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch("src.llm.provenance._lmstudio_model_info", side_effect=spy),
+        ):
+            p = describe_backend(model="m", api_base="http://localhost:1234/v1")
+        self.assertEqual(seen["api_key"], "the-actual-secret")
+        self.assertNotIn("env:", seen["api_key"])
+        self.assertEqual(p.quant, "8bit")
+
+    def test_an_unresolvable_reference_does_not_block_the_run(self):
+        env = {"RAG_LLM_API_KEY": "env:DOES_NOT_EXIST"}
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch("src.llm.provenance._lmstudio_model_info", return_value={}),
+        ):
+            self.assertEqual(describe_backend(model="m", api_base="http://x/v1").model, "m")

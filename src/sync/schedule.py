@@ -34,6 +34,24 @@ def _xml_escape(text: str) -> str:
     )
 
 
+def scheduler_environment(overrides: Optional[dict] = None) -> dict:
+    """Environment a scheduled run needs that it will NOT inherit.
+
+    A launchd/systemd job starts from an almost-empty environment: no shell
+    profile, no login session. Two values matter here and neither can be left to
+    chance, because the project's ``.env`` is written for the DEVCONTAINER —
+    ``host.docker.internal`` resolves inside a container and nowhere else. A
+    scheduled run on the host would fail every tick, forever, reporting the LLM
+    and vector store as unavailable while the real cause is a hostname.
+    """
+    env = {
+        "RAG_LLM_API_BASE": "http://localhost:1234/v1",
+        "QDRANT_URL": "http://localhost:6333",
+    }
+    env.update(overrides or {})
+    return env
+
+
 def sync_command(
     *,
     repo_root: Optional[str] = None,
@@ -73,6 +91,7 @@ def render_launchd_plist(
     account: Optional[str] = None,
     model: Optional[str] = None,
     label: str = LAUNCHD_LABEL,
+    environment: Optional[dict] = None,
 ) -> str:
     """Render a LaunchAgent plist for ``~/Library/LaunchAgents/<label>.plist``.
 
@@ -81,6 +100,11 @@ def render_launchd_plist(
     """
     args = sync_command(repo_root=repo_root, conda_env=conda_env, account=account, model=model)
     program_args = "\n".join(f"        <string>{_xml_escape(a)}</string>" for a in args)
+    env = scheduler_environment(environment)
+    env_block = "\n".join(
+        f"        <key>{_xml_escape(k)}</key>\n        <string>{_xml_escape(str(v))}</string>"
+        for k, v in sorted(env.items())
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -94,6 +118,10 @@ def render_launchd_plist(
     </array>
     <key>WorkingDirectory</key>
     <string>{_xml_escape(os.path.abspath(repo_root))}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+{env_block}
+    </dict>
     <key>StartInterval</key>
     <integer>{int(interval_seconds)}</integer>
     <key>RunAtLoad</key>
@@ -118,6 +146,7 @@ def render_systemd_units(
     account: Optional[str] = None,
     model: Optional[str] = None,
     unit: str = SYSTEMD_UNIT,
+    environment: Optional[dict] = None,
 ) -> tuple[str, str]:
     """Render ``(service, timer)`` for ``~/.config/systemd/user/``.
 
@@ -126,6 +155,9 @@ def render_systemd_units(
     """
     args = sync_command(repo_root=repo_root, conda_env=conda_env, account=account, model=model)
     exec_start = " ".join(args)
+    env_lines = "\n".join(
+        f"Environment={k}={v}" for k, v in sorted(scheduler_environment(environment).items())
+    )
     service = f"""[Unit]
 Description=mailrag incremental mail sync
 After=network-online.target
@@ -133,6 +165,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory={os.path.abspath(repo_root)}
+{env_lines}
 ExecStart={exec_start}
 StandardOutput=append:{log_path}
 StandardError=append:{log_path}

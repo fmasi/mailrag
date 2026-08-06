@@ -99,7 +99,16 @@ def describe_backend(model: str = "", api_base: str = "", api_key: str = "") -> 
     api_base = str(api_base or os.getenv("RAG_LLM_API_BASE", "")).strip()
     model = str(model or os.getenv("RAG_LLM_MODEL", "")).strip()
     if not api_key:
-        api_key = os.getenv("RAG_LLM_API_KEY", "").strip()
+        # Resolve through the SAME path the client uses. Reading the env var raw
+        # would send "Bearer keychain:mailrag.llm.token" — the reference, not the
+        # secret — and the 401 would degrade provenance to "unknown" silently,
+        # which is precisely the failure this module exists to prevent.
+        try:
+            from src.llm.client import _resolve_api_key  # noqa: PLC0415
+
+            api_key = _resolve_api_key()
+        except Exception:  # noqa: BLE001 — metadata capture never blocks a run
+            api_key = os.getenv("RAG_LLM_API_KEY", "").strip()
 
     info = _lmstudio_model_info(api_base, model, api_key) if api_base and model else {}
     return Provenance(
