@@ -192,13 +192,26 @@ holds.
 attempt, and warns separately when the last run never finished — which on a
 laptop is the normal way a run ends.
 
+### Judge failures: outage vs poison
+
+A whole judge sweep failing is ambiguous — the endpoint may be down, or every
+message left in the queue may be one your model reliably chokes on, which is the
+*steady state* once good mail drains. mailrag settles it with one tiny probe
+(`healthcheck`): probe succeeds, the failures are charged to the messages and
+they are abandoned after three attempts; probe fails, nothing is charged and the
+stage is deferred. Transport failures are classified as outages up front and
+never consume a retry budget at all.
+
 ### Known limitation: incremental is not identical to a rebuild
 
 Chunk dedup is within-run only. Two emails sharing a long footer, indexed in the
 same run, store it once; indexed in separate runs, they store it twice. The
 `content_hash` payload exists to make cross-run dedup possible later, but nothing
-reads it yet. The cost is redundant vectors and duplicated hits, not wrong
-answers — and closing it properly requires resolving what happens when the email
+reads it yet. Under sync this compounds: each delta's dedup cannot see previously
+indexed mail, so shared boilerplate (disclaimers, signatures) accumulates
+duplicate chunks tick over tick. A periodic `--recreate` rebuild resets it for
+free — every judgment is cached. The cost is redundant vectors and duplicated
+hits, not wrong answers — and closing it properly requires resolving what happens when the email
 that "owns" a shared chunk is deleted.
 
 This deliberately inverts `onboard`'s fail-fast, which is right for a six-hour

@@ -117,7 +117,40 @@ class SyncState:
     def __init__(self, path: str):
         self._conn = sqlite3.connect(path)
         self._conn.row_factory = sqlite3.Row
+        self._migrate()
         self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring a pre-existing ledger up to the current schema, in place.
+
+        Without this, opening a ledger written before the lifecycle refactor
+        fails at connect (``CREATE INDEX`` against a table with no ``state``
+        column) and every sync is dead until the file is deleted — which costs a
+        full re-enumeration. Runs BEFORE the schema script so the indexes it
+        creates have their columns.
+        """
+        try:
+            existing = {r[1] for r in self._conn.execute("PRAGMA table_info(messages)")}
+        except sqlite3.DatabaseError:  # pragma: no cover - unreadable file
+            return
+        if not existing:
+            return  # fresh database; the schema script builds it
+        if "attempts" not in existing:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        if "state" not in existing:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN state TEXT NOT NULL DEFAULT 'new'")
+            # Reconstruct the lifecycle from the timestamps the old design used,
+            # so an existing ledger keeps its progress instead of re-doing it.
+            self._conn.execute(
+                """UPDATE messages SET state = CASE
+                       WHEN judged_at IS NOT NULL AND indexed_at IS NOT NULL THEN 'done'
+                       WHEN judged_at IS NOT NULL THEN 'judged'
+                       WHEN indexed_at IS NOT NULL THEN 'indexed_unjudged'
+                       ELSE 'new' END"""
+            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -289,6 +322,11 @@ class SyncState:
                     continue
                 current = State(row["state"])
                 new = next_state(current, event)
+                if new is current and event in (Event.REQUEUED, Event.ABANDONED):
+                    # The table refused this transition (e.g. requeueing a DONE
+                    # message). Running the side effects anyway would null its
+                    # timestamps and leave an inconsistent row.
+                    continue
                 if event is Event.ABANDONED:
                     # Terminal but reversible, and always with a reason: an
                     # abandoned message the operator cannot see or recover is

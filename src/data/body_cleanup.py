@@ -231,6 +231,11 @@ def clean_body(text: str) -> str:
     # the signature pass, so the delimiters it sees are exactly the ones a second
     # cleaning pass would see. Doing either afterwards changes the delimiter set
     # between passes — which is what made this non-idempotent, twice.
-    text = _TRAILING_HWS.sub("", text).strip()
+    # ALL whitespace normalization happens before the signature pass, so the text
+    # it measures is byte-identical to what a second cleaning pass would measure.
+    # Collapsing newline runs afterwards was the last remaining route to
+    # non-idempotence: an oversized (rejected) signature block could shrink under
+    # the collapse and be accepted on the next pass.
+    text = _MULTI_NEWLINE.sub("\n\n", _TRAILING_HWS.sub("", text)).strip()
     text = strip_signature_block(text)
     return normalize_whitespace(text)

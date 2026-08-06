@@ -1025,3 +1025,116 @@ class TestOutageBelowTheSeam(_RunnerTest):
                 )
         self.assertEqual(self.state.counts("acct")["abandoned"], 0)
         self.assertEqual(self.state.counts("acct")["pending_judge"], 3)
+
+
+class TestFifthRoundRegressions(_RunnerTest):
+    """Findings from the fifth (independent) review of the refactor."""
+
+    def _profile(self):
+        return mock.Mock(
+            pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x", rubric="p"
+        )
+
+    def _all_fail(self, *, profile, paths, model, workers, on_outcome=None):
+        for p in paths:
+            on_outcome(p, "error")
+        return {"cached": 0, "done": 0, "error": len(paths), "unavailable": 0}
+
+    def test_poison_messages_are_abandoned_when_the_endpoint_probes_healthy(self):
+        """The steady state of the queue: once good mail drains, only failures
+        remain, so 'the whole sweep failed' stops being evidence of an outage.
+        A probe distinguishes the two cases the heuristic could not."""
+        from src.sync.runner import MAX_JUDGE_ATTEMPTS
+
+        for i in range(2):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+        for _ in range(MAX_JUDGE_ATTEMPTS):
+            judge_pending(
+                self.account,
+                self.state,
+                profile=self._profile(),
+                model="m",
+                run_pass_fn=self._all_fail,
+                probe_fn=lambda model: None,  # endpoint is up
+            )
+        self.assertEqual(self.state.counts("acct")["abandoned"], 2)
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 0)
+
+    def test_the_same_failures_are_NOT_abandoned_when_the_endpoint_is_down(self):
+        from src.sync.runner import MAX_JUDGE_ATTEMPTS
+
+        for i in range(2):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+
+        def probe_fails(model):
+            raise ConnectionRefusedError(61, "refused")
+
+        for _ in range(MAX_JUDGE_ATTEMPTS + 2):
+            report = judge_pending(
+                self.account,
+                self.state,
+                profile=self._profile(),
+                model="m",
+                run_pass_fn=self._all_fail,
+                probe_fn=probe_fails,
+            )
+        self.assertEqual(self.state.counts("acct")["abandoned"], 0)
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 2)
+        self.assertIn("judge", report.skipped_stages)
+
+    def test_a_pre_refactor_ledger_is_migrated_rather_than_bricking_sync(self):
+        """Opening a ledger written before the lifecycle refactor used to fail at
+        connect, leaving sync dead until the file was deleted (which costs a full
+        re-enumeration)."""
+        import sqlite3
+
+        path = os.path.join(self.d, "legacy.db")
+        con = sqlite3.connect(path)
+        con.executescript(
+            """CREATE TABLE messages (
+                   account_id TEXT NOT NULL, message_key TEXT NOT NULL,
+                   content_sha256 TEXT NOT NULL DEFAULT '', message_id TEXT,
+                   folder TEXT NOT NULL DEFAULT '', source_uid TEXT NOT NULL DEFAULT '',
+                   eml_path TEXT NOT NULL DEFAULT '', internal_date TEXT,
+                   fetched_at TEXT NOT NULL, judged_at TEXT, indexed_at TEXT, error TEXT,
+                   PRIMARY KEY (account_id, message_key));"""
+        )
+        con.execute(
+            "INSERT INTO messages (account_id, message_key, fetched_at, judged_at, indexed_at) "
+            "VALUES ('acct','done_key','t','t','t')"
+        )
+        con.execute(
+            "INSERT INTO messages (account_id, message_key, fetched_at, judged_at) "
+            "VALUES ('acct','judged_key','t','t')"
+        )
+        con.execute(
+            "INSERT INTO messages (account_id, message_key, fetched_at) VALUES ('acct','new_key','t')"
+        )
+        con.commit()
+        con.close()
+
+        migrated = SyncState(path)
+        self.addCleanup(migrated.close)
+        states = {
+            r["message_key"]: r["state"]
+            for r in migrated.rows("acct", ["done_key", "judged_key", "new_key"])
+        }
+        # Progress is reconstructed from the old timestamps, not thrown away.
+        self.assertEqual(states["done_key"], "done")
+        self.assertEqual(states["judged_key"], "judged")
+        self.assertEqual(states["new_key"], "new")
+        self.assertEqual(migrated.counts("acct")["pending_judge"], 1)
+
+    def test_a_refused_transition_does_not_run_its_side_effects(self):
+        """requeue on a DONE message used to null both timestamps and report
+        success while leaving the state at done — an inconsistent row."""
+        self.state.record_fetched("acct", message_key="k1")
+        self.state.mark_judged("acct", ["k1"])
+        self.state.mark_indexed("acct", ["k1"])
+        self.assertEqual(self.state.requeue("acct", ["k1"]), 0)
+        row = self.state.rows("acct", ["k1"])[0]
+        self.assertEqual(row["state"], "done")
+        self.assertIsNotNone(row["judged_at"])
+        self.assertIsNotNone(row["indexed_at"])

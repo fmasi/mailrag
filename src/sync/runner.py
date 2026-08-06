@@ -208,6 +208,7 @@ def judge_pending(
     workers: int = 1,
     report: Optional[SyncReport] = None,
     run_pass_fn: Optional[Callable] = None,
+    probe_fn: Optional[Callable] = None,
 ) -> SyncReport:
     """Run the Pass-2 summarize/judge sweep over spooled-but-unjudged mail.
 
@@ -300,7 +301,17 @@ def judge_pending(
     # messages, so nothing is charged. A lone failing message in a
     # single-message sweep is charged — otherwise a genuinely poison message
     # could never be abandoned.
-    looks_like_an_outage = len(by_path) > 1 and not succeeded and len(errored_paths) == len(by_path)
+    # A whole-sweep failure is ambiguous: the endpoint may be down, or every
+    # remaining message may be poison — which is the STEADY STATE of this queue
+    # once good mail drains. One tiny probe settles what the heuristic alone
+    # cannot; without it, two deterministically-failing messages issue real LLM
+    # calls every tick forever and pin the account at "partial".
+    looks_like_an_outage = (
+        len(by_path) > 1
+        and not succeeded
+        and len(errored_paths) == len(by_path)
+        and not _endpoint_is_up(model, probe_fn)
+    )
     if failed_keys and looks_like_an_outage:
         for key in failed_keys:
             state.record_error(account.id, key, "pass-2 judge failed (whole sweep failed)")
@@ -321,6 +332,21 @@ def judge_pending(
             )
     report.errors += len(errored_paths)
     return report
+
+
+def _endpoint_is_up(model: str, probe_fn: Optional[Callable] = None) -> bool:
+    """One tiny completion against the configured endpoint. False if unreachable."""
+    try:
+        if probe_fn is not None:
+            probe_fn(model)
+        else:
+            from src.llm.client import healthcheck  # noqa: PLC0415
+
+            healthcheck(model=model)
+        return True
+    except Exception as exc:  # noqa: BLE001 — any failure means "cannot confirm it is up"
+        log.info("judge endpoint probe failed (%s); treating the sweep as an outage", exc)
+        return False
 
 
 def _credit_judged(account, state, keys, report) -> None:
