@@ -205,3 +205,57 @@ class TestKeyReferenceResolution(unittest.TestCase):
             mock.patch("src.llm.provenance._lmstudio_model_info", return_value={}),
         ):
             self.assertEqual(describe_backend(model="m", api_base="http://x/v1").model, "m")
+
+
+class TestProvenanceOnEveryJudgePath(unittest.TestCase):
+    """Provenance must be recorded on the SYNC path, not only the interactive
+    `summarize` verb. Scheduled sync is where it matters most: nobody is
+    watching, so a model or quant change there would otherwise be undetectable
+    after the fact. Found in review — 237 sync-judged rows had NULL quant."""
+
+    def test_the_sync_runner_passes_provenance_to_run_pass(self):
+        import inspect
+
+        from src.sync import runner
+
+        src = inspect.getsource(runner._default_run_pass)
+        self.assertIn("describe_backend", src)
+        self.assertIn("provenance=", src)
+
+    def test_the_judge_verb_passes_provenance_to_run_pass(self):
+        import inspect
+
+        from src.pipeline import judge
+
+        src = inspect.getsource(judge)
+        self.assertIn("describe_backend", src)
+        self.assertIn("provenance=", src)
+
+    def test_run_pass_records_the_quant_it_is_given(self):
+        """End-to-end through the real run_pass, so a caller that forgets the
+        kwarg cannot pass this by accident."""
+        import shutil
+        import tempfile
+
+        from src.llm.cache import Pass2Cache
+        from src.llm.pass2 import run_pass
+        from src.llm.provenance import Provenance
+
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        path = os.path.join(d, "m.eml")
+        with open(path, "w") as fh:
+            fh.write("Subject: x\n\nbody")
+        cache = Pass2Cache(os.path.join(d, "p2.db"))
+        self.addCleanup(cache.close)
+        run_pass(
+            [path],
+            cache,
+            lambda p: {"sender": "a", "subject": "s", "date": "", "body": "b", "message_id": ""},
+            lambda e: {"summary": "s", "is_noise": 0, "confidence": 0.9},
+            "gemma",
+            provenance=Provenance(
+                model="gemma", quant="8bit", endpoint="http://localhost:1234/v1", source="local"
+            ),
+        )
+        self.assertEqual(cache.judges(), {"gemma@8bit [local]": 1})

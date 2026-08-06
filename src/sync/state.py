@@ -115,8 +115,14 @@ class SyncState:
     """The sync ledger. One file per machine; safe to delete (costs a re-enumerate)."""
 
     def __init__(self, path: str):
-        self._conn = sqlite3.connect(path)
+        self._conn = sqlite3.connect(path, timeout=30.0)
         self._conn.row_factory = sqlite3.Row
+        # A scheduled tick and a manual `mailrag sync` can overlap. WAL lets a
+        # reader and a writer coexist, and the busy timeout makes a brief writer
+        # collision wait rather than raise "database is locked" — which would
+        # abort a run that had already spooled mail.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._migrate()
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

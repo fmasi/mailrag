@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from src.attachments.extract import ExtractResult, build_default_extractor, default_extractor_name
+from src.attachments.extract import (
+    ExtractResult,
+    Status,
+    build_default_extractor,
+    default_extractor_name,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS attachments (
@@ -161,6 +166,13 @@ class AttachmentStore:
         result = build_default_extractor(name).extract(
             self.get_bytes(sha256), row["mime"], row["filename"]
         )
+        if result.status in (Status.OCR_UNAVAILABLE, Status.BINARY):
+            # ENVIRONMENT verdicts, not facts about the attachment: OCR_UNAVAILABLE
+            # means tesseract was missing from PATH, BINARY means a parsing library
+            # was not installed. Caching either freezes the failure — a later run
+            # with a working environment reads the cache and never retries (GH #37,
+            # re-triggered by scheduled runs, which inherit no PATH).
+            return result
         self._conn.execute(
             """INSERT OR REPLACE INTO text_cache
                (sha256, extractor, text, status, extractor_used, created_at)

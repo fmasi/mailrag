@@ -17,6 +17,7 @@ from src.llm import client as llm_client
 from src.llm import rubrics, summary
 from src.llm.cache import Pass2Cache
 from src.llm.pass2 import run_pass
+from src.llm.provenance import describe_backend
 from src.pipeline.pass2 import _make_load_email
 
 
@@ -62,8 +63,17 @@ def run(
             )
         )
 
+    prov = describe_backend(model=model, api_base=getattr(cl, "base_url", ""))
+    print(f"judge: {prov.label()}")
     counts = run_pass(
-        suspects, cache, load_email, judge_fn, model, progress=progress, workers=workers
+        suspects,
+        cache,
+        load_email,
+        judge_fn,
+        model,
+        progress=progress,
+        workers=workers,
+        provenance=prov,
     )
     cache.close()
     return {**counts, "suspects": len(suspects)}

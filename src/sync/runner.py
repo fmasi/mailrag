@@ -373,11 +373,17 @@ def _default_run_pass(*, profile, paths, model, workers, on_outcome=None):
     from src.llm import rubrics, summary  # noqa: PLC0415
     from src.llm.cache import Pass2Cache  # noqa: PLC0415
     from src.llm.pass2 import run_pass  # noqa: PLC0415
+    from src.llm.provenance import describe_backend  # noqa: PLC0415
     from src.pipeline.pass2 import _make_load_email  # noqa: PLC0415
 
     cache = Pass2Cache(profile.pass2_cache)
     try:
         cl = llm_client.make_client()
+        # Record WHICH judge produced these rows. Scheduled sync is the path this
+        # matters most on: nobody is watching, so a model or quant change here
+        # would otherwise be undetectable after the fact.
+        prov = describe_backend(model=model, api_base=getattr(cl, "base_url", ""))
+        log.info("judge: %s", prov.label())
 
         def summarize(email):
             return summary.parse_response(
@@ -393,6 +399,7 @@ def _default_run_pass(*, profile, paths, model, workers, on_outcome=None):
             progress=False,
             workers=workers,
             on_outcome=on_outcome,
+            provenance=prov,
         )
     finally:
         cache.close()
@@ -471,8 +478,11 @@ def index_pending(
     keys = [k for k in by_path.values() if k in handled_keys]
     # Anything the indexer did not account for cannot be retried into success:
     # its document was rejected, its body cleaned to nothing, or it lost a dedup
-    # it will lose again. Leaving it pending grew the per-tick load set forever
-    # while --status reported a backlog that never drained.
+    # it will lose again. These are ABANDONED (terminal, with the reason
+    # recorded, recoverable via --requeue) rather than left pending: leaving them
+    # pending grew the per-tick load set forever while --status reported a
+    # backlog that never drained, and a retried dedup loser re-adds the duplicate
+    # chunk its twin's absence let it win.
     unhandled = [k for k in by_path.values() if k not in handled_keys]
     if unhandled:
         state.abandon(account.id, unhandled, "indexer produced no chunks for this message")

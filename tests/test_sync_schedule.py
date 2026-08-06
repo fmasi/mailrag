@@ -181,3 +181,11 @@ class TestSchedulerEnvironment(unittest.TestCase):
             max(i for i, l in enumerate(lines) if l.startswith("Environment=")),
             next(i for i, l in enumerate(lines) if l.startswith("ExecStart=")),
         )
+
+    def test_the_unit_carries_a_PATH_that_includes_homebrew(self):
+        """Attachment OCR shells out to `tesseract`, which a scheduled job cannot
+        find without PATH — and the resulting `ocr_unavailable` used to be cached,
+        so a later supervised run never healed it (GH #37 via launchd)."""
+        path = self._plist()["EnvironmentVariables"]["PATH"]
+        self.assertIn("/opt/homebrew/bin", path)
+        self.assertIn("/usr/bin", path)

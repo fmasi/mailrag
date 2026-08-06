@@ -174,11 +174,30 @@ def _looks_like_auth_error(exc: BaseException) -> bool:
     We match on the string form because the OpenAILike stack wraps the
     underlying ``openai`` error in a variety of exception types; a substring
     check on the status/keywords is robust across those wrappers.
+
+    The markers are deliberately NARROW. Bare ``invalid`` / ``malformed`` used to
+    be here, and every OpenAI-spec 4xx body contains ``'type':
+    'invalid_request_error'`` — so an ordinary per-message rejection (an
+    over-length prompt, a bad parameter) was reported as an auth failure. Since
+    auth failures are classified endpoint-level, that message would then never
+    spend a retry attempt, never be abandoned, and — because indexing waits on
+    judging — never be indexed, while re-issuing a real LLM call every tick
+    forever.
     """
     text = f"{type(exc).__name__}: {exc}".lower()
     return any(
         marker in text
-        for marker in ("401", "403", "unauthorized", "malformed", "api key", "api token", "invalid")
+        for marker in (
+            "401",
+            "403",
+            "unauthorized",
+            "invalid_api_key",
+            "invalid api key",
+            "api key",
+            "api token",
+            "authenticationerror",
+            "permissiondenied",
+        )
     )
 
 

@@ -138,3 +138,28 @@ class TestAttachmentStore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEnvironmentVerdictsAreNotCached(unittest.TestCase):
+    """`ocr_unavailable` and `binary` describe the ENVIRONMENT (a missing
+    tesseract, a missing parsing library), not the attachment. Caching them
+    freezes the failure: a later run with a working environment reads the cache
+    and never retries."""
+
+    def test_ocr_unavailable_is_not_written_to_the_cache(self):
+        import inspect
+
+        from src.attachments import store
+
+        src = inspect.getsource(store.AttachmentStore._extract_and_cache)
+        self.assertIn("OCR_UNAVAILABLE", src)
+        # the early return must come before the INSERT
+        self.assertLess(src.index("OCR_UNAVAILABLE"), src.index("INSERT OR REPLACE"))
+
+    def test_binary_is_treated_the_same_way(self):
+        import inspect
+
+        from src.attachments import store
+
+        src = inspect.getsource(store.AttachmentStore._extract_and_cache)
+        self.assertIn("Status.BINARY", src)
