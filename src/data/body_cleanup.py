@@ -87,7 +87,10 @@ _TRACKING_PARAMS = frozenset(
         "mc_cid", "mc_eid", "ml_subscriber",
         "_hsenc", "_hsmi", "hsctatracking",
         "vero_conv", "vero_id", "ck_subscriber_id",
-        "_branch_match_id", "ref", "ref_src", "s_cid", "icid", "spm",
+        # "ref" is deliberately NOT here: ?ref=INV-2024-001 is an invoice
+        # reference far more often than an attribution tag, and dropping it would
+        # do exactly what this function's contract promises not to.
+        "_branch_match_id", "ref_src", "s_cid", "icid", "spm",
     }
 )  # fmt: skip
 
@@ -136,7 +139,11 @@ def strip_tracking_params(text: str) -> str:
 
 # RFC 3676 §4.3: a line containing exactly "-- " delimits the signature block.
 # Tolerant of the trailing space being stripped in transit, which is common.
-_SIGNATURE_DELIM = re.compile(r"\n-- ?\n")
+# Any trailing horizontal whitespace, not just a single space. A client (or a
+# transport) that emits "--  \n" would otherwise be missed on the first pass and
+# then MATCH on the second, once normalize_whitespace has trimmed the line —
+# making clean_body non-idempotent and silently deleting more on a re-clean.
+_SIGNATURE_DELIM = re.compile(r"\n--[ \t]*\n")
 
 # Below this many characters of surviving body, a signature strip is more
 # likely to have eaten the message than cleaned it — a two-line "Thanks,\n--\nJ"
@@ -217,5 +224,9 @@ def clean_body(text: str) -> str:
         return text
     text = strip_base64_blobs(text)
     text = strip_tracking_params(text)
+    # Trailing horizontal whitespace is trimmed BEFORE the signature pass, so the
+    # delimiter the signature rule sees is the same one a second cleaning pass
+    # would see. Doing it afterwards is what made this non-idempotent.
+    text = _TRAILING_HWS.sub("", text)
     text = strip_signature_block(text)
     return normalize_whitespace(text)

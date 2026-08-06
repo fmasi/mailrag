@@ -326,3 +326,50 @@ class TestEdgeCases(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIdentityHeaderCaps(unittest.TestCase):
+    """message_id / in_reply_to / thread_id / message_key escaped truncation
+    entirely: a 1 MB Message-ID produced ~4 MB of metadata PER CHUNK, and one
+    such email in a 256-point batch pushed a single Qdrant request past its
+    request cap — surfacing as a bogus 'Qdrant is down' every tick."""
+
+    def _email(self, **kw):
+        from src.data.models import NormalizedEmail
+
+        base = dict(
+            sender="a@x.com",
+            subject="Subject",
+            date=None,
+            body="A body.",
+            source="local",
+            source_id="/x.eml",
+        )
+        base.update(kw)
+        return NormalizedEmail(**base)
+
+    def test_an_oversized_message_id_is_capped(self):
+        doc = self._email(message_id="<" + "a" * 1_000_000 + ">").to_document()
+        self.assertLess(len(doc.metadata["message_id"]), 1100)
+        self.assertLess(len(doc.metadata["message_key"]), 1100)
+        self.assertLess(len(doc.metadata["thread_id"]), 1100)
+
+    def test_an_oversized_in_reply_to_is_capped(self):
+        doc = self._email(in_reply_to="<" + "b" * 500_000 + ">").to_document()
+        self.assertLess(len(doc.metadata["in_reply_to"]), 1100)
+
+    def test_total_metadata_stays_small_for_a_hostile_email(self):
+        doc = self._email(
+            message_id="<" + "a" * 200_000 + ">",
+            in_reply_to="<" + "b" * 200_000 + ">",
+            references="<" + "c" * 200_000 + ">",
+            subject="s" * 10_000,
+            sender="x" * 10_000,
+        ).to_document()
+        total = sum(len(str(v)) for v in doc.metadata.values())
+        self.assertLess(total, 20_000)
+
+    def test_normal_headers_are_untouched(self):
+        mid = "<CAB123.456@mail.example.com>"
+        doc = self._email(message_id=mid).to_document()
+        self.assertEqual(doc.metadata["message_id"], mid)

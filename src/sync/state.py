@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS messages (
     judged_at      TEXT,
     indexed_at     TEXT,
     error          TEXT,
+    attempts       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (account_id, message_key)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_pending_judge
@@ -333,6 +334,67 @@ class SyncState:
             [account_id, *keys],
         ).fetchall()
         return [r["message_key"] for r in rows]
+
+    def abandon(self, account_id: str, message_keys: Iterable[str], reason: str) -> int:
+        """Give up on messages, terminally, with the reason recorded.
+
+        Some failures are not transient and not retryable — the spooled ``.eml``
+        has been deleted, or the message has failed the same stage too many
+        times. Leaving those pending means re-loading them on every tick forever
+        while ``--status`` reports a permanently dirty account and (because
+        indexing waits on judging) blocks everything behind them.
+
+        Both stage timestamps are set so the row leaves every queue, and ``error``
+        is set so it is still counted and visible rather than silently passing as
+        done.
+        """
+        keys = [k for k in dict.fromkeys(message_keys) if k]
+        if not keys:
+            return 0
+        now = _now()
+        self._conn.executemany(
+            """UPDATE messages SET judged_at=COALESCE(judged_at, ?),
+                   indexed_at=COALESCE(indexed_at, ?), error=?
+               WHERE account_id=? AND message_key=?""",
+            [(now, now, reason[:2000], account_id, k) for k in keys],
+        )
+        self._conn.commit()
+        return len(keys)
+
+    def bump_attempts(self, account_id: str, message_keys: Iterable[str]) -> Dict[str, int]:
+        """Increment the failure counter for these messages; return the new counts.
+
+        A deterministically-failing message otherwise re-issues a real (possibly
+        paid) LLM call on every tick, forever, with nothing recording that it has
+        already failed a hundred times.
+        """
+        keys = [k for k in dict.fromkeys(message_keys) if k]
+        if not keys:
+            return {}
+        self._conn.executemany(
+            "UPDATE messages SET attempts=attempts+1 WHERE account_id=? AND message_key=?",
+            [(account_id, k) for k in keys],
+        )
+        self._conn.commit()
+        marks = ",".join("?" * len(keys))
+        rows = self._conn.execute(
+            f"SELECT message_key, attempts FROM messages WHERE account_id=? "
+            f"AND message_key IN ({marks})",
+            [account_id, *keys],
+        ).fetchall()
+        return {r["message_key"]: r["attempts"] for r in rows}
+
+    def last_successful_run(self, account_id: str) -> Optional[sqlite3.Row]:
+        """The most recent run that actually completed cleanly.
+
+        ``last_run`` answers "when did we last try", which is not the question
+        ``--status`` is asking: 120 consecutive failed ticks would otherwise look
+        fresh because the newest *attempt* is two hours old.
+        """
+        return self._conn.execute(
+            "SELECT * FROM sync_runs WHERE account_id=? AND status=? ORDER BY id DESC LIMIT 1",
+            (account_id, STATUS_OK),
+        ).fetchone()
 
     def record_error(self, account_id: str, message_key: str, error: str) -> None:
         """Park a poison message with its error, without blocking the folder.

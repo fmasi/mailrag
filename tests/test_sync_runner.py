@@ -545,9 +545,11 @@ class TestReviewRegressions(_RunnerTest):
         )
         self.assertEqual(report.indexed, 1)
 
-    def test_a_message_that_produced_no_chunks_is_left_pending(self):
-        """An email fully absorbed by the corpus-wide dedup writes nothing;
-        marking it indexed would strand it forever."""
+    def test_a_message_that_produced_no_chunks_reaches_a_terminal_state(self):
+        """An email the indexer could not account for will not succeed on an
+        identical retry, so it is abandoned WITH an error rather than left
+        pending — leaving it pending grew the per-tick load set forever and, for
+        dedup losers, re-added the duplicate chunk on the next run."""
         self._deliver("m1", "<1@x>", mtime=1000)
         self._sync()
         report = index_pending(
@@ -559,7 +561,8 @@ class TestReviewRegressions(_RunnerTest):
             require_judged=False,
         )
         self.assertEqual(report.indexed, 0)
-        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+        self.assertEqual(self.state.counts("acct")["pending_index"], 0)
+        self.assertEqual(self.state.counts("acct")["errors"], 1)
 
     def test_a_permanent_refusal_is_not_reported_as_a_transient_outage(self):
         """A policy/legacy refusal needs an operator; filing it as 'deferred'
@@ -659,7 +662,7 @@ class TestSecondRoundRegressions(_RunnerTest):
         self.assertEqual(report.indexed, 1)
         self.assertEqual(self.state.counts("acct")["pending_index"], 0)
 
-    def test_a_dedup_loser_is_still_left_pending_to_retry(self):
+    def test_a_dedup_loser_does_not_accumulate_in_the_pending_set(self):
         self._deliver("m1", "<1@x>", mtime=1000)
         self._sync()
         report = index_pending(
@@ -671,7 +674,10 @@ class TestSecondRoundRegressions(_RunnerTest):
             require_judged=False,
         )
         self.assertEqual(report.indexed, 0)
-        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+        # Not pending: retrying it would win the dedup next time (its twin is
+        # absent from that delta) and add a duplicate chunk the collection
+        # already holds.
+        self.assertEqual(self.state.counts("acct")["pending_index"], 0)
 
     def test_mail_indexed_before_being_judged_is_requeued_when_judged(self):
         """indexed_at was write-once, so a summary arriving later could never
@@ -724,8 +730,11 @@ class TestSecondRoundRegressions(_RunnerTest):
         )
         self.assertEqual(report.judged, 2)
         self.assertEqual(report.errors, 1)
-        # The missing file must not be handed to the sweep at all.
-        self.assertEqual(self.state.counts("acct")["pending_judge"], 1)
+        # The missing file must not be handed to the sweep at all, AND must reach
+        # a terminal state — leaving it pending re-reported the same failure on
+        # every tick and blocked it from indexing forever.
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 0)
+        self.assertEqual(self.state.counts("acct")["errors"], 1)
 
     def test_a_transient_error_is_cleared_once_the_message_succeeds(self):
         """Otherwise --status's error count only ever grows and stops meaning
@@ -755,3 +764,136 @@ class TestSecondRoundRegressions(_RunnerTest):
         )
         self.assertEqual(report.skipped_stages, [])
         self.assertGreater(report.errors, 0)  # what the CLI now derives rc from
+
+
+class TestThirdRoundRegressions(_RunnerTest):
+    """Defects found by the third (whole-system) audit. Each fails on 32f2e23."""
+
+    def _profile(self):
+        return mock.Mock(
+            pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x", rubric="p"
+        )
+
+    def _index_all(self, require_judged=False):
+        keys = {r["message_key"] for r in self.state.pending("acct", "indexed")}
+        return index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: (len(keys), keys),
+            require_judged=require_judged,
+        )
+
+    def test_a_mid_sweep_judge_failure_still_requeues_for_indexing(self):
+        """The success path re-queued; the outage path did not. Every message in
+        the completed prefix kept a summary-less vector forever while the ledger
+        reported the account fully done."""
+        for i in range(2):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+        self._index_all()  # indexed while unjudged (the no-model path)
+        self.assertEqual(self.state.counts("acct")["pending_index"], 0)
+
+        def dies_after_first(*, profile, paths, model, workers, on_outcome=None):
+            on_outcome(sorted(paths)[0], "done")
+            raise ConnectionError("LM Studio went away")
+
+        report = judge_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            model="m",
+            run_pass_fn=dies_after_first,
+        )
+        self.assertEqual(report.judged, 1)
+        # The judged one must be back in the index queue with its summary.
+        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+
+    def test_a_missing_spool_file_reaches_a_terminal_state_in_the_judge_stage(self):
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        os.unlink(self.state.pending("acct", "judged")[0]["eml_path"])
+        judge_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            model="m",
+            run_pass_fn=lambda **kw: self.fail("must not reach the sweep"),
+        )
+        counts = self.state.counts("acct")
+        self.assertEqual((counts["pending_judge"], counts["pending_index"]), (0, 0))
+        self.assertEqual(counts["errors"], 1)
+
+    def test_a_missing_spool_file_reaches_a_terminal_state_in_the_index_stage(self):
+        """Previously handed to the loader, silently skipped, misreported as a
+        dedup loser, and re-loaded on every tick forever."""
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        os.unlink(self.state.pending("acct", "indexed")[0]["eml_path"])
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder=mock.Mock(),
+            index_fn=lambda **kw: self.fail("must not reach the indexer"),
+            require_judged=False,
+        )
+        self.assertEqual(self.state.counts("acct")["pending_index"], 0)
+        self.assertTrue(any("missing" in m for m in report.messages))
+
+    def test_a_deterministically_failing_judge_is_abandoned_not_retried_forever(self):
+        """Each retry is a real, possibly paid, LLM call."""
+        from src.sync.runner import MAX_JUDGE_ATTEMPTS
+
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+
+        def always_fails(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "error")
+            return {"cached": 0, "done": 0, "error": len(paths)}
+
+        for _ in range(MAX_JUDGE_ATTEMPTS):
+            judge_pending(
+                self.account,
+                self.state,
+                profile=self._profile(),
+                model="m",
+                run_pass_fn=always_fails,
+            )
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 0)
+        self.assertEqual(self.state.counts("acct")["errors"], 1)
+
+    def test_the_account_converges_to_zero_pending_over_repeated_runs(self):
+        """The property all three audits kept breaking: with no new mail, repeated
+        runs must reach a fixed point rather than re-loading the same set."""
+        for i in range(4):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+
+        def judges(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "done")
+            return {"cached": 0, "done": len(paths), "error": 0}
+
+        load_sizes = []
+        for _ in range(5):
+            judge_pending(
+                self.account, self.state, profile=self._profile(), model="m", run_pass_fn=judges
+            )
+            keys = {r["message_key"] for r in self.state.pending("acct", "indexed")}
+            load_sizes.append(len(keys))
+            index_pending(
+                self.account,
+                self.state,
+                profile=self._profile(),
+                embedder=mock.Mock(),
+                index_fn=lambda **kw: (len(kw["paths"]), set(keys)),
+                require_judged=True,
+            )
+        counts = self.state.counts("acct")
+        self.assertEqual((counts["pending_judge"], counts["pending_index"]), (0, 0))
+        # The per-run load set drains and stays drained; it must never grow.
+        self.assertEqual(load_sizes[0], 4)
+        self.assertEqual(load_sizes[1:], [0, 0, 0, 0])

@@ -42,7 +42,11 @@ from typing import Optional
 #       when there is exactly one "-- " delimiter and the removed block is
 #       signature-shaped. Version 2 bodies were cleaned under the old rule, so
 #       they must not share a fingerprint with these.
-PREPROCESS_VERSION = 3
+#   4 — signature delimiter widened to any trailing horizontal whitespace and
+#       the whitespace trim moved before it (the "--  " case made cleaning
+#       non-idempotent); "ref" removed from the tracking-parameter list; subject
+#       and sender caps halved for token headroom.
+PREPROCESS_VERSION = 4
 
 # Bump when the chunk layout changes shape for identical preprocessed text —
 # a different splitter, a change to how attachments are split, or a change to

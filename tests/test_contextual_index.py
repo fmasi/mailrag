@@ -492,3 +492,121 @@ class TestDedupDeleteInteraction(unittest.TestCase):
             [_email("a body about the quarterly plan", mid="<a@x>")], recreate=False
         )
         self.assertTrue(set(delete.call_args[0][2]) <= {p.payload["message_key"] for p in points})
+
+
+class TestBatchIsolation(unittest.TestCase):
+    """One undindexable document must not take a whole batch with it, and a
+    failure mid-upsert must not leave the delta deleted-with-no-replacement
+    (third-round audit findings)."""
+
+    def _embedder(self):
+        e = mock.Mock()
+        e.dim = 1024
+        e.encode.side_effect = lambda texts, **kw: (
+            [[0.1] * 1024 for _ in texts],
+            [{"7": 0.9} for _ in texts],
+        )
+        return e
+
+    def test_a_document_the_splitter_rejects_does_not_kill_the_batch(self):
+        good = [
+            _email(f"a distinct body number {i} about the plan", mid=f"<g{i}@x>") for i in range(3)
+        ]
+        upserted = []
+        real_split = None
+
+        def selective(self_splitter, docs, show_progress=False):
+            if len(docs) > 1:
+                raise ValueError("Metadata length (543) is longer than chunk size (512)")
+            if docs[0].metadata.get("message_key") == "g1@x":
+                raise ValueError("Metadata length (543) is longer than chunk size (512)")
+            return real_split(self_splitter, docs, show_progress=show_progress)
+
+        from llama_index.core.node_parser import SentenceSplitter
+
+        real_split = SentenceSplitter.get_nodes_from_documents
+        with (
+            mock.patch.object(SentenceSplitter, "get_nodes_from_documents", selective),
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_payload_indexes"),
+            mock.patch("src.indexing.contextual_index.hq.has_legacy_points", return_value=False),
+            mock.patch("src.indexing.contextual_index.hq.collection_policy", return_value=""),
+            mock.patch("src.indexing.contextual_index.hq.delete_by_message_keys"),
+            mock.patch(
+                "src.indexing.contextual_index.hq.upsert",
+                side_effect=lambda c, n, pts: upserted.extend(pts),
+            ),
+        ):
+            res = build_contextual_index(
+                good,
+                collection="t",
+                embedder=self._embedder(),
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+                recreate=False,
+            )
+        written = {p.payload["message_key"] for p in upserted}
+        self.assertEqual(written, {"g0@x", "g2@x"})  # the good mail survived
+        self.assertIn("g1@x", res.failed_message_keys)  # and the culprit is named
+
+    def test_a_failure_mid_upsert_only_exposes_one_batch(self):
+        """Deleting the whole delta up front meant a mid-loop failure removed
+        every not-yet-rewritten email — reproduced as 4 of 6 vanishing."""
+        emails = [
+            _email(f"body number {i} about the quarterly plan", mid=f"<m{i}@x>") for i in range(6)
+        ]
+        deleted, upserted = [], []
+
+        def failing_upsert(c, n, pts):
+            if len(upserted) >= 2:
+                raise ConnectionError("qdrant connection reset mid-batch")
+            upserted.extend(pts)
+
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_payload_indexes"),
+            mock.patch("src.indexing.contextual_index.hq.has_legacy_points", return_value=False),
+            mock.patch("src.indexing.contextual_index.hq.collection_policy", return_value=""),
+            mock.patch(
+                "src.indexing.contextual_index.hq.delete_by_message_keys",
+                side_effect=lambda c, n, keys: deleted.extend(keys),
+            ),
+            mock.patch("src.indexing.contextual_index.hq.upsert", side_effect=failing_upsert),
+        ):
+            with self.assertRaises(ConnectionError):
+                build_contextual_index(
+                    emails,
+                    collection="t",
+                    embedder=self._embedder(),
+                    apply_noise_filter=False,
+                    qdrant_url="http://x",
+                    recreate=False,
+                    upsert_batch=2,
+                )
+        # Only the batches actually attempted may have been deleted — never the
+        # whole delta.
+        self.assertLessEqual(len(set(deleted)), 4)
+        self.assertLess(len(set(deleted)), 6)
+
+    def test_a_full_rebuild_never_deletes(self):
+        deleted = []
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch(
+                "src.indexing.contextual_index.hq.delete_by_message_keys",
+                side_effect=lambda c, n, keys: deleted.extend(keys),
+            ),
+            mock.patch("src.indexing.contextual_index.hq.upsert"),
+        ):
+            build_contextual_index(
+                [_email("a body about the plan", mid="<a@x>")],
+                collection="t",
+                embedder=self._embedder(),
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+                recreate=True,
+            )
+        self.assertEqual(deleted, [])

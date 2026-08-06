@@ -7,6 +7,7 @@ an optional {message_id: summary} map (so callers choose live vs cached summarie
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -22,6 +23,37 @@ from src.ingest.embed_text import embed_max_length, prepend_summary
 from src.ingest.numeric import augment_numeric
 from src.ingest.sparse import lexical_weights_to_sparse
 
+log = logging.getLogger(__name__)
+
+
+def _split_documents(splitter, docs):
+    """Split *docs*, quarantining any document the splitter rejects.
+
+    ``SentenceSplitter`` raises when a document's METADATA alone exceeds the
+    chunk budget — which one inbound email with a very long subject in a
+    token-dense script can cause. Splitting the whole list in one call means that
+    single message takes every other document in the batch down with it, and the
+    caller has no way to tell which one was at fault. The fast path is still the
+    bulk call; only on failure does it fall back to per-document splitting to
+    isolate the offender.
+
+    Returns ``(nodes, failed_message_keys)``.
+    """
+    try:
+        return splitter.get_nodes_from_documents(docs, show_progress=False), frozenset()
+    except Exception:  # noqa: BLE001 — identify the culprit rather than give up
+        pass
+
+    nodes, failed = [], set()
+    for doc in docs:
+        try:
+            nodes.extend(splitter.get_nodes_from_documents([doc], show_progress=False))
+        except Exception as exc:  # noqa: BLE001 — one bad document, not a bad batch
+            key = doc.metadata.get("message_key") or doc.doc_id
+            failed.add(key)
+            log.warning("skipping undindexable document %s: %s", key, exc)
+    return nodes, frozenset(failed)
+
 
 @dataclass
 class BuildResult:
@@ -30,6 +62,10 @@ class BuildResult:
     collection: str
     kept_emails: int
     chunks: int
+    # Documents the splitter refused (e.g. metadata alone over the chunk budget).
+    # Reported so the caller can give them a terminal state instead of retrying
+    # the same failure on every run.
+    failed_message_keys: frozenset = frozenset()
     # message_keys that actually produced points in THIS run. Callers that track
     # per-message state (the sync ledger) must mark only these as indexed — an
     # email whose chunks were all removed by the corpus-wide dedup contributes
@@ -158,7 +194,7 @@ def build_contextual_index(
         chunk_overlap=chunk_overlap,
         tokenizer=encode_len,
     )
-    nodes = splitter.get_nodes_from_documents(docs, show_progress=False)
+    nodes, failed_keys = _split_documents(splitter, docs)
 
     # 4b. Deterministic point ids (issue #101). Assigned BEFORE the dedup pass:
     # dedup is corpus-order-dependent, so deriving a chunk's ordinal after it would
@@ -170,7 +206,12 @@ def build_contextual_index(
     # email can finish this step contributing zero nodes.
     nodes = dedup_by_content(nodes, key=lambda n: n.get_content(metadata_mode=MetadataMode.NONE))
     if not nodes:
-        return BuildResult(collection=collection, kept_emails=kept_emails, chunks=0)
+        return BuildResult(
+            collection=collection,
+            kept_emails=kept_emails,
+            chunks=0,
+            failed_message_keys=failed_keys,
+        )
 
     # 5b. The set of emails that will actually be written. Derived from the
     # SURVIVING nodes, never from `docs`: deleting an email's existing points and
@@ -222,18 +263,31 @@ def build_contextual_index(
         if existing_policy and existing_policy != fingerprint:
             raise RuntimeError(describe_mismatch(collection, existing_policy, fingerprint))
         hq.ensure_payload_indexes(client, collection)
-        # Only emails that survive to upsert get their old points removed. An
-        # email fully absorbed by the dedup keeps whatever it already had —
-        # stale beats absent, and it is reported as un-indexed so the caller
-        # does not record success.
-        hq.delete_by_message_keys(client, collection, surviving_keys)
+        # NOTE: the delete happens per BATCH inside the upsert loop below, not
+        # here. Deleting the whole delta up front means a failure partway through
+        # the loop leaves every not-yet-rewritten email deleted with no
+        # replacement — reproduced as 4 of 6 emails vanishing from a live
+        # collection while the run reported only "index deferred".
 
     enc_max_len = embed_max_length(chunk_size, embed_summary, override=embed_max_length_override)
 
     # 7. Embed in upsert_batch-sized batches and upsert
     done = 0
+    deleted_keys: set = set()
     for i in range(0, len(nodes), upsert_batch):
         batch = nodes[i : i + upsert_batch]
+        if not recreate:
+            # Replace this batch's emails immediately before writing them, so an
+            # interrupted loop can only ever leave ONE batch in the deleted-but-
+            # not-rewritten window instead of the entire delta.
+            fresh = {
+                k
+                for k in (n.metadata.get("message_key") for n in batch)
+                if k and k not in deleted_keys
+            }
+            if fresh:
+                hq.delete_by_message_keys(client, collection, fresh)
+                deleted_keys |= fresh
         embed_texts = []
         for n in batch:
             t = n.get_content(metadata_mode=MetadataMode.EMBED)
@@ -267,5 +321,6 @@ def build_contextual_index(
         collection=collection,
         kept_emails=kept_emails,
         chunks=done,
+        failed_message_keys=failed_keys,
         indexed_message_keys=surviving_keys,
     )

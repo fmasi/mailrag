@@ -155,8 +155,30 @@ indexing waits on judging, freeze the whole account.
 
 Indexing without a judge stage (no `--model`) is supported, and mail indexed
 that way is **re-queued** once a later run judges it, so its summary does reach
-the vector. Errors are cleared when a message finally succeeds, so the count in
-`--status` reflects outstanding problems rather than accumulating history.
+the vector — including when that judge sweep itself fails partway through. Errors are cleared when a message finally succeeds, so the count in `--status`
+reflects outstanding problems rather than accumulating history.
+
+Some failures are **terminal**, not retried: a spooled `.eml` that has been
+deleted, a message the chunker rejects, and a message whose judge call has failed
+three times. Those are abandoned with the reason recorded and counted as errors,
+because retrying them means re-loading (and re-paying for) the same failure on
+every tick while blocking everything queued behind them. A message the indexer
+produces no chunks for is treated the same way — retrying it would win the
+in-run dedup on the next tick and add a duplicate chunk the collection already
+holds.
+
+`--status` measures staleness from the last **successful** run, not the last
+attempt, and warns separately when the last run never finished — which on a
+laptop is the normal way a run ends.
+
+### Known limitation: incremental is not identical to a rebuild
+
+Chunk dedup is within-run only. Two emails sharing a long footer, indexed in the
+same run, store it once; indexed in separate runs, they store it twice. The
+`content_hash` payload exists to make cross-run dedup possible later, but nothing
+reads it yet. The cost is redundant vectors and duplicated hits, not wrong
+answers — and closing it properly requires resolving what happens when the email
+that "owns" a shared chunk is deleted.
 
 This deliberately inverts `onboard`'s fail-fast, which is right for a six-hour
 build and wrong for a background refresh. Nothing is lost, because the ledger

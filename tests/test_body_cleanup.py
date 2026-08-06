@@ -287,3 +287,37 @@ class TestSignatureGuardRegressions(unittest.TestCase):
         out = strip_signature_block(body)
         self.assertIn("Please review", out)
         self.assertNotIn("jane@example.com", out)
+
+
+class TestThirdRoundRegressions(unittest.TestCase):
+    def test_a_delimiter_with_trailing_whitespace_is_seen_on_the_first_pass(self):
+        """`--  \\n` (two spaces) was missed by pass 1, then whitespace
+        normalization rewrote it to `--\\n` so pass 2 DID match — deleting content
+        the first pass kept."""
+        body = "Thanks for the detailed notes, they were very useful indeed.\n--  \nJane Doe\nCTO"
+        once = clean_body(body)
+        self.assertEqual(clean_body(once), once)
+        self.assertNotIn("Jane Doe", once)
+
+    def test_clean_body_is_idempotent_across_whitespace_variants(self):
+        for delim in ("--", "-- ", "--  ", "--\t", "-- \t "):
+            body = (
+                f"A body long enough to clear the minimum guard comfortably.\n{delim}\nJ Doe\nCTO"
+            )
+            once = clean_body(body)
+            self.assertEqual(clean_body(once), once, delim.replace("\t", "\\t"))
+
+    def test_crlf_bodies_are_idempotent(self):
+        body = "line\r\nwith\r\ncrlf\r\nSent from my iPhone\nThanks!\n--  \n> quoted line\n"
+        once = clean_body(body)
+        self.assertEqual(clean_body(once), once)
+
+    def test_a_reference_parameter_is_not_stripped_as_tracking(self):
+        """`?ref=INV-2024-001` is an invoice reference far more often than an
+        attribution tag — dropping it did exactly what the contract forbids."""
+        url = "https://billing.example.com/invoice?ref=INV-2024-001"
+        self.assertEqual(strip_tracking_params(url), url)
+
+    def test_genuine_attribution_tags_are_still_stripped(self):
+        out = strip_tracking_params("https://example.com/x?ref_src=twsrc&utm_id=9&keep=1")
+        self.assertEqual(out, "https://example.com/x?keep=1")

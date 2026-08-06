@@ -11,13 +11,24 @@ from llama_index.core import Document
 
 from .threading import compute_thread_id
 
-_MAX_SENDER_LEN = 256
-_MAX_SUBJECT_LEN = 512
+# Capped in CHARACTERS while the chunker budgets in TOKENS. For token-dense
+# scripts (CJK, emoji) one character can exceed one token, so a 512-char subject
+# could tokenise past a 512-token chunk budget and make the splitter reject the
+# document outright. Halved to leave headroom; `_split_documents` quarantines
+# anything that still slips through rather than failing the batch.
+_MAX_SENDER_LEN = 128
+_MAX_SUBJECT_LEN = 256
 _MAX_RECIPIENT_PREVIEW_LEN = 512
 _MAX_RECIPIENT_FULL_LEN = (
     8192  # Keep some full data but trim to fit Pinecone's 40KB limit per vector
 )
 _MAX_SUMMARY_LEN = 1024
+# Identity/threading headers are sender-supplied and were the only metadata that
+# escaped truncation entirely — a 1 MB Message-ID produced ~4 MB of payload PER
+# CHUNK, and one such email in a 256-point batch pushes a single Qdrant request
+# past its 32 MB request cap. Generous enough that no legitimate header is
+# touched (RFC 5322 recommends well under 1000 chars).
+_MAX_ID_LEN = 998
 
 
 @dataclass
@@ -82,7 +93,7 @@ class NormalizedEmail:
             # Stable per-email identity, indexed as a Qdrant payload keyword so an
             # incremental run can delete exactly this email's chunks (body AND
             # attachments, which carry the same key) before re-upserting them.
-            "message_key": key,
+            "message_key": _truncate(key, _MAX_ID_LEN),
             "sender": _truncate(self.sender, _MAX_SENDER_LEN),
             "subject": _truncate(self.subject, _MAX_SUBJECT_LEN),
             "date": self.date.isoformat() if self.date else "unknown",
@@ -105,16 +116,19 @@ class NormalizedEmail:
         # Enron corpus, which carries no Message-ID/In-Reply-To/References)
         # fall back to a "subj:<slug>" key instead of persisting an empty string
         # that breaks thread-aware retrieval.
-        metadata["thread_id"] = compute_thread_id(
-            self.message_id or "",
-            self.in_reply_to or "",
-            self.references or "",
-            subject=self.subject or "",
+        metadata["thread_id"] = _truncate(
+            compute_thread_id(
+                self.message_id or "",
+                self.in_reply_to or "",
+                self.references or "",
+                subject=self.subject or "",
+            ),
+            _MAX_ID_LEN,
         )
         if self.message_id:
-            metadata["message_id"] = self.message_id
+            metadata["message_id"] = _truncate(self.message_id, _MAX_ID_LEN)
         if self.in_reply_to:
-            metadata["in_reply_to"] = self.in_reply_to
+            metadata["in_reply_to"] = _truncate(self.in_reply_to, _MAX_ID_LEN)
         if self.references:
             metadata["references"] = _truncate(self.references, _MAX_RECIPIENT_FULL_LEN)
 

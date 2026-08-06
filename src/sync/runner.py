@@ -42,6 +42,10 @@ log = logging.getLogger(__name__)
 # costs little re-fetching, large enough to keep SQLite writes off the hot path.
 CURSOR_COMMIT_EVERY = 20
 
+# Give up on a message after this many failed judge attempts. Without a bound a
+# deterministically-failing message re-issues a real LLM call on every tick.
+MAX_JUDGE_ATTEMPTS = 3
+
 
 class PermanentIndexError(RuntimeError):
     """The index stage refused for a reason retrying cannot fix.
@@ -222,12 +226,17 @@ def judge_pending(
     # means the same failure at the same position on every future run, stalling
     # the account permanently now that indexing waits on judging.
     missing = [p for p in by_path if not os.path.exists(p)]
-    for path in missing:
-        state.record_error(account.id, by_path[path], "spooled file is missing")
-        report.errors += 1
-        del by_path[path]
     if missing:
-        report.messages.append(f"{len(missing)} spooled file(s) missing; skipped")
+        # Terminal, not merely an error: the file is gone and no future run can
+        # recover it. Recording an error but leaving the row pending made the
+        # account permanently "partial", re-reported the same failure every tick,
+        # and (because indexing waits on judging) blocked the row from indexing
+        # forever.
+        state.abandon(account.id, [by_path[p] for p in missing], "spooled file is missing")
+        report.errors += len(missing)
+        report.messages.append(f"{len(missing)} spooled file(s) missing; abandoned")
+        for path in missing:
+            del by_path[path]
     if not by_path:
         return report
 
@@ -258,27 +267,49 @@ def judge_pending(
         report.skipped_stages.append("judge")
         report.messages.append(f"judge deferred: {exc}")
         # Whatever completed before the failure is still durably cached, so
-        # crediting it costs nothing and avoids re-paying for it next run.
-        if succeeded:
-            report.judged += state.mark_judged(
-                account.id, [by_path[p] for p in succeeded if p in by_path]
-            )
+        # crediting it costs nothing and avoids re-paying for it next run. It
+        # goes through the SAME credit helper as the success path — doing the
+        # re-queue on only one branch is what stranded the completed prefix of a
+        # died-mid-sweep run with permanently summary-less vectors.
+        _credit_judged(account, state, [by_path[p] for p in succeeded if p in by_path], report)
         return report
 
-    newly_judged = [by_path[p] for p in succeeded if p in by_path]
-    # Anything already indexed WITHOUT a summary must go back through indexing now
-    # that it has one — indexed_at is otherwise write-once, so the vector would
-    # stay summary-less forever (found in review of the #101 fixes).
-    requeued = state.clear_indexed(account.id, state.indexed_keys(account.id, newly_judged))
-    if requeued:
-        report.messages.append(f"{requeued} message(s) re-queued for indexing with their summary")
-    report.judged += state.mark_judged(account.id, newly_judged)
-    for path in errored_paths:
-        key = by_path.get(path)
-        if key:
+    _credit_judged(account, state, [by_path[p] for p in succeeded if p in by_path], report)
+
+    # Deterministic failures must not retry forever: each one is a real (possibly
+    # paid) LLM call on every tick with nothing recording that it has already
+    # failed a hundred times.
+    failed_keys = [by_path[p] for p in errored_paths if p in by_path]
+    if failed_keys:
+        attempts = state.bump_attempts(account.id, failed_keys)
+        exhausted = [k for k, n in attempts.items() if n >= MAX_JUDGE_ATTEMPTS]
+        for key in failed_keys:
             state.record_error(account.id, key, "pass-2 judge failed")
+        if exhausted:
+            state.abandon(
+                account.id, exhausted, f"pass-2 judge failed {MAX_JUDGE_ATTEMPTS}x; abandoned"
+            )
+            report.messages.append(
+                f"{len(exhausted)} message(s) abandoned after {MAX_JUDGE_ATTEMPTS} judge failures"
+            )
     report.errors += len(errored_paths)
     return report
+
+
+def _credit_judged(account, state, keys, report) -> None:
+    """Record a successful judgment and re-queue anything already indexed.
+
+    Both the success and the mid-sweep-failure paths go through here. ``judged_at``
+    and ``indexed_at`` are each write-once, so a message that was indexed BEFORE
+    its summary existed can only get that summary into its vector if judging
+    explicitly sends it back to the index queue.
+    """
+    if not keys:
+        return
+    requeued = state.clear_indexed(account.id, state.indexed_keys(account.id, keys))
+    if requeued:
+        report.messages.append(f"{requeued} message(s) re-queued for indexing with their summary")
+    report.judged += state.mark_judged(account.id, keys)
 
 
 def _default_run_pass(*, profile, paths, model, workers, on_outcome=None):
@@ -343,6 +374,16 @@ def index_pending(
             report.messages.append(f"{len(deferred)} message(s) awaiting judge before indexing")
 
     by_path = {r["eml_path"]: r["message_key"] for r in pending if r["eml_path"]}
+    missing = [p for p in by_path if not os.path.exists(p)]
+    if missing:
+        # Same terminal treatment as the judge stage. Without it the dead path is
+        # handed to the loader, silently skipped, reported as a dedup loser (the
+        # wrong cause), and re-loaded on every tick forever.
+        state.abandon(account.id, [by_path[p] for p in missing], "spooled file is missing")
+        report.errors += len(missing)
+        report.messages.append(f"{len(missing)} spooled file(s) missing; abandoned")
+        for path in missing:
+            del by_path[path]
     if not by_path:
         return report
 
@@ -375,7 +416,15 @@ def index_pending(
     # self-heal because their surviving twin is not in the next delta.
     chunks, handled_keys = result
     keys = [k for k in by_path.values() if k in handled_keys]
-    skipped = len(by_path) - len(keys)
+    # Anything the indexer did not account for cannot be retried into success:
+    # its document was rejected, its body cleaned to nothing, or it lost a dedup
+    # it will lose again. Leaving it pending grew the per-tick load set forever
+    # while --status reported a backlog that never drained.
+    unhandled = [k for k in by_path.values() if k not in handled_keys]
+    if unhandled:
+        state.abandon(account.id, unhandled, "indexer produced no chunks for this message")
+        report.errors += len(unhandled)
+    skipped = len(unhandled)
     report.indexed += state.mark_indexed(account.id, keys)
     report.messages.append(f"indexed {chunks} chunk(s)")
     if skipped:
@@ -437,6 +486,17 @@ def _default_index(*, profile, embedder, paths, collection, embed_summary=True):
     # and should be retried, so it is excluded from `handled` below.
     reached_indexer = {e.message_key() for e in emails}
 
+    # Mail that was indexed earlier and has now been judged confident noise (or
+    # dropped by pass-1) still has points in the collection. Nothing else will
+    # ever revisit it — indexed_at is write-once and it can never re-enter a
+    # delta — so its points must be removed here or the prune silently fails to
+    # prune and noise stays searchable forever.
+    dropped = loaded_keys - reached_indexer
+    if dropped:
+        removed = hq.delete_by_message_keys(client, collection, dropped)
+        if removed:
+            log.info("removed points for %d message(s) dropped before indexing", removed)
+
     attachment_docs = build_attachment_documents(
         [e.source_id for e in emails if getattr(e, "source_id", None)],
         extractor_name="tesseract",
@@ -455,8 +515,15 @@ def _default_index(*, profile, embedder, paths, collection, embed_summary=True):
     )
     # handled = written  ∪  deliberately dropped  ∪  unparseable-at-load.
     # Only the dedup losers stay pending.
-    deduped_away = reached_indexer - set(result.indexed_message_keys)
-    handled = (loaded_keys | reached_indexer) - deduped_away
+    # handled = everything this run is DONE with, whatever the outcome: written,
+    # deliberately dropped, rejected by the splitter, or absorbed by the in-run
+    # dedup. Nothing is left pending, because nothing pending here would ever
+    # succeed on a later identical attempt.
+    handled = loaded_keys | reached_indexer | set(result.failed_message_keys)
+    if result.failed_message_keys:
+        log.warning(
+            "%d document(s) could not be split and were skipped", len(result.failed_message_keys)
+        )
     return result.chunks, handled
 
 
