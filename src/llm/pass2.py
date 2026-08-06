@@ -36,7 +36,27 @@ _TRANSIENT_EXC_NAMES = (
     "InternalServerError",
     "RateLimitError",
     "ServiceUnavailable",
+    # Auth failures are endpoint-level and operator-fixable — LM Studio now
+    # requires a token, and a missing key returns 401 for EVERY message. Charging
+    # that to the messages would abandon a whole backlog over a config mistake.
+    "AuthenticationError",
+    "PermissionDeniedError",
+    "LLMHealthcheckError",
 )
+
+
+def _prov_kwargs(model: str, provenance) -> Dict[str, str]:
+    """Cache columns describing the judge. Falls back to the bare model id."""
+    if provenance is None:
+        return {"model": model}
+    from src.llm.provenance import model_fingerprint  # noqa: PLC0415
+
+    return {
+        "model": model_fingerprint(provenance) or model,
+        "quant": provenance.quant,
+        "endpoint": provenance.endpoint,
+        "source": provenance.source,
+    }
 
 
 def classify_failure(exc: BaseException) -> str:
@@ -65,6 +85,7 @@ def process_file(
     load_email: Callable[[str], Dict],
     summarize: Callable[[Dict], Dict],
     model: str,
+    provenance=None,
 ) -> str:
     """Summarize+judge one file unless cached. Returns 'cached' | 'done' | 'error'."""
     try:
@@ -81,7 +102,9 @@ def process_file(
         email = load_email(path)
         record = summarize(email)
         mid, chash = _identity_from(email)
-        cache.put(sha, record, model=model, message_id=mid, content_sha256=chash)
+        cache.put(
+            sha, record, message_id=mid, content_sha256=chash, **_prov_kwargs(model, provenance)
+        )
         return "done"
     except Exception as exc:  # leave uncached so the next run retries it
         outcome = classify_failure(exc)
@@ -99,6 +122,7 @@ def run_pass(
     progress: bool = False,
     workers: int = 1,
     on_outcome: Optional[Callable[[str, str], None]] = None,
+    provenance=None,
 ) -> Dict[str, int]:
     """Sweep *paths*, summarizing uncached files. Returns outcome counts.
 
@@ -175,7 +199,13 @@ def run_pass(
             for fut in as_completed(futures):
                 try:
                     path, sha, record, mid, chash = fut.result()
-                    cache.put(sha, record, model=model, message_id=mid, content_sha256=chash)
+                    cache.put(
+                        sha,
+                        record,
+                        message_id=mid,
+                        content_sha256=chash,
+                        **_prov_kwargs(model, provenance),
+                    )
                     _record(path, "done")
                 except Exception as exc:  # leave uncached so a rerun retries it
                     outcome = classify_failure(exc)
@@ -187,7 +217,7 @@ def run_pass(
         return counts
 
     for path in paths:
-        _record(path, process_file(path, cache, load_email, summarize, model))
+        _record(path, process_file(path, cache, load_email, summarize, model, provenance))
         _tick()
     if bar is not None:
         bar.close()

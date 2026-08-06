@@ -23,7 +23,10 @@ CREATE TABLE IF NOT EXISTS pass2 (
     model          TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
     message_id     TEXT,
-    content_sha256 TEXT
+    content_sha256 TEXT,
+    quant          TEXT,
+    endpoint       TEXT,
+    source         TEXT
 )
 """
 
@@ -32,6 +35,12 @@ CREATE TABLE IF NOT EXISTS pass2 (
 # Message-ID and a normalized content hash and fall back to them in
 # :meth:`Pass2Cache.get_resilient`.
 _IDENTITY_COLUMNS = ("message_id", "content_sha256")
+
+# Which judge produced a row. A model id alone does not identify one: the same
+# model at a different quantisation, or served from a hosted endpoint rather than
+# this machine, is a different judge — and a cache mixing them makes every
+# noise-rate comparison over the corpus unattributable.
+_PROVENANCE_COLUMNS = ("quant", "endpoint", "source")
 
 
 class Pass2Cache:
@@ -51,6 +60,9 @@ class Pass2Cache:
             if col not in existing:
                 self._conn.execute(f"ALTER TABLE pass2 ADD COLUMN {col} TEXT")
             self._conn.execute(f"CREATE INDEX IF NOT EXISTS idx_pass2_{col} ON pass2({col})")
+        for col in _PROVENANCE_COLUMNS:
+            if col not in existing:
+                self._conn.execute(f"ALTER TABLE pass2 ADD COLUMN {col} TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -70,12 +82,15 @@ class Pass2Cache:
         model: str = "",
         message_id: Optional[str] = None,
         content_sha256: Optional[str] = None,
+        quant: str = "",
+        endpoint: str = "",
+        source: str = "",
     ) -> None:
         self._conn.execute(
             """INSERT OR REPLACE INTO pass2
                (sha256, summary, is_noise, confidence, reason, model, created_at,
-                message_id, content_sha256)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+                message_id, content_sha256, quant, endpoint, source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 sha256,
                 record.get("summary", ""),
@@ -86,6 +101,9 @@ class Pass2Cache:
                 datetime.now(timezone.utc).isoformat(),
                 message_id or None,
                 content_sha256 or None,
+                quant or None,
+                endpoint or None,
+                source or None,
             ),
         )
         self._conn.commit()
@@ -134,6 +152,28 @@ class Pass2Cache:
 
     def iter_kept(self) -> Iterator[sqlite3.Row]:
         yield from self._conn.execute("SELECT * FROM pass2 WHERE is_noise=0")
+
+    def judges(self) -> Dict[str, int]:
+        """How many rows each distinct judge produced.
+
+        The question this cache must be able to answer: is this corpus judged by
+        ONE model at ONE quantisation, or silently by several?
+        """
+        rows = self._conn.execute(
+            "SELECT COALESCE(model,'') m, COALESCE(quant,'') q, COALESCE(source,'') s, "
+            "COUNT(*) n FROM pass2 GROUP BY m, q, s ORDER BY n DESC"
+        ).fetchall()
+        out: Dict[str, int] = {}
+        for r in rows:
+            key = r["m"] or "(unrecorded)"
+            # The stored model may already be a `model@quant` fingerprint; only
+            # append the quant when it is not already carried.
+            if r["q"] and not key.endswith(f"@{r['q']}"):
+                key += f"@{r['q']}"
+            if r["s"]:
+                key += f" [{r['s']}]"
+            out[key] = out.get(key, 0) + r["n"]
+        return out
 
     def stats(self) -> Dict[str, int]:
         row = self._conn.execute(
