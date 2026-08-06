@@ -365,3 +365,18 @@ class TestAuthHeuristicIsNarrow(unittest.TestCase):
 
     def test_a_malformed_json_response_is_NOT_auth(self):
         self.assertFalse(self._looks_auth("malformed JSON in response body", cls="ValueError"))
+
+    def test_a_token_count_containing_401_is_NOT_auth(self):
+        """Reproduced by review: bare substring matching made a 400 whose body
+        says "resulted in 40123 tokens" read as an auth failure — and auth is
+        endpoint-level, so that message would defer forever."""
+        self.assertFalse(
+            self._looks_auth(
+                "Error code: 400 - {'error': {'message': 'your messages resulted in "
+                "40123 tokens, however the model supports at most 8192'}}"
+            )
+        )
+
+    def test_a_real_status_code_still_matches_at_a_word_boundary(self):
+        self.assertTrue(self._looks_auth("Error code: 401 - unauthorized"))
+        self.assertTrue(self._looks_auth("unexpected status 403: forbidden"))

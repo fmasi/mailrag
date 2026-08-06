@@ -202,6 +202,16 @@ they are abandoned after three attempts; probe fails, nothing is charged and the
 stage is deferred. Transport failures are classified as outages up front and
 never consume a retry budget at all.
 
+### Known limitation: a degraded environment loses attachment text
+
+Attachment OCR shells out to `tesseract`. The generated scheduler unit pins a
+`PATH` that finds it, and the attachment store no longer caches an
+`ocr_unavailable` verdict — but the **indexing** path extracts directly rather
+than through that store, so if a run somehow executes without tesseract, the
+affected messages are indexed without their attachment text and marked done.
+They will not re-enter a delta on their own; `mailrag sync --requeue` after
+fixing the environment is the recovery.
+
 ### Known limitation: incremental is not identical to a rebuild
 
 Chunk dedup is within-run only. Two emails sharing a long footer, indexed in the

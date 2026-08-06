@@ -16,6 +16,7 @@ harness (separate reference client).
 from __future__ import annotations
 
 import os
+import re
 import threading
 
 # The historical placeholder used against auth-less local servers (LM Studio,
@@ -168,6 +169,9 @@ def default_model() -> str:
     return os.getenv("RAG_LLM_MODEL", "").strip()
 
 
+_STATUS_RE = re.compile(r"(?<!\d)(401|403)(?!\d)")
+
+
 def _looks_like_auth_error(exc: BaseException) -> bool:
     """Heuristic: does ``exc`` look like a 401/403 auth failure?
 
@@ -185,11 +189,15 @@ def _looks_like_auth_error(exc: BaseException) -> bool:
     forever.
     """
     text = f"{type(exc).__name__}: {exc}".lower()
+    # Status codes are matched with word boundaries, not as bare substrings: a
+    # per-message 400 whose body reads "your messages resulted in 40123 tokens"
+    # contains the digits 401, and misreading that as auth defers the message
+    # forever (auth is endpoint-level, so it never spends a retry attempt).
+    if _STATUS_RE.search(text):
+        return True
     return any(
         marker in text
         for marker in (
-            "401",
-            "403",
             "unauthorized",
             "invalid_api_key",
             "invalid api key",
