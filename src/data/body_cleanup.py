@@ -227,6 +227,10 @@ def clean_body(text: str) -> str:
     # Trailing horizontal whitespace is trimmed BEFORE the signature pass, so the
     # delimiter the signature rule sees is the same one a second cleaning pass
     # would see. Doing it afterwards is what made this non-idempotent.
-    text = _TRAILING_HWS.sub("", text)
+    # Both the trailing-whitespace trim AND the leading/trailing strip run before
+    # the signature pass, so the delimiters it sees are exactly the ones a second
+    # cleaning pass would see. Doing either afterwards changes the delimiter set
+    # between passes — which is what made this non-idempotent, twice.
+    text = _TRAILING_HWS.sub("", text).strip()
     text = strip_signature_block(text)
     return normalize_whitespace(text)

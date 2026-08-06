@@ -74,6 +74,22 @@ class LLMHealthcheckError(RuntimeError):
     """
 
 
+def _request_timeout() -> float:
+    """Per-request timeout in seconds (``RAG_LLM_TIMEOUT``, default 120)."""
+    try:
+        return float(os.getenv("RAG_LLM_TIMEOUT", "") or 120.0)
+    except ValueError:
+        return 120.0
+
+
+def _max_retries() -> int:
+    """Client-side retries per request (``RAG_LLM_MAX_RETRIES``, default 2)."""
+    try:
+        return max(0, int(os.getenv("RAG_LLM_MAX_RETRIES", "") or 2))
+    except ValueError:
+        return 2
+
+
 class _LLMClient:
     """Holds endpoint config and lazily builds one ``OpenAILike`` per
     ``(model, temperature)``.
@@ -107,6 +123,13 @@ class _LLMClient:
                     is_chat_model=True,
                     temperature=temperature,
                     context_window=_CONTEXT_WINDOW,
+                    # Bounded so an unreachable endpoint fails in seconds rather
+                    # than minutes of exponential backoff. A sweep over
+                    # thousands of emails against a dead endpoint would
+                    # otherwise take hours to report what it knew immediately;
+                    # the scheduled run simply retries on the next tick.
+                    timeout=_request_timeout(),
+                    max_retries=_max_retries(),
                 )
                 self._cache[key] = inst
             return inst

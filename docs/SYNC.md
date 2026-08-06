@@ -133,7 +133,7 @@ and anything it couldn't do is picked up next time:
 | Unavailable | Behaviour |
 |-------------|-----------|
 | Network / IMAP | warn, exit cleanly, retry on the next tick |
-| LLM endpoint | mail is still fetched and spooled; judging deferred — and **indexing waits too**, because `indexed_at` is set once and never cleared, so indexing unjudged mail would freeze a summary-less vector permanently |
+| LLM endpoint | mail is still fetched and spooled; judging deferred, and indexing waits with it. An endpoint outage is distinguished from a per-message failure (`classify_failure`) and never consumes a message's retry budget — otherwise a weekend with LM Studio closed would abandon the whole backlog |
 | Qdrant | mail is still fetched and judged; indexing deferred |
 
 Two failures are deliberately *not* treated as outages, because retrying cannot
@@ -157,6 +157,27 @@ Indexing without a judge stage (no `--model`) is supported, and mail indexed
 that way is **re-queued** once a later run judges it, so its summary does reach
 the vector — including when that judge sweep itself fails partway through. Errors are cleared when a message finally succeeds, so the count in `--status`
 reflects outstanding problems rather than accumulating history.
+
+### The message lifecycle
+
+Every spooled message is in exactly one state, and one transition table
+(`src/sync/lifecycle.py`) decides how it moves:
+
+```
+   NEW ──judged──▶ JUDGED ──indexed──▶ DONE
+    │                 ▲                  │
+    │indexed          │judged            │judged (rubric changed)
+    ▼                 │                  ▼
+ INDEXED_UNJUDGED ────┘               JUDGED
+```
+
+`INDEXED_UNJUDGED` is a named state rather than a flag combination on purpose:
+mail indexed before its summary existed **must** return to the index queue once
+judged, and making that a table entry means no code path can forget it. Any
+non-terminal state can also go to `ABANDONED`, which is **reversible** —
+`mailrag sync --requeue` puts abandoned messages back at the front of the
+pipeline. An irreversible terminal state would turn any bug in the abandon logic
+into permanent data loss.
 
 Some failures are **terminal**, not retried: a spooled `.eml` that has been
 deleted, a message the chunker rejects, and a message whose judge call has failed

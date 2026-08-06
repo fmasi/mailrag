@@ -247,10 +247,15 @@ def judge_pending(
     # cleared. Found in review of #101.
     succeeded: List[str] = []
     errored_paths: List[str] = []
+    unavailable_paths: List[str] = []
 
     def on_outcome(path: str, outcome: str) -> None:
         if outcome in ("done", "cached"):
             succeeded.append(path)
+        elif outcome == "unavailable":
+            # The ENDPOINT failed, not this message. Recorded separately so it
+            # cannot consume the message's retry budget.
+            unavailable_paths.append(path)
         else:
             errored_paths.append(path)
 
@@ -279,7 +284,29 @@ def judge_pending(
     # Deterministic failures must not retry forever: each one is a real (possibly
     # paid) LLM call on every tick with nothing recording that it has already
     # failed a hundred times.
+    if unavailable_paths:
+        # A dead endpoint reports identically for every message, so this is a
+        # stage outage however many messages it touched — not N failures.
+        log.warning("judge endpoint unavailable for %d message(s)", len(unavailable_paths))
+        report.skipped_stages.append("judge")
+        report.messages.append(f"judge deferred: endpoint unavailable ({len(unavailable_paths)})")
+
     failed_keys = [by_path[p] for p in errored_paths if p in by_path]
+    # Attempts are spent only on failures attributable to the MESSAGE. The
+    # primary defence is classification (``classify_failure`` in llm/pass2.py);
+    # this is the backstop for a transport failure that classification missed:
+    # if EVERY message in a multi-message sweep failed and none succeeded, that
+    # is far more likely to be the endpoint than N simultaneously-poison
+    # messages, so nothing is charged. A lone failing message in a
+    # single-message sweep is charged — otherwise a genuinely poison message
+    # could never be abandoned.
+    looks_like_an_outage = len(by_path) > 1 and not succeeded and len(errored_paths) == len(by_path)
+    if failed_keys and looks_like_an_outage:
+        for key in failed_keys:
+            state.record_error(account.id, key, "pass-2 judge failed (whole sweep failed)")
+        report.errors += len(errored_paths)
+        report.skipped_stages.append("judge")
+        return report
     if failed_keys:
         attempts = state.bump_attempts(account.id, failed_keys)
         exhausted = [k for k, n in attempts.items() if n >= MAX_JUDGE_ATTEMPTS]
@@ -297,19 +324,21 @@ def judge_pending(
 
 
 def _credit_judged(account, state, keys, report) -> None:
-    """Record a successful judgment and re-queue anything already indexed.
+    """Record a successful judgment for these messages.
 
-    Both the success and the mid-sweep-failure paths go through here. ``judged_at``
-    and ``indexed_at`` are each write-once, so a message that was indexed BEFORE
-    its summary existed can only get that summary into its vector if judging
-    explicitly sends it back to the index queue.
+    There is no re-queue step here any more, and that is the point: a message
+    that was indexed before its summary existed sits in ``INDEXED_UNJUDGED``, and
+    the transition table sends it back to the index queue on the JUDGED event
+    (see :mod:`src.sync.lifecycle`). Forgetting to do that on one of the two
+    exit paths was defect #1 of the fourth review round; it is now not something
+    a caller can forget, because a caller no longer does it.
     """
     if not keys:
         return
-    requeued = state.clear_indexed(account.id, state.indexed_keys(account.id, keys))
+    requeued = sum(1 for r in state.rows(account.id, keys) if r["state"] == "indexed_unjudged")
+    report.judged += state.mark_judged(account.id, keys)
     if requeued:
         report.messages.append(f"{requeued} message(s) re-queued for indexing with their summary")
-    report.judged += state.mark_judged(account.id, keys)
 
 
 def _default_run_pass(*, profile, paths, model, workers, on_outcome=None):
@@ -361,17 +390,15 @@ def index_pending(
     ones land (issue #101, slice 1).
     """
     report = report or SyncReport(account_id=account.id)
-    pending = state.pending(account.id, "indexed")
-
+    # The lifecycle decides what is indexable — not an ad-hoc filter here. With a
+    # judge stage configured, unjudged mail waits (so nothing is ever embedded
+    # without its summary); without one it is indexed directly, and the
+    # transition table re-queues it automatically if a judgment arrives later.
+    pending = state.pending(account.id, "indexed", judge_configured=require_judged)
     if require_judged:
-        # Indexing unjudged mail is permanent: indexed_at is set once and never
-        # cleared, so an email indexed during an LLM outage would keep its
-        # summary-less vector forever even after the summary arrived. Wait for
-        # the judge stage instead — the mail is safe on disk meanwhile.
-        deferred = [r for r in pending if r["judged_at"] is None]
-        pending = [r for r in pending if r["judged_at"] is not None]
-        if deferred:
-            report.messages.append(f"{len(deferred)} message(s) awaiting judge before indexing")
+        waiting = len(state.pending(account.id, "judged"))
+        if waiting:
+            report.messages.append(f"{waiting} message(s) awaiting judge before indexing")
 
     by_path = {r["eml_path"]: r["message_key"] for r in pending if r["eml_path"]}
     missing = [p for p in by_path if not os.path.exists(p)]

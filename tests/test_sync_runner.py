@@ -82,10 +82,19 @@ class _RunnerTest(unittest.TestCase):
             os.utime(path, (mtime, mtime))
         return path
 
+    def _pending_index_keys(self, judge_configured=False):
+        return {
+            r["message_key"]
+            for r in self.state.pending("acct", "indexed", judge_configured=judge_configured)
+        }
+
     def _keys_for(self, paths):
         """The message_keys the ledger holds for these spool paths — what a real
         indexer reports back as handled."""
-        rows = {r["eml_path"]: r["message_key"] for r in self.state.pending("acct", "indexed")}
+        rows = {
+            r["eml_path"]: r["message_key"]
+            for r in self.state.pending("acct", "indexed", judge_configured=False)
+        }
         rows.update({r["eml_path"]: r["message_key"] for r in self.state.pending("acct", "judged")})
         return {rows[p] for p in paths if p in rows}
 
@@ -527,7 +536,10 @@ class TestReviewRegressions(_RunnerTest):
         )
         self.assertNotIn("yes", called)
         self.assertEqual(report.indexed, 0)
-        self.assertEqual(self.state.counts("acct")["pending_index"], 1)
+        # It owes JUDGING, not indexing — the lifecycle keeps it out of the index
+        # queue entirely rather than filtering it at the last moment.
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 1)
+        self.assertEqual(self.state.counts("acct")["pending_index"], 0)
 
     def test_judged_mail_is_indexed_once_the_judgment_arrives(self):
         self._deliver("m1", "<1@x>", mtime=1000)
@@ -650,7 +662,7 @@ class TestSecondRoundRegressions(_RunnerTest):
         self._deliver("m1", "<1@x>", mtime=1000)
         self._sync()
         # The indexer reports it as HANDLED even though it wrote nothing for it.
-        keys = {r["message_key"] for r in self.state.pending("acct", "indexed")}
+        keys = self._pending_index_keys()
         report = index_pending(
             self.account,
             self.state,
@@ -684,7 +696,9 @@ class TestSecondRoundRegressions(_RunnerTest):
         reach the vector."""
         self._deliver("m1", "<1@x>", mtime=1000)
         self._sync()
-        keys = {r["message_key"] for r in self.state.pending("acct", "indexed")}
+        keys = {
+            r["message_key"] for r in self.state.pending("acct", "indexed", judge_configured=False)
+        }
         index_pending(
             self.account,
             self.state,
@@ -775,7 +789,10 @@ class TestThirdRoundRegressions(_RunnerTest):
         )
 
     def _index_all(self, require_judged=False):
-        keys = {r["message_key"] for r in self.state.pending("acct", "indexed")}
+        keys = {
+            r["message_key"]
+            for r in self.state.pending("acct", "indexed", judge_configured=require_judged)
+        }
         return index_pending(
             self.account,
             self.state,
@@ -830,7 +847,7 @@ class TestThirdRoundRegressions(_RunnerTest):
         dedup loser, and re-loaded on every tick forever."""
         self._deliver("m1", "<1@x>", mtime=1000)
         self._sync()
-        os.unlink(self.state.pending("acct", "indexed")[0]["eml_path"])
+        os.unlink(self.state.pending("acct", "indexed", judge_configured=False)[0]["eml_path"])
         report = index_pending(
             self.account,
             self.state,
@@ -849,10 +866,19 @@ class TestThirdRoundRegressions(_RunnerTest):
         self._deliver("m1", "<1@x>", mtime=1000)
         self._sync()
 
-        def always_fails(*, profile, paths, model, workers, on_outcome=None):
+        # A second message that SUCCEEDS each round is what proves the endpoint is
+        # alive. Without that witness a failure is treated as an outage and must
+        # NOT consume the failing message's attempts (see the outage test below).
+        self._deliver("ok", "<ok@x>", mtime=1001)
+        self._sync()
+        ok_path = next(
+            r["eml_path"] for r in self.state.pending("acct", "judged") if "ok_x" in r["eml_path"]
+        )
+
+        def one_fails(*, profile, paths, model, workers, on_outcome=None):
             for p in paths:
-                on_outcome(p, "error")
-            return {"cached": 0, "done": 0, "error": len(paths)}
+                on_outcome(p, "done" if p == ok_path else "error")
+            return {"cached": 0, "done": 1, "error": len(paths) - 1}
 
         for _ in range(MAX_JUDGE_ATTEMPTS):
             judge_pending(
@@ -860,10 +886,10 @@ class TestThirdRoundRegressions(_RunnerTest):
                 self.state,
                 profile=self._profile(),
                 model="m",
-                run_pass_fn=always_fails,
+                run_pass_fn=one_fails,
             )
         self.assertEqual(self.state.counts("acct")["pending_judge"], 0)
-        self.assertEqual(self.state.counts("acct")["errors"], 1)
+        self.assertEqual(self.state.counts("acct")["abandoned"], 1)
 
     def test_the_account_converges_to_zero_pending_over_repeated_runs(self):
         """The property all three audits kept breaking: with no new mail, repeated
@@ -897,3 +923,105 @@ class TestThirdRoundRegressions(_RunnerTest):
         # The per-run load set drains and stays drained; it must never grow.
         self.assertEqual(load_sizes[0], 4)
         self.assertEqual(load_sizes[1:], [0, 0, 0, 0])
+
+
+class TestOutageBelowTheSeam(_RunnerTest):
+    """Outage tests that inject failure BELOW the seam — a real closed socket
+    through the real `run_pass` — instead of stubbing `run_pass_fn` to raise.
+
+    This distinction is not academic. Three review rounds passed while an
+    outage was modelled as an exception that production never raises: the
+    OpenAI-compatible client catches connection errors internally and reports a
+    per-message failure, so the code's outage branch was dead and every message
+    silently spent a retry. Testing at the real seam makes that impossible.
+    """
+
+    def _profile(self):
+        import os as _os
+
+        return mock.Mock(
+            pass2_cache=_os.path.join(self.d, "p2.db"),
+            chunk_size=512,
+            chunk_overlap=64,
+            qdrant_url="http://x",
+            rubric="personal",
+        )
+
+    def _dead_env(self):
+        """Point the real client at a dead port, with retries off so the test is
+        fast. The FAILURE MODE under test is unaffected by the retry count."""
+        return {
+            "RAG_LLM_API_BASE": self._dead_endpoint_url(),
+            "RAG_LLM_API_KEY": "x",
+            "RAG_LLM_MAX_RETRIES": "0",
+            "RAG_LLM_TIMEOUT": "2",
+        }
+
+    @staticmethod
+    def _dead_endpoint_url():
+        """A port with nothing listening — a genuinely refused connection."""
+        import socket
+
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        return f"http://127.0.0.1:{port}/v1"
+
+    def test_a_dead_endpoint_never_consumes_a_messages_retry_budget(self):
+        """The critical defect: three ticks against a closed port abandoned the
+        entire backlog permanently, because a transport failure was counted as a
+        per-message failure."""
+        from src.sync.runner import MAX_JUDGE_ATTEMPTS
+
+        for i in range(3):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+
+        env = self._dead_env()
+        with mock.patch.dict(os.environ, env):
+            for _ in range(MAX_JUDGE_ATTEMPTS + 2):
+                judge_pending(
+                    self.account, self.state, profile=self._profile(), model="m", workers=1
+                )
+
+        counts = self.state.counts("acct")
+        self.assertEqual(counts["abandoned"], 0, "an outage must not abandon anything")
+        self.assertEqual(counts["pending_judge"], 3, "the mail must still be waiting")
+
+        # ...and it is still judgeable once the endpoint returns.
+        def works(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "done")
+            return {"cached": 0, "done": len(paths), "error": 0}
+
+        report = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=works
+        )
+        self.assertEqual(report.judged, 3)
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 0)
+
+    def test_a_dead_endpoint_is_reported_as_a_skipped_stage(self):
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        env = self._dead_env()
+        with mock.patch.dict(os.environ, env):
+            report = judge_pending(
+                self.account, self.state, profile=self._profile(), model="m", workers=1
+            )
+        self.assertIn("judge", report.skipped_stages)
+        self.assertNotEqual(report.status, STATUS_OK)
+
+    def test_the_same_holds_with_multiple_workers(self):
+        """The threaded branch reports outcomes through a different code path."""
+        for i in range(3):
+            self._deliver(f"m{i}", f"<{i}@x>", mtime=1000 + i)
+        self._sync()
+        env = self._dead_env()
+        with mock.patch.dict(os.environ, env):
+            for _ in range(4):
+                judge_pending(
+                    self.account, self.state, profile=self._profile(), model="m", workers=3
+                )
+        self.assertEqual(self.state.counts("acct")["abandoned"], 0)
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 3)

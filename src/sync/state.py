@@ -38,6 +38,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from src.sync.lifecycle import Event, State, is_pending, next_state
 from src.sync.sources import Cursor
 
 _SCHEMA = """
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS messages (
     indexed_at     TEXT,
     error          TEXT,
     attempts       INTEGER NOT NULL DEFAULT 0,
+    state          TEXT NOT NULL DEFAULT 'new',
     PRIMARY KEY (account_id, message_key)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_pending_judge
@@ -73,6 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_pending_judge
 CREATE INDEX IF NOT EXISTS idx_messages_pending_index
     ON messages(account_id, indexed_at);
 CREATE INDEX IF NOT EXISTS idx_messages_content ON messages(account_id, content_sha256);
+CREATE INDEX IF NOT EXISTS idx_messages_state ON messages(account_id, state);
 
 CREATE TABLE IF NOT EXISTS poison (
     account_id  TEXT NOT NULL,
@@ -254,37 +257,152 @@ class SyncState:
         )
         self._conn.commit()
 
-    def mark_judged(self, account_id: str, message_keys: Iterable[str]) -> int:
-        return self._mark(account_id, message_keys, "judged_at")
+    def apply_event(
+        self, account_id: str, message_keys: Iterable[str], event: Event, *, reason: str = ""
+    ) -> int:
+        """Apply one lifecycle event to these messages. The ONLY state writer.
 
-    def mark_indexed(self, account_id: str, message_keys: Iterable[str]) -> int:
-        return self._mark(account_id, message_keys, "indexed_at")
+        Callers report what happened; the resulting state comes from the
+        transition table in :mod:`src.sync.lifecycle`, not from the caller. That
+        is the whole point — the previous design let each code path decide, and
+        every review round found a path that decided differently from its
+        neighbour.
 
-    def _mark(self, account_id: str, message_keys: Iterable[str], column: str) -> int:
+        Bookkeeping that used to be a separate thing to remember rides along
+        here: the stage timestamp is stamped, and a successful stage clears any
+        recorded error so the count in ``--status`` means "outstanding", not
+        "ever".
+        """
         keys = [k for k in dict.fromkeys(message_keys) if k]
         if not keys:
             return 0
         now = _now()
-        # Clearing `error` is the point of doing this in one statement: a message
-        # that failed once and succeeded on retry must stop being counted, or the
-        # error total only ever grows and stops meaning anything.
-        self._conn.executemany(
-            f"UPDATE messages SET {column}=?, error=NULL WHERE account_id=? AND message_key=?",
-            [(now, account_id, k) for k in keys],
+        column = {Event.JUDGED: "judged_at", Event.INDEXED: "indexed_at"}.get(event)
+        changed = 0
+        with self._conn:
+            for key in keys:
+                row = self._conn.execute(
+                    "SELECT state FROM messages WHERE account_id=? AND message_key=?",
+                    (account_id, key),
+                ).fetchone()
+                if row is None:
+                    continue
+                current = State(row["state"])
+                new = next_state(current, event)
+                if event is Event.ABANDONED:
+                    # Terminal but reversible, and always with a reason: an
+                    # abandoned message the operator cannot see or recover is
+                    # indistinguishable from one that was silently lost.
+                    self._conn.execute(
+                        "UPDATE messages SET state=?, error=? WHERE account_id=? AND message_key=?",
+                        (new.value, (reason or "abandoned")[:2000], account_id, key),
+                    )
+                elif event is Event.REQUEUED:
+                    self._conn.execute(
+                        "UPDATE messages SET state=?, error=NULL, attempts=0, indexed_at=NULL, "
+                        "judged_at=NULL WHERE account_id=? AND message_key=?",
+                        (new.value, account_id, key),
+                    )
+                elif column:
+                    self._conn.execute(
+                        f"UPDATE messages SET state=?, {column}=?, error=NULL "
+                        "WHERE account_id=? AND message_key=?",
+                        (new.value, now, account_id, key),
+                    )
+                else:
+                    self._conn.execute(
+                        "UPDATE messages SET state=? WHERE account_id=? AND message_key=?",
+                        (new.value, account_id, key),
+                    )
+                changed += 1
+        return changed
+
+    def mark_judged(self, account_id: str, message_keys: Iterable[str]) -> int:
+        """Convenience wrapper — a judged stage completed for these messages."""
+        return self.apply_event(account_id, message_keys, Event.JUDGED)
+
+    def mark_indexed(self, account_id: str, message_keys: Iterable[str]) -> int:
+        """Convenience wrapper — an index stage completed for these messages."""
+        return self.apply_event(account_id, message_keys, Event.INDEXED)
+
+    def abandon(self, account_id: str, message_keys: Iterable[str], reason: str) -> int:
+        """Give up on messages that cannot succeed by retrying. Reversible."""
+        return self.apply_event(account_id, message_keys, Event.ABANDONED, reason=reason)
+
+    def requeue(self, account_id: str, message_keys: Iterable[str] = ()) -> int:
+        """Put abandoned messages back in play. Empty *message_keys* means all."""
+        keys = list(message_keys) or [
+            r["message_key"]
+            for r in self._conn.execute(
+                "SELECT message_key FROM messages WHERE account_id=? AND state=?",
+                (account_id, State.ABANDONED.value),
+            )
+        ]
+        return self.apply_event(account_id, keys, Event.REQUEUED)
+
+    def rows(self, account_id: str, message_keys: Iterable[str]) -> List[sqlite3.Row]:
+        """Fetch specific ledger rows, for callers that need current state."""
+        keys = [k for k in dict.fromkeys(message_keys) if k]
+        if not keys:
+            return []
+        marks = ",".join("?" * len(keys))
+        return list(
+            self._conn.execute(
+                f"SELECT * FROM messages WHERE account_id=? AND message_key IN ({marks})",
+                [account_id, *keys],
+            )
+        )
+
+    def abandoned(self, account_id: str) -> List[sqlite3.Row]:
+        return list(
+            self._conn.execute(
+                "SELECT * FROM messages WHERE account_id=? AND state=? ORDER BY fetched_at",
+                (account_id, State.ABANDONED.value),
+            )
+        )
+
+    def record_error(self, account_id: str, message_key: str, error: str) -> None:
+        """Park a poison message with its error, without blocking the folder.
+
+        The cursor still advances past it — one unparseable message must never
+        wedge every later message behind it.
+        """
+        self._conn.execute(
+            "UPDATE messages SET error=? WHERE account_id=? AND message_key=?",
+            (error[:2000], account_id, message_key),
         )
         self._conn.commit()
-        return len(keys)
+
+    def pending(
+        self, account_id: str, stage: str, *, judge_configured: bool = True
+    ) -> List[sqlite3.Row]:
+        """Messages spooled but not yet through *stage* (``judged``/``indexed``).
+
+        The backbone of stage-skipping: mail fetched while LM Studio or Qdrant was
+        down simply shows up here on the next run.
+        """
+        wanted = [
+            st.value for st in State if is_pending(st, stage, judge_configured=judge_configured)
+        ]
+        if not wanted:
+            return []
+        marks = ",".join("?" * len(wanted))
+        return list(
+            self._conn.execute(
+                f"SELECT * FROM messages WHERE account_id=? AND state IN ({marks}) "
+                "ORDER BY fetched_at",
+                (account_id, *wanted),
+            )
+        )
 
     def record_poison(self, account_id: str, *, folder: str, source_uid: str, error: str) -> None:
         """Durably park a message that could not even be parsed.
 
-        Its own table, deliberately. :meth:`record_error` cannot serve this case
-        — it is an UPDATE keyed on ``message_key``, which an unparseable message
-        does not have — but synthesising a key into the ``messages`` table would
-        put a *sender-controlled* string in the same namespace as real keys: a
-        crafted ``Message-ID`` could collide with a poison row and be silently
-        suppressed. Keyed instead on the only identity such a message has, its
-        location on the server.
+        Its own table, deliberately: an unparseable message has no
+        ``message_key``, and synthesising one would put a *sender-controlled*
+        string in the same namespace as real keys, letting a crafted
+        ``Message-ID`` collide with a poison row and be silently suppressed.
+        Keyed on the only identity such a message has — its server location.
         """
         self._conn.execute(
             """INSERT INTO poison (account_id, folder, source_uid, error, seen_at)
@@ -302,71 +420,13 @@ class SyncState:
         ).fetchone()
         return row["n"] or 0
 
-    def clear_indexed(self, account_id: str, message_keys: Iterable[str]) -> int:
-        """Send messages back to the index queue. Returns how many were reset.
-
-        ``indexed_at`` is otherwise write-once, which strands anything indexed
-        before its summary existed: the vector stays summary-less forever even
-        after a later run judges it. Judging therefore un-indexes, so the next
-        index pass rewrites the point with its summary (cheap — deterministic
-        ids make it a replacement, not a duplicate).
-        """
-        keys = [k for k in dict.fromkeys(message_keys) if k]
-        if not keys:
-            return 0
-        cur = self._conn.executemany(
-            "UPDATE messages SET indexed_at=NULL WHERE account_id=? AND message_key=? "
-            "AND indexed_at IS NOT NULL",
-            [(account_id, k) for k in keys],
-        )
-        self._conn.commit()
-        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-
-    def indexed_keys(self, account_id: str, message_keys: Iterable[str]) -> List[str]:
-        """Which of *message_keys* are already marked indexed."""
-        keys = [k for k in dict.fromkeys(message_keys) if k]
-        if not keys:
-            return []
-        marks = ",".join("?" * len(keys))
-        rows = self._conn.execute(
-            f"SELECT message_key FROM messages WHERE account_id=? AND indexed_at IS NOT NULL "
-            f"AND message_key IN ({marks})",
-            [account_id, *keys],
-        ).fetchall()
-        return [r["message_key"] for r in rows]
-
-    def abandon(self, account_id: str, message_keys: Iterable[str], reason: str) -> int:
-        """Give up on messages, terminally, with the reason recorded.
-
-        Some failures are not transient and not retryable — the spooled ``.eml``
-        has been deleted, or the message has failed the same stage too many
-        times. Leaving those pending means re-loading them on every tick forever
-        while ``--status`` reports a permanently dirty account and (because
-        indexing waits on judging) blocks everything behind them.
-
-        Both stage timestamps are set so the row leaves every queue, and ``error``
-        is set so it is still counted and visible rather than silently passing as
-        done.
-        """
-        keys = [k for k in dict.fromkeys(message_keys) if k]
-        if not keys:
-            return 0
-        now = _now()
-        self._conn.executemany(
-            """UPDATE messages SET judged_at=COALESCE(judged_at, ?),
-                   indexed_at=COALESCE(indexed_at, ?), error=?
-               WHERE account_id=? AND message_key=?""",
-            [(now, now, reason[:2000], account_id, k) for k in keys],
-        )
-        self._conn.commit()
-        return len(keys)
-
     def bump_attempts(self, account_id: str, message_keys: Iterable[str]) -> Dict[str, int]:
-        """Increment the failure counter for these messages; return the new counts.
+        """Increment the per-message failure counter; return the new counts.
 
-        A deterministically-failing message otherwise re-issues a real (possibly
-        paid) LLM call on every tick, forever, with nothing recording that it has
-        already failed a hundred times.
+        Only ever called for failures attributable to the MESSAGE. A failure of
+        the endpoint itself must not consume a message's attempts — mistaking one
+        for the other is how an overnight LLM outage came to abandon an entire
+        backlog.
         """
         keys = [k for k in dict.fromkeys(message_keys) if k]
         if not keys:
@@ -387,7 +447,7 @@ class SyncState:
     def last_successful_run(self, account_id: str) -> Optional[sqlite3.Row]:
         """The most recent run that actually completed cleanly.
 
-        ``last_run`` answers "when did we last try", which is not the question
+        ``last_run`` answers "when did we last try", which is not what
         ``--status`` is asking: 120 consecutive failed ticks would otherwise look
         fresh because the newest *attempt* is two hours old.
         """
@@ -396,49 +456,27 @@ class SyncState:
             (account_id, STATUS_OK),
         ).fetchone()
 
-    def record_error(self, account_id: str, message_key: str, error: str) -> None:
-        """Park a poison message with its error, without blocking the folder.
-
-        The cursor still advances past it — one unparseable message must never
-        wedge every later message behind it.
-        """
-        self._conn.execute(
-            "UPDATE messages SET error=? WHERE account_id=? AND message_key=?",
-            (error[:2000], account_id, message_key),
-        )
-        self._conn.commit()
-
-    def pending(self, account_id: str, stage: str) -> List[sqlite3.Row]:
-        """Messages spooled but not yet through *stage* (``judged``/``indexed``).
-
-        The backbone of stage-skipping: mail fetched while LM Studio or Qdrant was
-        down simply shows up here on the next run.
-        """
-        column = {"judged": "judged_at", "indexed": "indexed_at"}[stage]
-        return list(
-            self._conn.execute(
-                f"SELECT * FROM messages WHERE account_id=? AND {column} IS NULL "
-                "ORDER BY fetched_at",
-                (account_id,),
-            )
-        )
-
     def counts(self, account_id: str) -> Dict[str, int]:
-        row = self._conn.execute(
-            """SELECT COUNT(*) AS total,
-                      SUM(judged_at IS NULL) AS pending_judge,
-                      SUM(indexed_at IS NULL) AS pending_index,
-                      SUM(error IS NOT NULL) AS errors
-               FROM messages WHERE account_id=?""",
+        rows = self._conn.execute(
+            "SELECT state, COUNT(*) AS n, SUM(error IS NOT NULL) AS errs "
+            "FROM messages WHERE account_id=? GROUP BY state",
             (account_id,),
-        ).fetchone()
+        ).fetchall()
+        by_state = {r["state"]: r["n"] for r in rows}
+        errors = sum((r["errs"] or 0) for r in rows)
         return {
-            "total": row["total"] or 0,
-            "pending_judge": row["pending_judge"] or 0,
-            "pending_index": row["pending_index"] or 0,
+            "total": sum(by_state.values()),
+            "pending_judge": sum(
+                n for st, n in by_state.items() if is_pending(State(st), "judged")
+            ),
+            "pending_index": sum(
+                n for st, n in by_state.items() if is_pending(State(st), "indexed")
+            ),
+            "abandoned": by_state.get(State.ABANDONED.value, 0),
+            "done": by_state.get(State.DONE.value, 0),
             # Poison messages never became ledger rows, so they must be counted
             # from their own table or --status under-reports the real trouble.
-            "errors": (row["errors"] or 0) + self.poison_count(account_id),
+            "errors": errors + self.poison_count(account_id),
         }
 
     # ------------------------------------------------------------- sync_runs

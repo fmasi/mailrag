@@ -64,6 +64,14 @@ def email_identity(
     return mid, content_sha256(sender=sender, subject=subject, date=date, body=body)
 
 
+# RFC 5322 recommends header lines well under 1000 chars. A longer Message-ID is
+# malformed or hostile, and an unbounded key breaks the system subtly: the Qdrant
+# payload copy gets truncated while the ledger copy does not, so a delete-by-key
+# silently matches nothing. Bounding it HERE means every consumer — ledger,
+# payload, point id, Pass-2 cache — sees the same string.
+_MAX_KEY_LEN = 998
+
+
 def message_key(
     *,
     sender: str = "",
@@ -86,4 +94,9 @@ def message_key(
     mid, csha = email_identity(
         sender=sender, subject=subject, date=date, body=body, message_id=message_id
     )
-    return mid or csha
+    key = mid or csha
+    if len(key) > _MAX_KEY_LEN:
+        # Substitute a digest rather than truncating: two overlong Message-IDs
+        # sharing a long prefix must not collapse onto one identity.
+        return "mid-sha256:" + hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return key

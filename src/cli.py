@@ -598,9 +598,15 @@ def _cmd_sync(args):
                     )
                 c = st["counts"]
                 print(
-                    f"  messages: {c['total']} total, {c['pending_judge']} awaiting judge, "
-                    f"{c['pending_index']} awaiting index, {c['errors']} error(s)"
+                    f"  messages: {c['total']} total, {c['done']} done, "
+                    f"{c['pending_judge']} awaiting judge, {c['pending_index']} awaiting index, "
+                    f"{c['errors']} error(s)"
                 )
+                if c.get("abandoned"):
+                    print(
+                        f"  {c['abandoned']} abandoned — recoverable with "
+                        f"`mailrag sync --account {account.id} --requeue`"
+                    )
                 if last is None:
                     print("  last run: never")
                 else:
@@ -632,6 +638,18 @@ def _cmd_sync(args):
                         # 120 consecutive failed ticks would otherwise look fresh
                         # because the newest attempt is two hours old.
                         print(f"  WARNING: last SUCCESSFUL sync was {stale:.0f}h ago")
+            return 0
+
+        if args.requeue:
+            for account in accounts:
+                rows = state.abandoned(account.id)
+                if not rows:
+                    print(f"{account.id}: nothing abandoned")
+                    continue
+                for r in rows:
+                    print(f"  {r['message_key']}  ({r['error']})")
+                n = state.requeue(account.id)
+                print(f"{account.id}: re-queued {n} message(s)")
             return 0
 
         if args.install_agent:
@@ -747,6 +765,11 @@ def _configure_sync(p):
     p.add_argument("--account", default=None, help="sync only this account id")
     p.add_argument("--state", default=None, help="sync state DB (default ~/.mailrag/sync_state.db)")
     p.add_argument("--status", action="store_true", help="print sync state and exit")
+    p.add_argument(
+        "--requeue",
+        action="store_true",
+        help="put abandoned messages back in the queue (see --status) and exit",
+    )
     p.add_argument(
         "--fetch-only",
         action="store_true",

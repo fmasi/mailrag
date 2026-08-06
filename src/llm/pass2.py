@@ -27,6 +27,38 @@ def _identity_from(email: Dict):
     )
 
 
+# Failures of the ENDPOINT rather than of the message. These must never consume
+# a message's retry budget: a closed LM Studio reports identically for every
+# message, and counting those as per-message failures abandoned entire backlogs.
+_TRANSIENT_EXC_NAMES = (
+    "APIConnectionError",
+    "APITimeoutError",
+    "InternalServerError",
+    "RateLimitError",
+    "ServiceUnavailable",
+)
+
+
+def classify_failure(exc: BaseException) -> str:
+    """``"unavailable"`` if *exc* means the endpoint is down, else ``"error"``.
+
+    Walks the ``__cause__``/``__context__`` chain because the OpenAI-compatible
+    clients wrap the underlying socket error.
+    """
+    seen = 0
+    cur: BaseException | None = exc
+    while cur is not None and seen < 10:
+        if isinstance(cur, (ConnectionError, TimeoutError)) or type(cur).__name__ in (
+            _TRANSIENT_EXC_NAMES
+        ):
+            return "unavailable"
+        if isinstance(cur, OSError) and not isinstance(cur, FileNotFoundError):
+            return "unavailable"
+        cur = cur.__cause__ or cur.__context__
+        seen += 1
+    return "error"
+
+
 def process_file(
     path: str,
     cache: Pass2Cache,
@@ -52,8 +84,9 @@ def process_file(
         cache.put(sha, record, model=model, message_id=mid, content_sha256=chash)
         return "done"
     except Exception as exc:  # leave uncached so the next run retries it
-        print(f"  pass2 error on {path}: {exc}")
-        return "error"
+        outcome = classify_failure(exc)
+        print(f"  pass2 {outcome} on {path}: {exc}")
+        return outcome
 
 
 def run_pass(
@@ -83,7 +116,7 @@ def run_pass(
     even arrive in input order — so any caller that records per-message state
     must use this rather than inferring from the counts.
     """
-    counts = {"cached": 0, "done": 0, "error": 0}
+    counts = {"cached": 0, "done": 0, "error": 0, "unavailable": 0}
 
     def _record(path: str, outcome: str) -> None:
         counts[outcome] += 1
@@ -145,8 +178,9 @@ def run_pass(
                     cache.put(sha, record, model=model, message_id=mid, content_sha256=chash)
                     _record(path, "done")
                 except Exception as exc:  # leave uncached so a rerun retries it
-                    print(f"  pass2 error on {futures[fut][0]}: {exc}")
-                    _record(futures[fut][0], "error")
+                    outcome = classify_failure(exc)
+                    print(f"  pass2 {outcome} on {futures[fut][0]}: {exc}")
+                    _record(futures[fut][0], outcome)
                 _tick()
         if bar is not None:
             bar.close()

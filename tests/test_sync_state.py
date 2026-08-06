@@ -115,15 +115,19 @@ class TestStageTracking(_StateTest):
         for h in ("h1", "h2", "h3"):
             self.state.record_fetched("acct", message_key=h, folder="INBOX")
 
-    def test_everything_starts_pending_both_stages(self):
+    def test_everything_starts_pending_judge(self):
+        """With a judge stage configured, NEW mail owes judging first — indexing
+        it now would embed it without its summary, permanently."""
         self.assertEqual(len(self.state.pending("acct", "judged")), 3)
-        self.assertEqual(len(self.state.pending("acct", "indexed")), 3)
+        self.assertEqual(len(self.state.pending("acct", "indexed")), 0)
+        # With no judge stage there is nothing to wait for.
+        self.assertEqual(len(self.state.pending("acct", "indexed", judge_configured=False)), 3)
 
-    def test_marking_judged_leaves_indexing_pending(self):
+    def test_marking_judged_moves_a_message_to_the_index_queue(self):
         """Stage-skipping: mail judged while Qdrant was down must still get indexed."""
         self.state.mark_judged("acct", ["h1", "h2"])
         self.assertEqual(len(self.state.pending("acct", "judged")), 1)
-        self.assertEqual(len(self.state.pending("acct", "indexed")), 3)
+        self.assertEqual(len(self.state.pending("acct", "indexed")), 2)
 
     def test_marking_is_idempotent_and_returns_a_count(self):
         self.assertEqual(self.state.mark_judged("acct", ["h1", "h1"]), 1)
@@ -140,7 +144,8 @@ class TestStageTracking(_StateTest):
         counts = self.state.counts("acct")
         self.assertEqual(counts["total"], 3)
         self.assertEqual(counts["pending_judge"], 2)
-        self.assertEqual(counts["pending_index"], 2)
+        self.assertEqual(counts["pending_index"], 0)
+        self.assertEqual(counts["done"], 1)
         self.assertEqual(counts["errors"], 1)
 
     def test_counts_on_an_unknown_account_are_zero_not_none(self):
