@@ -1,6 +1,26 @@
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    # PINNED — do not move to `:latest`, and do not bump casually.
+    #
+    # Qdrant is stateful: a server upgrade migrates the on-disk storage format
+    # under ${QDRANT_STORAGE_PATH}, and those migrations are one-way. With
+    # `:latest` any `docker compose pull` or container recreate could silently
+    # carry the collections across a minor version, with no clean rollback and
+    # nothing in the repo recording which version the data was written by.
+    #
+    # 1.18.1 is also the server line that matches our capped client
+    # (qdrant-client >=1.18.0,<1.19 — see pyproject.toml and issue #106).
+    # Bump this deliberately: read the release notes for storage-format
+    # changes, back up the storage path, then run the suite against the new
+    # server before committing the change.
+    #
+    # Pinned by digest as well as tag, matching how this repo already pins its
+    # GitHub Actions to commit SHAs: a version tag on Docker Hub is mutable, so
+    # the tag alone records intent while the digest records the actual bytes.
+    # Re-read it after any bump with:
+    #   docker buildx imagetools inspect qdrant/qdrant:<tag> \
+    #     --format '{{json .Manifest.Digest}}'
+    image: qdrant/qdrant:v1.18.1@sha256:45f8e3ddc2570a4d029877e1b5ec1045c19b3852b4e22a55c7f43b05aea0ca89
     container_name: qdrant
     ports:
       - "6333:6333"   # REST / HTTP API
