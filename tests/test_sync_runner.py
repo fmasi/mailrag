@@ -944,7 +944,14 @@ class TestOutageBelowTheSeam(_RunnerTest):
             chunk_size=512,
             chunk_overlap=64,
             qdrant_url="http://x",
-            rubric="personal",
+            # A rubric that SHIPS in the repo. `personal` is corpus-specific and
+            # lives in the gitignored rubrics/local/, so on a clean checkout the
+            # prompt build failed before any socket was touched — the failure
+            # then classified as a per-message `error` rather than the transport
+            # `unavailable` these tests exist to prove, and two of the three
+            # passed for the wrong reason. Caught by CI, not locally, because the
+            # local tree has the rubric.
+            rubric="work",
         )
 
     def _dead_env(self):
