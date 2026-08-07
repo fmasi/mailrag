@@ -30,8 +30,11 @@ questionary
 # Full-screen TUI for `mailrag wizard` (src/tui)
 textual
 
-# MCP server (src/mcp_server): expose the query path over Model Context Protocol
-mcp
+# MCP server (src/mcp_server): expose the query path over Model Context Protocol.
+# v2+ is required, not incidental: src/mcp_server/server.py imports MCPServer,
+# which only exists in the 2.x line (v2 renamed FastMCP and dropped the old
+# name). Keep this floor in step with the Poetry constraint.
+mcp>=2.0.0
 
 # Continuous sync (src/sync, issue #101): PyYAML reads accounts.yaml; imapclient
 # is the IMAP leg (ENABLE / CONDSTORE / CHANGEDSINCE, which imaplib lacks).
