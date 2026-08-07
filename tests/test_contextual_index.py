@@ -610,3 +610,68 @@ class TestBatchIsolation(unittest.TestCase):
                 recreate=True,
             )
         self.assertEqual(deleted, [])
+
+    def test_every_batch_deletes_exactly_its_own_emails_before_writing_them(self):
+        """The per-batch delete must be correctly SCOPED, not merely bounded.
+
+        A mutation audit showed the previous test — which only asserted an upper
+        bound on how much was deleted — stayed green when the delete was hoisted
+        so that only the first batch's keys were removed. That leaves every later
+        batch's old points in place: stale chunks surviving a replacement, which
+        is the failure delete-then-upsert exists to prevent.
+
+        So this pins the ordering directly: for each email written, its delete
+        must have happened, and must have happened BEFORE its first upsert.
+        """
+        emails = [
+            _email(f"body number {i} about the quarterly plan", mid=f"<m{i}@x>") for i in range(6)
+        ]
+        events = []  # ("del", key) / ("up", key) in call order
+
+        fake_embedder = mock.Mock()
+        fake_embedder.dim = 1024
+        fake_embedder.encode.side_effect = lambda texts, **kw: (
+            [[0.1] * 1024 for _ in texts],
+            [{"7": 0.9} for _ in texts],
+        )
+        with (
+            mock.patch("src.indexing.contextual_index.hq.get_client"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_hybrid_collection"),
+            mock.patch("src.indexing.contextual_index.hq.ensure_payload_indexes"),
+            mock.patch("src.indexing.contextual_index.hq.has_legacy_points", return_value=False),
+            mock.patch("src.indexing.contextual_index.hq.collection_policy", return_value=""),
+            mock.patch(
+                "src.indexing.contextual_index.hq.delete_by_message_keys",
+                side_effect=lambda c, n, keys: events.extend(("del", k) for k in keys),
+            ),
+            mock.patch(
+                "src.indexing.contextual_index.hq.upsert",
+                side_effect=lambda c, n, pts: events.extend(
+                    ("up", p.payload["message_key"]) for p in pts
+                ),
+            ),
+        ):
+            build_contextual_index(
+                emails,
+                collection="t",
+                embedder=fake_embedder,
+                apply_noise_filter=False,
+                qdrant_url="http://x",
+                recreate=False,
+                upsert_batch=2,
+            )
+
+        written = [k for kind, k in events if kind == "up"]
+        deleted = [k for kind, k in events if kind == "del"]
+        self.assertEqual(len(written), 6)
+        # Every written email had its old points removed...
+        self.assertEqual(set(deleted), set(written))
+        # ...exactly once...
+        self.assertEqual(len(deleted), len(set(deleted)))
+        # ...and before it was written.
+        for key in set(written):
+            self.assertLess(
+                events.index(("del", key)),
+                events.index(("up", key)),
+                f"{key} was upserted before its delete",
+            )
