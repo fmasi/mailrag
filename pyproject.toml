@@ -136,6 +136,16 @@ imap = ["imapclient"]
 pytest = "^9.0.2"
 pytest-cov = "^6.0"
 ipykernel = "^7.2.0"
+# The two CI quality gates, declared so a dev environment built from this file
+# is complete — previously they existed only as pinned `pip install` lines in
+# .github/workflows/ci.yml, so running them locally meant installing them by
+# hand, and whatever version you happened to get. Pinned exactly (not caret) to
+# the versions ci.yml uses: a lint/type gate that disagrees with CI about which
+# rules exist is worse than no local gate at all. Bump both here and in the
+# matching `ruff (lint + format)` / `mypy (type check)` jobs in
+# .github/workflows/ci.yml together.
+ruff = "0.15.20"
+mypy = "2.1.0"
 
 [build-system]
 requires = ["poetry-core"]
