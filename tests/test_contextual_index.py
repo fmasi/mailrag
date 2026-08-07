@@ -552,7 +552,13 @@ class TestBatchIsolation(unittest.TestCase):
 
     def test_a_failure_mid_upsert_only_exposes_one_batch(self):
         """Deleting the whole delta up front meant a mid-loop failure removed
-        every not-yet-rewritten email — reproduced as 4 of 6 vanishing."""
+        every not-yet-rewritten email — reproduced as 4 of 6 vanishing.
+
+        PAIRED with `test_every_batch_deletes_exactly_its_own_emails_before_
+        writing_them`: this one catches a delete hoisted ahead of ALL batches,
+        which that one cannot see; that one catches a delete scoped to too few
+        batches, which this one cannot see. Keep both.
+        """
         emails = [
             _email(f"body number {i} about the quarterly plan", mid=f"<m{i}@x>") for i in range(6)
         ]
@@ -622,6 +628,14 @@ class TestBatchIsolation(unittest.TestCase):
 
         So this pins the ordering directly: for each email written, its delete
         must have happened, and must have happened BEFORE its first upsert.
+
+        PAIRED with `test_a_failure_mid_upsert_only_exposes_one_batch` — neither
+        is sufficient alone, so do not delete one as redundant. This test does
+        NOT catch a delete hoisted ahead of ALL batches (every key is still
+        deleted exactly once before its own upsert, so the ordering holds);
+        that mutation is caught only by the mid-loop-failure test, which is
+        blind to the scoping this one pins. Verified by mutation in both
+        directions.
         """
         emails = [
             _email(f"body number {i} about the quarterly plan", mid=f"<m{i}@x>") for i in range(6)
@@ -663,7 +677,8 @@ class TestBatchIsolation(unittest.TestCase):
 
         written = [k for kind, k in events if kind == "up"]
         deleted = [k for kind, k in events if kind == "del"]
-        self.assertEqual(len(written), 6)
+        # One chunk per email for these short bodies, so one upsert event each.
+        self.assertEqual(len(written), len(emails))
         # Every written email had its old points removed...
         self.assertEqual(set(deleted), set(written))
         # ...exactly once...
