@@ -81,7 +81,10 @@ pdf2image = "^1.17"
 pillow = "^12.3"
 # Official Model Context Protocol SDK — powers the stdio MCP server
 # (src/mcp_server) that exposes the email-RAG query path to MCP clients.
-mcp = "^1.28.1"
+# v2 (2026-07-28) is required, not merely preferred: the 1.x line went into
+# maintenance mode on that date and now receives security fixes only, so a
+# `<2` pin would park us on a branch that no longer gets real releases.
+mcp = "^2.0.0"
 # Continuous sync (src/sync, issue #101). PyYAML parses accounts.yaml (already a
 # transitive dep, declared here because we import it directly). imapclient is the
 # IMAP leg: actively maintained, and it exposes ENABLE / CONDSTORE / CHANGEDSINCE,

@@ -586,29 +586,29 @@ class TestServerRegistration(unittest.TestCase):
                 "get_attachment",
             },
         )
-        self.assertEqual(set(by_name["list_collections"].inputSchema.get("properties", {})), set())
+        self.assertEqual(set(by_name["list_collections"].input_schema.get("properties", {})), set())
         self.assertEqual(
-            set(by_name["search_email"].inputSchema["properties"]),
+            set(by_name["search_email"].input_schema["properties"]),
             {"query", "collection", "top_k", "mode", "max_chars", "full"},
         )
         self.assertEqual(
-            set(by_name["get_thread"].inputSchema["properties"]),
+            set(by_name["get_thread"].input_schema["properties"]),
             {"thread_id", "collection", "mode"},
         )
         self.assertEqual(
-            set(by_name["grep_email"].inputSchema["properties"]),
+            set(by_name["grep_email"].input_schema["properties"]),
             {"pattern", "collection", "max_matches", "regex"},
         )
         self.assertEqual(
-            set(by_name["answer_question"].inputSchema["properties"]),
+            set(by_name["answer_question"].input_schema["properties"]),
             {"query", "collection", "k"},
         )
         self.assertEqual(
-            set(by_name["list_attachments"].inputSchema["properties"]),
+            set(by_name["list_attachments"].input_schema["properties"]),
             {"thread_id", "message_id", "collection"},
         )
         self.assertEqual(
-            set(by_name["get_attachment"].inputSchema["properties"]),
+            set(by_name["get_attachment"].input_schema["properties"]),
             {"sha256", "ocr"},
         )
 
@@ -617,19 +617,23 @@ class TestServerRegistration(unittest.TestCase):
         searcher = _FakeSearcher(_threads())
         with mock.patch("src.mcp_server.server.get_searcher", return_value=searcher):
             result = asyncio.run(srv.call_tool("search_email", {"query": "invoices", "top_k": 1}))
-        # FastMCP (this SDK version) returns (content_blocks, structured_result).
-        content_blocks, structured = result
-        rows = structured["result"]
+        # SDK v2 returns a CallToolResult model. v1's FastMCP returned a bare
+        # (content_blocks, structured_result) 2-tuple, so the old unpacking here
+        # silently became "iterate the model's fields" — which is why the v1
+        # form failed loudly on the upgrade rather than passing on wrong data.
+        rows = result.structured_content["result"]
         self.assertEqual(rows[0]["thread_id"], "t1")
         # The text content mirrors the same payload.
-        self.assertIn("t1", content_blocks[0].text)
+        self.assertIn("t1", result.content[0].text)
+        # A successful call must not be flagged as an error.
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_list_collections(self):
         srv = server.build_server()
         rows = [{"name": "work-rag", "points_count": 3, "is_default": True}]
         with mock.patch("src.mcp_server.server.list_collections", return_value=rows):
-            _, structured = asyncio.run(srv.call_tool("list_collections", {}))
-        self.assertEqual(structured["result"][0]["name"], "work-rag")
+            result = asyncio.run(srv.call_tool("list_collections", {}))
+        self.assertEqual(result.structured_content["result"][0]["name"], "work-rag")
 
     def test_call_tool_dispatches_into_answer_question(self):
         srv = server.build_server()
@@ -639,17 +643,15 @@ class TestServerRegistration(unittest.TestCase):
             mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
             mock.patch("src.llm.client.healthcheck", return_value=None),
         ):
-            _, structured = asyncio.run(
-                srv.call_tool("answer_question", {"query": "when?", "k": 1})
-            )
-        self.assertEqual(structured["result"]["answer"], "A")
+            result = asyncio.run(srv.call_tool("answer_question", {"query": "when?", "k": 1}))
+        self.assertEqual(result.structured_content["result"]["answer"], "A")
 
     def test_call_tool_dispatches_into_list_attachments(self):
         srv = server.build_server()
         store = _FakeStore([_FakeMeta("abc", "f.pdf", "application/pdf", 1, "t1", "m1")])
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
-            _, structured = asyncio.run(srv.call_tool("list_attachments", {"thread_id": "t1"}))
-        self.assertEqual(structured["result"][0]["sha256"], "abc")
+            result = asyncio.run(srv.call_tool("list_attachments", {"thread_id": "t1"}))
+        self.assertEqual(result.structured_content["result"][0]["sha256"], "abc")
 
     def test_call_tool_dispatches_into_get_attachment(self):
         srv = server.build_server()
@@ -665,8 +667,8 @@ class TestServerRegistration(unittest.TestCase):
             }
         )
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
-            _, structured = asyncio.run(srv.call_tool("get_attachment", {"sha256": "abc"}))
-        self.assertEqual(structured["result"]["text"], "body")
+            result = asyncio.run(srv.call_tool("get_attachment", {"sha256": "abc"}))
+        self.assertEqual(result.structured_content["result"]["text"], "body")
 
 
 class TestCliWiring(unittest.TestCase):
