@@ -21,6 +21,9 @@ map — this is the canonical reading order.
      per-backend examples, and the dense-only "sparse caveat".
    - **[`VERBS.md`](VERBS.md)** — the CLI source of truth: every verb (including `ask` and `mcp`),
      the cost-ordered ladder, the alias table, and the persona recipes.
+   - **[`SYNC.md`](SYNC.md)** — keeping a collection live: `accounts.yaml`, secret references
+     (`keychain:` / `env:` / `file:`), folder **roles**, stage-skipping when a backend is down,
+     launchd & systemd scheduling, and the `MessageSource` seam for adding a provider.
    - **[`MCP_SERVER.md`](MCP_SERVER.md)** — the multi-collection stdio MCP server: the five tools
      (`list_collections` / `search_email` / `answer_question` / `list_attachments` /
      `get_attachment`), collection discovery, client setup, and the CLI↔MCP capability matrix.
@@ -53,6 +56,7 @@ map — this is the canonical reading order.
 | Run the public demo | `make demo` → [`scripts/quickstart.sh`](../scripts/quickstart.sh) → `main.py::run_demo` |
 | Ask a question from the CLI | `./mailrag ask "…" --collection <name>` |
 | Serve a collection to an agent | `./mailrag mcp` (see [`MCP_SERVER.md`](MCP_SERVER.md)) |
+| Keep a collection fresh | `./mailrag sync` (see [`SYNC.md`](SYNC.md)) |
 | Build a contextual index from loaded emails | `build_contextual_index(...)` in `src/indexing/contextual_index.py` |
 | Query a collection from code | `build_hybrid_searcher(collection).search()` / `.search_threads()` in `src/query/hybrid.py` |
 | Load emails from a source | `load_emails(source="enron" \| "mail_archive_x" \| "azure_blob")` in `src/data/` |

@@ -61,6 +61,7 @@ def _cmd_index(args):
         limit=args.limit,
         embed_summary=args.embed_summary,
         noise_min_confidence=args.noise_confidence,
+        allow_legacy_append=args.allow_legacy_append,
     )
     prof.save(args.profile)
     print(f"DONE: {res.chunks} chunks -> '{res.collection}'")
@@ -363,7 +364,18 @@ def _configure_mcp(p):
 
 def _configure_index(p):
     _add_profile_arg(p)
-    p.add_argument("--recreate", action="store_true")
+    p.add_argument(
+        "--recreate",
+        action="store_true",
+        help="drop and rebuild the collection; omit to index INCREMENTALLY "
+        "(each email's existing chunks are replaced, so re-running is safe)",
+    )
+    p.add_argument(
+        "--allow-legacy-append",
+        action="store_true",
+        help="append into a collection built before deterministic ids even though "
+        "that duplicates every chunk (default: refuse and ask for one --recreate)",
+    )
     p.add_argument("--limit", type=int, default=None)
     p.add_argument(
         "--embed-summary",
@@ -531,6 +543,258 @@ def _cmd_attachments_get(args):
     return 0
 
 
+def _sync_state_path(args):
+    from src.sync.state import SyncState  # noqa: PLC0415
+
+    return SyncState(os.path.expanduser(args.state or "~/.mailrag/sync_state.db"))
+
+
+def _sync_accounts(args):
+    """The accounts this invocation targets, with actionable errors when there are none."""
+    from src.sync.accounts import load_accounts  # noqa: PLC0415
+
+    accounts = load_accounts(args.accounts)
+    if not accounts:
+        path = args.accounts or "~/.mailrag/accounts.yaml"
+        raise SystemExit(
+            f"no accounts configured in {path}.\n"
+            "Create it with an entry like:\n\n"
+            "accounts:\n"
+            "  - id: personal\n"
+            "    source: imap\n"
+            "    host: imap.mail.me.com\n"
+            "    login: you@example.com\n"
+            "    secret: keychain:mailrag.imap.personal\n"
+            "    collection: personal\n"
+            "    profile: ~/.mailrag/personal.json\n"
+            "    spool_root: ~/mail/personal/incoming\n"
+        )
+    if args.account:
+        chosen = [a for a in accounts if a.id == args.account]
+        if not chosen:
+            known = ", ".join(a.id for a in accounts)
+            raise SystemExit(f"no account {args.account!r}; known: {known}")
+        return chosen
+    return accounts
+
+
+def _cmd_sync(args):
+    """Fetch new mail into the spool, then judge and index the delta."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    state = _sync_state_path(args)
+    try:
+        accounts = _sync_accounts(args)
+
+        if args.status:
+            for account in accounts:
+                st = state.status(account.id)
+                last = st["last_run"]
+                print(f"\n{account.id}  ->  collection '{account.collection}'")
+                for f in st["folders"]:
+                    print(
+                        f"  {f['name']:<24} role={f['role']:<8} "
+                        f"cursor={f['cursor_kind'] or '(none)'} last_sync={f['last_sync_at'] or '-'}"
+                    )
+                c = st["counts"]
+                print(
+                    f"  messages: {c['total']} total, {c['done']} done, "
+                    f"{c['pending_judge']} awaiting judge, {c['pending_index']} awaiting index, "
+                    f"{c['errors']} error(s)"
+                )
+                if c.get("abandoned"):
+                    print(
+                        f"  {c['abandoned']} abandoned — recoverable with "
+                        f"`mailrag sync --account {account.id} --requeue`"
+                    )
+                if last is None:
+                    print("  last run: never")
+                else:
+                    print(
+                        f"  last run: {last['status']} at {last['completed_at'] or last['started_at']}"
+                        f" (fetched {last['fetched']}, judged {last['judged']},"
+                        f" indexed {last['indexed']})"
+                    )
+                    if last["message"]:
+                        # Where "index REFUSED (needs operator action)" lives —
+                        # printing only the status would hide the one line that
+                        # says what to do.
+                        print(f"  note: {last['message']}")
+                    if last["status"] == "running":
+                        # A killed tick (sleep, shutdown, SIGKILL) is the NORMAL
+                        # way a run ends on a laptop, and leaves completed_at
+                        # NULL — so a staleness check that reads only
+                        # completed_at is switched off exactly when it matters.
+                        print("  WARNING: the last run never finished (killed or still running)")
+                success = state.last_successful_run(account.id)
+                now = datetime.now(timezone.utc)
+                if success is None:
+                    if last is not None:
+                        print("  WARNING: no run has EVER completed successfully")
+                else:
+                    stale = _staleness_hours(success["completed_at"], now)
+                    if stale is not None and stale > 48:
+                        # Measured from the last SUCCESS, not the last attempt:
+                        # 120 consecutive failed ticks would otherwise look fresh
+                        # because the newest attempt is two hours old.
+                        print(f"  WARNING: last SUCCESSFUL sync was {stale:.0f}h ago")
+            return 0
+
+        if args.requeue:
+            for account in accounts:
+                rows = state.abandoned(account.id)
+                if not rows:
+                    print(f"{account.id}: nothing abandoned")
+                    continue
+                for r in rows:
+                    print(f"  {r['message_key']}  ({r['error']})")
+                n = state.requeue(account.id)
+                print(f"{account.id}: re-queued {n} message(s)")
+            return 0
+
+        if args.install_agent:
+            return _install_sync_agent(args, accounts)
+
+        from src.sync.factory import build_source  # noqa: PLC0415
+        from src.sync.runner import sync_account  # noqa: PLC0415
+
+        rc = 0
+        for account in accounts:
+            profile, embedder = None, None
+            if not args.fetch_only:
+                if not account.profile:
+                    raise SystemExit(
+                        f"account {account.id!r} has no 'profile:' — needed to judge and index "
+                        "(or pass --fetch-only to just spool the mail)"
+                    )
+                profile = CorpusProfile.load(account.profile)
+                # The embedder is needed to INDEX; --model only gates the LLM
+                # judge pass. Tying the two would make "keep the index fresh
+                # without paying for summaries" impossible.
+                embedder = BgeM3Embedder(device="mps", use_fp16=True)
+            report = sync_account(
+                account,
+                state=state,
+                source_factory=build_source,
+                profile=profile,
+                embedder=embedder,
+                model=args.model or "",
+                workers=args.workers,
+                fetch_only=args.fetch_only,
+                limit=args.limit,
+                embed_summary=account.embed_summary,
+            )
+            print(f"{account.id}: {report.summary()}")
+            for msg in report.messages:
+                if "REFUSED" in msg:
+                    print(f"  !! {msg}", file=sys.stderr)
+            # Errors count too: a PERMANENT refusal deliberately does not set a
+            # skipped stage, and exiting 0 would record it in the scheduler's log
+            # as a clean tick — the opposite of escalating it.
+            if report.skipped_stages or report.errors:
+                rc = max(rc, 1)
+        return rc
+    finally:
+        state.close()
+
+
+def _install_sync_agent(args, accounts):
+    """Write a launchd LaunchAgent (macOS) or systemd user timer (Linux)."""
+    import sys as _sys  # noqa: PLC0415
+
+    from src.sync import schedule  # noqa: PLC0415
+
+    account = accounts[0] if len(accounts) == 1 else None
+    interval = account.cadence_seconds() if account else 43200
+    repo_root = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+    log_path = os.path.expanduser(args.log or "~/.mailrag/sync.log")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    if _sys.platform == "darwin":
+        target = os.path.expanduser(f"~/Library/LaunchAgents/{schedule.LAUNCHD_LABEL}.plist")
+        content = schedule.render_launchd_plist(
+            interval_seconds=interval,
+            repo_root=repo_root,
+            log_path=log_path,
+            conda_env=args.conda_env,
+            account=account.id if account else None,
+            model=args.model,
+        )
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        print(f"wrote {target}\n\n{schedule.install_hint('darwin')}")
+        return 0
+
+    service, timer = schedule.render_systemd_units(
+        interval_seconds=interval,
+        repo_root=repo_root,
+        log_path=log_path,
+        conda_env=args.conda_env,
+        account=account.id if account else None,
+        model=args.model,
+    )
+    unit_dir = os.path.expanduser("~/.config/systemd/user")
+    os.makedirs(unit_dir, exist_ok=True)
+    for name, body in (
+        (f"{schedule.SYSTEMD_UNIT}.service", service),
+        (f"{schedule.SYSTEMD_UNIT}.timer", timer),
+    ):
+        with open(os.path.join(unit_dir, name), "w", encoding="utf-8") as fh:
+            fh.write(body)
+    print(f"wrote units in {unit_dir}\n\n{schedule.install_hint('linux')}")
+    return 0
+
+
+def _staleness_hours(completed_at, now):
+    """Hours since *completed_at*, or None if it is missing/unparseable."""
+    from datetime import datetime  # noqa: PLC0415
+
+    if not completed_at:
+        return None
+    try:
+        return (now - datetime.fromisoformat(completed_at)).total_seconds() / 3600.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _configure_sync(p):
+    p.add_argument(
+        "--accounts", default=None, help="accounts.yaml (default ~/.mailrag/accounts.yaml)"
+    )
+    p.add_argument("--account", default=None, help="sync only this account id")
+    p.add_argument("--state", default=None, help="sync state DB (default ~/.mailrag/sync_state.db)")
+    p.add_argument("--status", action="store_true", help="print sync state and exit")
+    p.add_argument(
+        "--requeue",
+        action="store_true",
+        help="put abandoned messages back in the queue (see --status) and exit",
+    )
+    p.add_argument(
+        "--fetch-only",
+        action="store_true",
+        help="spool new mail but skip judging and indexing (no LLM, no Qdrant)",
+    )
+    p.add_argument("--model", default=None, help="LLM model for the summarize/judge pass")
+    p.add_argument("--workers", type=int, default=1)
+    p.add_argument(
+        "--limit", type=int, default=None, help="stop after this many messages per account"
+    )
+    p.add_argument(
+        "--install-agent",
+        action="store_true",
+        help="write a launchd LaunchAgent (macOS) or systemd user timer (Linux) and exit",
+    )
+    p.add_argument(
+        "--conda-env",
+        default=None,
+        help="with --install-agent: conda env to run in (a scheduler inherits no shell setup)",
+    )
+    p.add_argument(
+        "--log", default=None, help="with --install-agent: log file for the scheduled run"
+    )
+
+
 def _add_verb(sub, name, configure, func, *, help, aliases=()):
     """Register a verb plus hidden aliases (old names) sharing one handler."""
     p = sub.add_parser(name, help=help)
@@ -570,6 +834,13 @@ def build_parser():
         _configure_mcp,
         _cmd_mcp,
         help="run the MCP server (stdio) over the indexed corpus",
+    )
+    _add_verb(
+        sub,
+        "sync",
+        _configure_sync,
+        _cmd_sync,
+        help="fetch new mail and index the delta (keeps a collection fresh)",
     )
     _add_verb(
         sub,

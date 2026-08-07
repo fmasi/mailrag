@@ -319,3 +319,64 @@ class TestHealthcheck(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAuthHeuristicIsNarrow(unittest.TestCase):
+    """Auth failures are classified ENDPOINT-level, so they never spend a
+    message's retry budget. That makes a false positive costly: a per-message
+    rejection misread as auth would be re-judged every tick forever, never
+    abandoned, and — since indexing waits on judging — never indexed."""
+
+    def _looks_auth(self, msg, cls="APIStatusError"):
+        from src.llm.client import _looks_like_auth_error
+
+        return _looks_like_auth_error(type(cls, (Exception,), {})(msg))
+
+    def test_a_real_401_is_detected(self):
+        self.assertTrue(
+            self._looks_auth("Error code: 401 - {'error': {'code': 'invalid_api_key'}}")
+        )
+
+    def test_a_403_is_detected(self):
+        self.assertTrue(self._looks_auth("Error code: 403 - forbidden"))
+
+    def test_an_lm_studio_token_rejection_is_detected(self):
+        self.assertTrue(
+            self._looks_auth("Malformed LM Studio API token provided", cls="AuthenticationError")
+        )
+
+    def test_an_over_length_prompt_is_NOT_auth(self):
+        """Every OpenAI-spec 4xx body contains 'invalid_request_error'. Matching
+        a bare 'invalid' made every per-message rejection look like auth."""
+        self.assertFalse(
+            self._looks_auth(
+                "Error code: 400 - {'error': {'message': \"This model's maximum context "
+                "length is 8192 tokens\", 'type': 'invalid_request_error'}}"
+            )
+        )
+
+    def test_a_bad_parameter_is_NOT_auth(self):
+        self.assertFalse(
+            self._looks_auth(
+                "Error code: 400 - {'error': {'message': 'Invalid value for temperature', "
+                "'type': 'invalid_request_error'}}"
+            )
+        )
+
+    def test_a_malformed_json_response_is_NOT_auth(self):
+        self.assertFalse(self._looks_auth("malformed JSON in response body", cls="ValueError"))
+
+    def test_a_token_count_containing_401_is_NOT_auth(self):
+        """Reproduced by review: bare substring matching made a 400 whose body
+        says "resulted in 40123 tokens" read as an auth failure — and auth is
+        endpoint-level, so that message would defer forever."""
+        self.assertFalse(
+            self._looks_auth(
+                "Error code: 400 - {'error': {'message': 'your messages resulted in "
+                "40123 tokens, however the model supports at most 8192'}}"
+            )
+        )
+
+    def test_a_real_status_code_still_matches_at_a_word_boundary(self):
+        self.assertTrue(self._looks_auth("Error code: 401 - unauthorized"))
+        self.assertTrue(self._looks_auth("unexpected status 403: forbidden"))

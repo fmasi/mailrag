@@ -27,26 +27,89 @@ def _identity_from(email: Dict):
     )
 
 
+# Failures of the ENDPOINT rather than of the message. These must never consume
+# a message's retry budget: a closed LM Studio reports identically for every
+# message, and counting those as per-message failures abandoned entire backlogs.
+_TRANSIENT_EXC_NAMES = (
+    "APIConnectionError",
+    "APITimeoutError",
+    "InternalServerError",
+    "RateLimitError",
+    "ServiceUnavailable",
+    # Auth failures are endpoint-level and operator-fixable — LM Studio now
+    # requires a token, and a missing key returns 401 for EVERY message. Charging
+    # that to the messages would abandon a whole backlog over a config mistake.
+    "AuthenticationError",
+    "PermissionDeniedError",
+    "LLMHealthcheckError",
+)
+
+
+def _prov_kwargs(model: str, provenance) -> Dict[str, str]:
+    """Cache columns describing the judge. Falls back to the bare model id."""
+    if provenance is None:
+        return {"model": model}
+    from src.llm.provenance import model_fingerprint  # noqa: PLC0415
+
+    return {
+        "model": model_fingerprint(provenance) or model,
+        "quant": provenance.quant,
+        "endpoint": provenance.endpoint,
+        "source": provenance.source,
+    }
+
+
+def classify_failure(exc: BaseException) -> str:
+    """``"unavailable"`` if *exc* means the endpoint is down, else ``"error"``.
+
+    Walks the ``__cause__``/``__context__`` chain because the OpenAI-compatible
+    clients wrap the underlying socket error.
+    """
+    seen = 0
+    cur: BaseException | None = exc
+    while cur is not None and seen < 10:
+        if isinstance(cur, (ConnectionError, TimeoutError)) or type(cur).__name__ in (
+            _TRANSIENT_EXC_NAMES
+        ):
+            return "unavailable"
+        if isinstance(cur, OSError) and not isinstance(cur, FileNotFoundError):
+            return "unavailable"
+        cur = cur.__cause__ or cur.__context__
+        seen += 1
+    return "error"
+
+
 def process_file(
     path: str,
     cache: Pass2Cache,
     load_email: Callable[[str], Dict],
     summarize: Callable[[Dict], Dict],
     model: str,
+    provenance=None,
 ) -> str:
     """Summarize+judge one file unless cached. Returns 'cached' | 'done' | 'error'."""
-    sha = file_sha256(path)
+    try:
+        sha = file_sha256(path)
+    except OSError as exc:
+        # A missing/unreadable .eml must not abort the sweep. It is deterministic,
+        # so aborting means the same file kills every future run at the same
+        # position and nothing after it is ever processed.
+        print(f"  pass2 error on {path}: {exc}")
+        return "error"
     if cache.has(sha):
         return "cached"
     try:
         email = load_email(path)
         record = summarize(email)
         mid, chash = _identity_from(email)
-        cache.put(sha, record, model=model, message_id=mid, content_sha256=chash)
+        cache.put(
+            sha, record, message_id=mid, content_sha256=chash, **_prov_kwargs(model, provenance)
+        )
         return "done"
     except Exception as exc:  # leave uncached so the next run retries it
-        print(f"  pass2 error on {path}: {exc}")
-        return "error"
+        outcome = classify_failure(exc)
+        print(f"  pass2 {outcome} on {path}: {exc}")
+        return outcome
 
 
 def run_pass(
@@ -58,6 +121,8 @@ def run_pass(
     limit: Optional[int] = None,
     progress: bool = False,
     workers: int = 1,
+    on_outcome: Optional[Callable[[str, str], None]] = None,
+    provenance=None,
 ) -> Dict[str, int]:
     """Sweep *paths*, summarizing uncached files. Returns outcome counts.
 
@@ -68,8 +133,20 @@ def run_pass(
     When *workers* > 1, load+summarize (network-bound LLM calls) run in a thread
     pool with that many in-flight requests; all SQLite cache reads/writes stay on
     the calling thread so the single connection is never touched concurrently.
+
+    *on_outcome* is called as ``on_outcome(path, outcome)`` for every path, with
+    outcome in ``{"cached", "done", "error"}``.  Aggregate counts alone cannot
+    tell a caller WHICH files succeeded — and with ``workers > 1`` results do not
+    even arrive in input order — so any caller that records per-message state
+    must use this rather than inferring from the counts.
     """
-    counts = {"cached": 0, "done": 0, "error": 0}
+    counts = {"cached": 0, "done": 0, "error": 0, "unavailable": 0}
+
+    def _record(path: str, outcome: str) -> None:
+        counts[outcome] += 1
+        if on_outcome is not None:
+            on_outcome(path, outcome)
+
     paths = list(paths)
     if limit is not None:
         paths = paths[:limit]
@@ -97,9 +174,15 @@ def run_pass(
         # LLM work out; cache.put happens here as each future lands.
         todo = []
         for path in paths:
-            sha = file_sha256(path)
+            try:
+                sha = file_sha256(path)
+            except OSError as exc:  # see process_file: never abort the sweep
+                print(f"  pass2 error on {path}: {exc}")
+                _record(path, "error")
+                _tick()
+                continue
             if cache.has(sha):
-                counts["cached"] += 1
+                _record(path, "cached")
                 _tick()
             else:
                 todo.append((path, sha))
@@ -116,18 +199,25 @@ def run_pass(
             for fut in as_completed(futures):
                 try:
                     path, sha, record, mid, chash = fut.result()
-                    cache.put(sha, record, model=model, message_id=mid, content_sha256=chash)
-                    counts["done"] += 1
+                    cache.put(
+                        sha,
+                        record,
+                        message_id=mid,
+                        content_sha256=chash,
+                        **_prov_kwargs(model, provenance),
+                    )
+                    _record(path, "done")
                 except Exception as exc:  # leave uncached so a rerun retries it
-                    print(f"  pass2 error on {futures[fut][0]}: {exc}")
-                    counts["error"] += 1
+                    outcome = classify_failure(exc)
+                    print(f"  pass2 {outcome} on {futures[fut][0]}: {exc}")
+                    _record(futures[fut][0], outcome)
                 _tick()
         if bar is not None:
             bar.close()
         return counts
 
     for path in paths:
-        counts[process_file(path, cache, load_email, summarize, model)] += 1
+        _record(path, process_file(path, cache, load_email, summarize, model, provenance))
         _tick()
     if bar is not None:
         bar.close()

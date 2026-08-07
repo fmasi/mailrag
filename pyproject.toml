@@ -65,6 +65,13 @@ pillow = "^12.3"
 # Official Model Context Protocol SDK — powers the stdio MCP server
 # (src/mcp_server) that exposes the email-RAG query path to MCP clients.
 mcp = "^1.28.1"
+# Continuous sync (src/sync, issue #101). PyYAML parses accounts.yaml (already a
+# transitive dep, declared here because we import it directly). imapclient is the
+# IMAP leg: actively maintained, and it exposes ENABLE / CONDSTORE / CHANGEDSINCE,
+# which imaplib does not. Optional — a Maildir-only or export-only user needs no
+# IMAP client; install with `poetry install --extras imap`.
+PyYAML = "^6.0"
+imapclient = {version = "^3.1.0", optional = true}
 # --- Transitive security floors (not imported directly) ---------------------
 # These are pulled in transitively (soupsieve via beautifulsoup4; transformers
 # via FlagEmbedding). We pin a minimum here purely to lift the resolved version
@@ -80,6 +87,8 @@ click = "^8.4.1"
 [tool.poetry.extras]
 # C/NIM experiment path (NVIDIA NeMo Retriever dense embed + rerank NIMs)
 nvidia = ["llama-index-embeddings-nvidia", "llama-index-postprocessor-nvidia-rerank"]
+# IMAP source for `mailrag sync` (src/sync/imap_source.py)
+imap = ["imapclient"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"

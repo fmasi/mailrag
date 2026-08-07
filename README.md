@@ -66,6 +66,12 @@ The point was never a single app — it's a private, open stack of context I own
   `.eml` path. OCR is optional and falls through cleanly when its reader isn't installed.
 - **Local-LLM `summarize`** — optional per-email summary + noise judgement from a local
   LLM, content-addressed and cached, so re-runs are free.
+- **Continuous sync** — a collection built from a backup is a snapshot that quietly rots.
+  `./mailrag sync` fetches new mail from a live account (IMAP or Maildir) and indexes only
+  the delta, so the index stays 1–2 days fresh instead of frozen at its export date. Point
+  ids are deterministic, so re-indexing replaces rather than duplicates; the content-addressed
+  cache means only *new* mail costs an LLM call. Behind a provider-agnostic seam — any
+  account, any provider, any collection (see [`docs/SYNC.md`](docs/SYNC.md)).
 - **A measured methodology** — a 360-query retrieval eval that prices each technique,
   controls for confounds, and reports significance, overturning the intuitive choice more
   than once. It also caught its own headline overstating: an early +6pp gain was half a
@@ -330,6 +336,7 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
 5. Deep dives:
    - [`docs/BACKENDS.md`](docs/BACKENDS.md) — point mailrag at the LLM / embedder / vector store of your choice (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI, Qdrant), with the dense-only "sparse caveat".
    - [`docs/VERBS.md`](docs/VERBS.md) — the CLI source of truth: every verb (including `ask` and `mcp`), the cost-ordered ladder, the alias table, and the persona recipes.
+   - [`docs/SYNC.md`](docs/SYNC.md) — continuous sync: account config, secret references, folder *roles* (so "everything but junk" means the same on every provider), what happens when the network / LLM / Qdrant is down, launchd & systemd scheduling, and how to add a provider.
    - [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — the multi-collection stdio MCP server: the `list_collections` / `search_email` / `answer_question` / `list_attachments` / `get_attachment` tools, collection discovery & selection, config, client setup (Claude Code / opencode), and the CLI↔MCP capability matrix.
    - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
    - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
@@ -350,9 +357,15 @@ easier for agents to reach, and keep its memory current:
   `get_attachment` — so any agent can discover, query and read your mail (including
   attachment text) without touching the internals (see
   [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md)).
-- **Live ingestion** — move from one-time imports to incremental ingest of incoming mail, so
-  the index stays current: a *living* context source, not a static snapshot. (The
-  `EmailLoader` interface is already source-agnostic to make this clean.)
+- **Live ingestion** ([#101](https://github.com/fmasi/mailrag/issues/101)) — live:
+  `./mailrag sync` moves mailrag from one-time imports to incremental ingest, so the index is a
+  *living* context source rather than a static snapshot. New mail is fetched from any
+  configured account, spooled as `.eml`, and run through the *same* pipeline — so the cleaning
+  rubric stays consistent and only new mail costs an LLM call. Providers sit behind a
+  `MessageSource` seam with opaque cursors (IMAP UID/MODSEQ today; Gmail `historyId`, JMAP and
+  Graph delta tokens need no schema change), and each stage degrades independently: mail is
+  still fetched when the LLM is down, still judged when Qdrant is down (see
+  [`docs/SYNC.md`](docs/SYNC.md)).
 - **Guided TUI** ([#36](https://github.com/fmasi/mailrag/issues/36)) — ✅ shipped:
   `./mailrag wizard` is now a full-screen terminal app ([Textual](https://textual.textualize.io/)):
   pick a persona, scope folders on a tree, review the plan, and watch the run live — with the

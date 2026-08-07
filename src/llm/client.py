@@ -16,6 +16,7 @@ harness (separate reference client).
 from __future__ import annotations
 
 import os
+import re
 import threading
 
 # The historical placeholder used against auth-less local servers (LM Studio,
@@ -57,7 +58,24 @@ def _resolve_api_key() -> str:
     ``healthcheck()`` surfaces that as a clear, actionable error at startup
     rather than an opaque 401 per query.
     """
-    return os.getenv("RAG_LLM_API_KEY", "").strip() or _PLACEHOLDER_KEY
+    raw = os.getenv("RAG_LLM_API_KEY", "").strip()
+    if not raw:
+        return _PLACEHOLDER_KEY
+    # A reference (keychain:/env:/file:) is dereferenced here, so a real token
+    # never has to sit in .env — the same rule the sync account passwords follow.
+    # A literal is still accepted: this variable predates the convention and is
+    # commonly set to a throwaway value for local endpoints.
+    if raw.split(":", 1)[0] in ("keychain", "env", "file"):
+        from src.config.secrets import SecretError, resolve_secret  # noqa: PLC0415
+
+        try:
+            return resolve_secret(raw)
+        except SecretError as exc:
+            raise LLMHealthcheckError(
+                f"RAG_LLM_API_KEY is a {raw.split(':', 1)[0]}: reference that could not be "
+                f"resolved: {exc}"
+            ) from exc
+    return raw
 
 
 def using_placeholder_key() -> bool:
@@ -72,6 +90,22 @@ class LLMHealthcheckError(RuntimeError):
     auth failure is the likely cause) so the MCP server / answer path can fail
     loudly at init instead of returning a raw 401 on every query.
     """
+
+
+def _request_timeout() -> float:
+    """Per-request timeout in seconds (``RAG_LLM_TIMEOUT``, default 120)."""
+    try:
+        return float(os.getenv("RAG_LLM_TIMEOUT", "") or 120.0)
+    except ValueError:
+        return 120.0
+
+
+def _max_retries() -> int:
+    """Client-side retries per request (``RAG_LLM_MAX_RETRIES``, default 2)."""
+    try:
+        return max(0, int(os.getenv("RAG_LLM_MAX_RETRIES", "") or 2))
+    except ValueError:
+        return 2
 
 
 class _LLMClient:
@@ -107,6 +141,13 @@ class _LLMClient:
                     is_chat_model=True,
                     temperature=temperature,
                     context_window=_CONTEXT_WINDOW,
+                    # Bounded so an unreachable endpoint fails in seconds rather
+                    # than minutes of exponential backoff. A sweep over
+                    # thousands of emails against a dead endpoint would
+                    # otherwise take hours to report what it knew immediately;
+                    # the scheduled run simply retries on the next tick.
+                    timeout=_request_timeout(),
+                    max_retries=_max_retries(),
                 )
                 self._cache[key] = inst
             return inst
@@ -128,17 +169,43 @@ def default_model() -> str:
     return os.getenv("RAG_LLM_MODEL", "").strip()
 
 
+_STATUS_RE = re.compile(r"(?<!\d)(401|403)(?!\d)")
+
+
 def _looks_like_auth_error(exc: BaseException) -> bool:
     """Heuristic: does ``exc`` look like a 401/403 auth failure?
 
     We match on the string form because the OpenAILike stack wraps the
     underlying ``openai`` error in a variety of exception types; a substring
     check on the status/keywords is robust across those wrappers.
+
+    The markers are deliberately NARROW. Bare ``invalid`` / ``malformed`` used to
+    be here, and every OpenAI-spec 4xx body contains ``'type':
+    'invalid_request_error'`` — so an ordinary per-message rejection (an
+    over-length prompt, a bad parameter) was reported as an auth failure. Since
+    auth failures are classified endpoint-level, that message would then never
+    spend a retry attempt, never be abandoned, and — because indexing waits on
+    judging — never be indexed, while re-issuing a real LLM call every tick
+    forever.
     """
     text = f"{type(exc).__name__}: {exc}".lower()
+    # Status codes are matched with word boundaries, not as bare substrings: a
+    # per-message 400 whose body reads "your messages resulted in 40123 tokens"
+    # contains the digits 401, and misreading that as auth defers the message
+    # forever (auth is endpoint-level, so it never spends a retry attempt).
+    if _STATUS_RE.search(text):
+        return True
     return any(
         marker in text
-        for marker in ("401", "403", "unauthorized", "malformed", "api key", "api token", "invalid")
+        for marker in (
+            "unauthorized",
+            "invalid_api_key",
+            "invalid api key",
+            "api key",
+            "api token",
+            "authenticationerror",
+            "permissiondenied",
+        )
     )
 
 

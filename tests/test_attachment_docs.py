@@ -132,3 +132,60 @@ class TestBuildAttachmentDocuments(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAttachmentMessageKey(unittest.TestCase):
+    """An email's attachment chunks must carry the SAME message_key as its body
+    chunks, so one delete filter clears the whole email before a re-index (#101)."""
+
+    def setUp(self):
+        import shutil
+
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+
+    def _docs(self, path):
+        from src.indexing.attachment_docs import build_attachment_documents
+
+        return build_attachment_documents([path], extractor_name="tesseract")
+
+    def _eml(self, message_id="<mbo@windriver.com>"):
+        return _write_eml(
+            os.path.join(self.d, "a.eml"),
+            message_id,
+            "See the attached targets.",
+            [(b"name,target\nfred,100\n", "text", "csv", "targets.csv")],
+        )
+
+    def test_attachment_chunks_share_the_bodys_message_key(self):
+        from src.data.loaders.mail_archive_x import MailArchiveXLoader
+
+        path = self._eml()
+        body_key = MailArchiveXLoader(eml_files=[path], verbose=False).load()[0].message_key()
+        docs = self._docs(path)
+        self.assertTrue(docs)
+        for d in docs:
+            self.assertEqual(d.metadata["message_key"], body_key)
+
+    def test_doc_ids_are_stable_across_runs(self):
+        """Attachment doc ids seed the deterministic point ids, so they must not
+        depend on the run."""
+        path = self._eml()
+        self.assertEqual([d.doc_id for d in self._docs(path)], [d.doc_id for d in self._docs(path)])
+
+    def test_message_key_is_excluded_from_the_embedded_text(self):
+        docs = self._docs(self._eml())
+        self.assertIn("message_key", docs[0].excluded_embed_metadata_keys)
+
+    def test_an_email_without_a_message_id_still_gets_a_key(self):
+        """Header-less mail falls back to the content hash rather than an empty key
+        that would make delete_by_message_keys a no-op."""
+        path = _write_eml(
+            os.path.join(self.d, "b.eml"),
+            "",
+            "See the attached targets.",
+            [(b"name,target\nfred,100\n", "text", "csv", "targets.csv")],
+        )
+        docs = self._docs(path)
+        self.assertTrue(docs)
+        self.assertTrue(docs[0].metadata["message_key"])

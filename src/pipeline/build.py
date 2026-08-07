@@ -24,6 +24,7 @@ def run(
     noise_min_confidence=0.7,
     index_attachments=True,
     attachment_extractor_name="tesseract",
+    allow_legacy_append=False,
 ):
     kept, _ = resolve_index_files(
         profile.resolved_root(), profile.selection_rules, getattr(profile, "blacklist", None)
@@ -76,4 +77,5 @@ def run(
         qdrant_url=profile.qdrant_url,
         apply_noise_filter=False,
         extra_docs=attachment_docs,
+        allow_legacy_append=allow_legacy_append,
     )

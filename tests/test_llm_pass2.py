@@ -35,9 +35,9 @@ class TestRunPass(unittest.TestCase):
 
     def test_processes_all_then_skips_cached(self):
         c1 = pass2.run_pass([self.f1, self.f2], self.cache, self._load, self._summarize, model="m")
-        self.assertEqual(c1, {"cached": 0, "done": 2, "error": 0})
+        self.assertEqual(c1, {"cached": 0, "done": 2, "error": 0, "unavailable": 0})
         c2 = pass2.run_pass([self.f1, self.f2], self.cache, self._load, self._summarize, model="m")
-        self.assertEqual(c2, {"cached": 2, "done": 0, "error": 0})
+        self.assertEqual(c2, {"cached": 2, "done": 0, "error": 0, "unavailable": 0})
 
     def test_limit_stops_early(self):
         c = pass2.run_pass(
@@ -58,19 +58,19 @@ class TestRunPass(unittest.TestCase):
         c = pass2.run_pass(
             [self.f1, self.f2], self.cache, self._load, self._summarize, model="m", progress=True
         )
-        self.assertEqual(c, {"cached": 0, "done": 2, "error": 0})
+        self.assertEqual(c, {"cached": 0, "done": 2, "error": 0, "unavailable": 0})
         self.assertEqual(self.cache.stats()["total"], 2)
 
     def test_workers_process_all_then_skip_cached(self):
         c1 = pass2.run_pass(
             [self.f1, self.f2], self.cache, self._load, self._summarize, model="m", workers=4
         )
-        self.assertEqual(c1, {"cached": 0, "done": 2, "error": 0})
+        self.assertEqual(c1, {"cached": 0, "done": 2, "error": 0, "unavailable": 0})
         self.assertEqual(self.cache.stats()["total"], 2)
         c2 = pass2.run_pass(
             [self.f1, self.f2], self.cache, self._load, self._summarize, model="m", workers=4
         )
-        self.assertEqual(c2, {"cached": 2, "done": 0, "error": 0})
+        self.assertEqual(c2, {"cached": 2, "done": 0, "error": 0, "unavailable": 0})
 
     def test_workers_error_leaves_uncached(self):
         def boom(email):
@@ -224,3 +224,59 @@ class TestSampleFiles(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFailureClassification(unittest.TestCase):
+    """Distinguishing an ENDPOINT outage from a per-message failure. The whole
+    retry/abandon policy rests on this: counting an outage as N per-message
+    failures abandoned an entire backlog after three ticks of a closed LM
+    Studio."""
+
+    def test_a_refused_connection_is_an_outage(self):
+        from src.llm.pass2 import classify_failure
+
+        self.assertEqual(classify_failure(ConnectionRefusedError(61, "refused")), "unavailable")
+
+    def test_a_timeout_is_an_outage(self):
+        from src.llm.pass2 import classify_failure
+
+        self.assertEqual(classify_failure(TimeoutError()), "unavailable")
+
+    def test_the_openai_client_wrapper_classes_are_recognised_by_name(self):
+        """The OpenAI-compatible clients raise their own types; matching by name
+        avoids importing them just to classify."""
+        from src.llm.pass2 import classify_failure
+
+        for name in ("APIConnectionError", "APITimeoutError", "RateLimitError"):
+            exc = type(name, (Exception,), {})()
+            self.assertEqual(classify_failure(exc), "unavailable", name)
+
+    def test_a_wrapped_transport_error_is_found_through_the_chain(self):
+        from src.llm.pass2 import classify_failure
+
+        try:
+            try:
+                raise ConnectionRefusedError(61, "refused")
+            except Exception as inner:
+                raise RuntimeError("client wrapped it") from inner
+        except Exception as exc:
+            self.assertEqual(classify_failure(exc), "unavailable")
+
+    def test_a_bad_response_is_a_per_message_failure(self):
+        """This one SHOULD spend the message's retry budget."""
+        from src.llm.pass2 import classify_failure
+
+        self.assertEqual(classify_failure(ValueError("could not parse JSON")), "error")
+
+    def test_a_missing_file_is_a_per_message_failure(self):
+        from src.llm.pass2 import classify_failure
+
+        self.assertEqual(classify_failure(FileNotFoundError("gone")), "error")
+
+    def test_a_cyclic_exception_chain_terminates(self):
+        from src.llm.pass2 import classify_failure
+
+        a, b = ValueError("a"), ValueError("b")
+        a.__cause__ = b
+        b.__cause__ = a
+        self.assertEqual(classify_failure(a), "error")

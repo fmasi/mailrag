@@ -123,6 +123,7 @@ class _HTMLTextExtractor(HTMLParser):
 
 
 from src.data import calendar_summary
+from src.data.body_cleanup import clean_body
 from src.data.loaders.base import EmailLoader
 from src.data.models import NormalizedEmail
 
@@ -321,6 +322,11 @@ class MailArchiveXLoader(EmailLoader):
         # Extract body content and strip quoted reply chains.
         body = self._extract_email_body_from_message(msg)
         body = self._strip_reply_chain(body)
+        # Final normalization: drop leaked base64 blobs, URL tracking params and
+        # signature blocks (src/data/body_cleanup.py). Runs last so it never
+        # perturbs the reply-chain heuristics above, which key off the raw
+        # quoting structure.
+        body = clean_body(body)
 
         # Collapse calendar invites/notifications to a one-line summary so the
         # (often huge) ics/HTML body doesn't explode into hundreds of chunks.

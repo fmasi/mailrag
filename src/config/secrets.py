@@ -1,0 +1,119 @@
+"""Resolve a secret from a **reference**, never a literal.
+
+Config files get copied into repos, pasted into issues and swept into backups, so
+they hold a reference — ``keychain:...``, ``env:...``, ``file:...`` — and this
+module dereferences it at use time. A plaintext secret is rejected rather than
+merely discouraged: config is not a safe place for one, and silently accepting it
+teaches the wrong habit.
+
+Shared by the sync account passwords (``accounts.yaml``) and the LLM endpoint key
+(``RAG_LLM_API_KEY``), which is why it lives in ``src/config`` rather than under
+``src/sync``.
+
+macOS Keychain is the default on darwin but never the only option — mailrag runs
+on Linux too, and a resolver that only understood ``security(1)`` would make the
+whole sync feature macOS-only.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+
+_SCHEMES = ("keychain", "env", "file")
+
+
+class SecretError(RuntimeError):
+    """A secret reference could not be resolved."""
+
+
+def resolve_secret(ref: str) -> str:
+    """Dereference *ref* and return the secret.
+
+    Supported forms::
+
+        keychain:<service>   macOS Keychain generic password, looked up by service
+        env:<VAR>            environment variable (CI, containers)
+        file:<path>          first line of a file (expect 0600 on POSIX)
+
+    Raises :class:`SecretError` for an unknown scheme, a missing target, or a
+    bare literal.
+    """
+    if not ref or ":" not in ref:
+        # NEVER echo the rejected value: if it is a literal, it is the password,
+        # and this message reaches the sync log and the run record in the state
+        # DB, replayed on every scheduled tick.
+        raise SecretError(
+            "secret must be a reference, not a literal value "
+            f"({'it is empty' if not ref else 'value withheld'}); "
+            f"use one of {', '.join(s + ':...' for s in _SCHEMES)}"
+        )
+    scheme, _, target = ref.partition(":")
+    scheme = scheme.strip().lower()
+    target = target.strip()
+    # Validate the scheme BEFORE quoting it back. A value like "hunter2:" parses
+    # as scheme="hunter2" — echoing that leaks the password just as surely as
+    # echoing the whole reference would.
+    if scheme not in _SCHEMES:
+        raise SecretError(
+            f"unknown secret scheme (value withheld); expected one of "
+            f"{', '.join(s + ':...' for s in _SCHEMES)}"
+        )
+    if not target:
+        raise SecretError(f"secret reference with scheme {scheme!r} names no target")
+
+    if scheme == "env":
+        value = os.environ.get(target)
+        if not value:
+            raise SecretError(f"environment variable {target} is unset or empty")
+        return value
+
+    if scheme == "file":
+        path = os.path.expanduser(target)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                value = fh.readline().strip()
+        except OSError as exc:
+            raise SecretError(f"cannot read secret file {path}: {exc}") from exc
+        if not value:
+            raise SecretError(f"secret file {path} is empty")
+        return value
+
+    return _from_keychain(target)  # the only remaining validated scheme
+
+
+def _from_keychain(service: str) -> str:
+    """Read a generic password from the macOS Keychain by service name."""
+    if not shutil.which("security"):
+        raise SecretError(
+            f"keychain: secrets need the macOS `security` tool, which is not on PATH "
+            f"(on Linux use env: or file: instead of keychain:{service})"
+        )
+    try:
+        out = subprocess.run(
+            ["security", "find-generic-password", "-s", service, "-w"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SecretError(f"keychain lookup for {service!r} failed: {exc}") from exc
+    if out.returncode != 0:
+        raise SecretError(
+            f"no keychain item for service {service!r}. Store one with:\n"
+            f"  security add-generic-password -U -a <account> -s {service} -w"
+        )
+    # -w prints the password followed by a newline; nothing else goes to stdout.
+    value = out.stdout.rstrip("\n")
+    if not value:
+        raise SecretError(f"keychain item {service!r} holds an empty password")
+    return value
+
+
+# NOTE: mailrag deliberately provides no "store the password for me" helper.
+# `security add-generic-password -w <password>` puts the plaintext in argv, where
+# any local process can read it from the process table. Users are told to run
+# `security add-generic-password ... -w` WITHOUT a value, which prompts for it
+# instead; see docs/SYNC.md.
