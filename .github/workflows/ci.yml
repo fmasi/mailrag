@@ -85,24 +85,29 @@ jobs:
       - name: Install dependencies
         run: poetry install --with dev --all-extras --no-interaction --no-root
 
+      # --upgrade pip matters: pip-audit audits every distribution in the venv,
+      # including pip itself, and the pip that virtualenv seeds runs a few
+      # releases behind — routinely old enough to be carrying an open advisory
+      # of its own. pip is the installer, not a project dependency, so the
+      # honest fix is to freshen it rather than ignore the advisory. Note the
+      # earlier "Install Poetry" step upgrades the *outer* interpreter's pip,
+      # which is a different pip from this venv's.
       - name: Install pip-audit
-        run: poetry run pip install pip-audit
+        run: poetry run python -m pip install --upgrade pip pip-audit
 
-      # Audit the resolved environment against the OSV database. The two
-      # --ignore-vuln entries below are transitive advisories with NO upstream
-      # fix release yet; every fixable advisory was already resolved by bumping
-      # the lockfile (cryptography 49.0.0, pypdf 6.14.2, tornado 6.5.7, and
-      # torch 2.12.1 which moved us out of GHSA-rrmf-rvhw-rf47's range; plus
-      # pillow 12.3.0, soupsieve 2.8.4, transformers 5.12.1 and click 8.4.2 via
-      # the constraint floors in pyproject.toml). Revisit these ignores whenever
-      # the packages cut a patched release.
-      #   nltk 3.9.4 — path traversal in nltk.data (no fixed version):
-      #     https://github.com/advisories/GHSA-p4gq-832x-fm9v  (alias PYSEC-2026-597)
-      #     CVE-2026-54293 (alias of the above GHSA) claims a fix in nltk 3.10.0,
-      #     but 3.10.0 is not yet published on PyPI, so the ignore still stands.
+      # Audit the resolved environment against the OSV database, with NO
+      # --ignore-vuln exceptions: every advisory that has reached us now has an
+      # upstream fix, pulled in by the constraint floors in pyproject.toml
+      # (see the "Transitive security floors" block there for the per-package
+      # advisory IDs). The nltk path-traversal ignore that used to live here
+      # — GHSA-p4gq-832x-fm9v / PYSEC-2026-597 — is gone: it was only ever a
+      # placeholder for "fixed in 3.10.0, but 3.10.0 is not on PyPI yet", and
+      # 3.10.x has since shipped.
+      #
+      # Keep this list empty. If a new advisory lands with no fixed release,
+      # prefer pinning around it; add an --ignore-vuln only as a last resort,
+      # and say here which upstream release is being waited on.
       - name: Run pip-audit
         run: >
           poetry run pip-audit
           --vulnerability-service osv
-          --ignore-vuln GHSA-p4gq-832x-fm9v
-          --ignore-vuln PYSEC-2026-597

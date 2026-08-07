@@ -16,7 +16,12 @@ pandas
 # Vector storage and utilities
 python-dotenv
 pydantic
-qdrant-client
+# Capped below 1.19: that release removed `IDF_EMBEDDING_MODELS`, which
+# llama-index-vector-stores-qdrant still imports at module load, so an
+# uncapped install breaks every Qdrant code path. See pyproject.toml for
+# the full note and issue #106 for lifting it. Keep this bound in step with
+# the Poetry constraint.
+qdrant-client>=1.18.0,<1.19
 FlagEmbedding
 
 # Optional: For better CLI and logging
