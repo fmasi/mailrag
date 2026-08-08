@@ -674,6 +674,29 @@ class TestServerRegistration(unittest.TestCase):
         self.assertEqual(result.structured_content["result"]["text"], "body")
         self.assertFalse(result.is_error)
 
+    def test_call_tool_dispatches_into_grep_email(self):
+        srv = server.build_server()
+        rows = [{"subject": "hit", "thread_id": "t1", "line": "an invoice line"}]
+        with mock.patch("src.mcp_server.server._grep_email", return_value=rows) as grep:
+            result = asyncio.run(srv.call_tool("grep_email", {"pattern": "invoice"}))
+        self.assertEqual(result.structured_content["result"][0]["subject"], "hit")
+        self.assertFalse(result.is_error)
+        # The pattern reaches the grep layer rather than being dropped or reused
+        # as a semantic query — grep_email is the no-embeddings path.
+        self.assertEqual(grep.call_args.args[0], "invoice")
+
+    def test_call_tool_dispatches_into_get_thread(self):
+        srv = server.build_server()
+        searcher = _FakeSearcher(_threads())
+        with mock.patch("src.mcp_server.server.get_searcher", return_value=searcher):
+            result = asyncio.run(srv.call_tool("get_thread", {"thread_id": "t1"}))
+        self.assertFalse(result.is_error)
+        row = result.structured_content["result"]
+        self.assertEqual(row["thread_id"], "t1")
+        # get_thread is the FULL-body companion to the bounded search_email, so
+        # the whole text must come back, not a snippet.
+        self.assertEqual(row["text"], "thread one body")
+
     def test_invalid_argument_round_trips_as_a_protocol_error(self):
         """A rejected argument must reach the client as ``is_error``, not a crash.
 
@@ -730,6 +753,9 @@ class TestServerRegistration(unittest.TestCase):
                 good = await client.call_tool("search_email", {"query": "invoices", "top_k": 1})
                 return bad, good
 
+        # The mock is load-bearing only for the second (valid) call: the first
+        # fails at search_email's blank-query guard before any searcher is built,
+        # so it is not suppressing any part of the error path under test.
         with mock.patch(
             "src.mcp_server.server.get_searcher", return_value=_FakeSearcher(_threads())
         ):
