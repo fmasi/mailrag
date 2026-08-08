@@ -687,7 +687,7 @@ class TestServerRegistration(unittest.TestCase):
         still pass if the flag were hard-wired False; this pins the other
         direction.
         """
-        from mcp.client import Client
+        from mcp import Client
 
         srv = server.build_server()
 
@@ -701,8 +701,12 @@ class TestServerRegistration(unittest.TestCase):
             result = asyncio.run(run())
         self.assertTrue(result.is_error)
         # The rejection reason reaches the caller rather than being swallowed.
+        # Asserts on the tool NAME, which is contract (it is pinned by the
+        # registration test above and supplied by the SDK error wrapper), not on
+        # the ValueError's prose — otherwise rewording the message downgrades
+        # this from a protocol check into a spelling check.
         self.assertTrue(result.content)
-        self.assertIn("query", result.content[0].text.lower())
+        self.assertIn("search_email", result.content[0].text)
 
     def test_session_survives_an_errored_call(self):
         """An errored call must leave the session able to serve the next one.
@@ -711,7 +715,7 @@ class TestServerRegistration(unittest.TestCase):
         tears down the connection — which no single-call test can detect. This
         is the unit-level counterpart of the live stdio smoke test.
         """
-        from mcp.client import Client
+        from mcp import Client
 
         srv = server.build_server()
 
