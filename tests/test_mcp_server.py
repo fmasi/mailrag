@@ -634,6 +634,7 @@ class TestServerRegistration(unittest.TestCase):
         with mock.patch("src.mcp_server.server.list_collections", return_value=rows):
             result = asyncio.run(srv.call_tool("list_collections", {}))
         self.assertEqual(result.structured_content["result"][0]["name"], "work-rag")
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_answer_question(self):
         srv = server.build_server()
@@ -645,6 +646,7 @@ class TestServerRegistration(unittest.TestCase):
         ):
             result = asyncio.run(srv.call_tool("answer_question", {"query": "when?", "k": 1}))
         self.assertEqual(result.structured_content["result"]["answer"], "A")
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_list_attachments(self):
         srv = server.build_server()
@@ -652,6 +654,7 @@ class TestServerRegistration(unittest.TestCase):
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
             result = asyncio.run(srv.call_tool("list_attachments", {"thread_id": "t1"}))
         self.assertEqual(result.structured_content["result"][0]["sha256"], "abc")
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_get_attachment(self):
         srv = server.build_server()
@@ -669,6 +672,62 @@ class TestServerRegistration(unittest.TestCase):
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
             result = asyncio.run(srv.call_tool("get_attachment", {"sha256": "abc"}))
         self.assertEqual(result.structured_content["result"]["text"], "body")
+        self.assertFalse(result.is_error)
+
+    def test_invalid_argument_round_trips_as_a_protocol_error(self):
+        """A rejected argument must reach the client as ``is_error``, not a crash.
+
+        Driven through the SDK v2 in-memory ``Client`` rather than
+        ``srv.call_tool`` directly, because the two behave differently: the
+        direct call raises ``ToolError`` in-process, and it is the protocol
+        layer that converts that into ``CallToolResult(is_error=True)``. Only
+        the client path exercises what a real MCP consumer actually sees.
+
+        The happy-path tests above pin ``is_error is False``, which alone would
+        still pass if the flag were hard-wired False; this pins the other
+        direction.
+        """
+        from mcp.client import Client
+
+        srv = server.build_server()
+
+        async def run():
+            async with Client(srv) as client:
+                return await client.call_tool("search_email", {"query": "   "})
+
+        with mock.patch(
+            "src.mcp_server.server.get_searcher", return_value=_FakeSearcher(_threads())
+        ):
+            result = asyncio.run(run())
+        self.assertTrue(result.is_error)
+        # The rejection reason reaches the caller rather than being swallowed.
+        self.assertTrue(result.content)
+        self.assertIn("query", result.content[0].text.lower())
+
+    def test_session_survives_an_errored_call(self):
+        """An errored call must leave the session able to serve the next one.
+
+        Guards the failure mode where an exception escapes the tool wrapper and
+        tears down the connection — which no single-call test can detect. This
+        is the unit-level counterpart of the live stdio smoke test.
+        """
+        from mcp.client import Client
+
+        srv = server.build_server()
+
+        async def run():
+            async with Client(srv) as client:
+                bad = await client.call_tool("search_email", {"query": "   "})
+                good = await client.call_tool("search_email", {"query": "invoices", "top_k": 1})
+                return bad, good
+
+        with mock.patch(
+            "src.mcp_server.server.get_searcher", return_value=_FakeSearcher(_threads())
+        ):
+            bad, good = asyncio.run(run())
+        self.assertTrue(bad.is_error)
+        self.assertFalse(good.is_error)
+        self.assertEqual(good.structured_content["result"][0]["thread_id"], "t1")
 
 
 class TestCliWiring(unittest.TestCase):

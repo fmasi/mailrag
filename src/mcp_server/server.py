@@ -488,8 +488,14 @@ def build_server():
     the old name outright rather than aliasing it, so this import is the whole
     of the v1 -> v2 migration for us. The decorator API below (``@server.tool``)
     and ``run(transport="stdio")`` are unchanged between the two.
+
+    Imported from ``mcp.server`` rather than the deeper ``mcp.server.mcpserver``
+    the migration guide shows: the shallower path is a deliberate re-export
+    (``MCPServer`` is listed in ``mcp.server.__all__``), so it is the supported
+    surface, while the deeper module is an internal layout detail that a v2.x
+    patch could reorganise without a deprecation cycle.
     """
-    from mcp.server.mcpserver import MCPServer
+    from mcp.server import MCPServer
 
     server = MCPServer(SERVER_NAME)
 
