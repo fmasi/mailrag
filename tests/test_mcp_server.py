@@ -586,29 +586,29 @@ class TestServerRegistration(unittest.TestCase):
                 "get_attachment",
             },
         )
-        self.assertEqual(set(by_name["list_collections"].inputSchema.get("properties", {})), set())
+        self.assertEqual(set(by_name["list_collections"].input_schema.get("properties", {})), set())
         self.assertEqual(
-            set(by_name["search_email"].inputSchema["properties"]),
+            set(by_name["search_email"].input_schema["properties"]),
             {"query", "collection", "top_k", "mode", "max_chars", "full"},
         )
         self.assertEqual(
-            set(by_name["get_thread"].inputSchema["properties"]),
+            set(by_name["get_thread"].input_schema["properties"]),
             {"thread_id", "collection", "mode"},
         )
         self.assertEqual(
-            set(by_name["grep_email"].inputSchema["properties"]),
+            set(by_name["grep_email"].input_schema["properties"]),
             {"pattern", "collection", "max_matches", "regex"},
         )
         self.assertEqual(
-            set(by_name["answer_question"].inputSchema["properties"]),
+            set(by_name["answer_question"].input_schema["properties"]),
             {"query", "collection", "k"},
         )
         self.assertEqual(
-            set(by_name["list_attachments"].inputSchema["properties"]),
+            set(by_name["list_attachments"].input_schema["properties"]),
             {"thread_id", "message_id", "collection"},
         )
         self.assertEqual(
-            set(by_name["get_attachment"].inputSchema["properties"]),
+            set(by_name["get_attachment"].input_schema["properties"]),
             {"sha256", "ocr"},
         )
 
@@ -617,19 +617,24 @@ class TestServerRegistration(unittest.TestCase):
         searcher = _FakeSearcher(_threads())
         with mock.patch("src.mcp_server.server.get_searcher", return_value=searcher):
             result = asyncio.run(srv.call_tool("search_email", {"query": "invoices", "top_k": 1}))
-        # FastMCP (this SDK version) returns (content_blocks, structured_result).
-        content_blocks, structured = result
-        rows = structured["result"]
+        # SDK v2 returns a CallToolResult model. v1's FastMCP returned a bare
+        # (content_blocks, structured_result) 2-tuple, so the old unpacking here
+        # silently became "iterate the model's fields" — which is why the v1
+        # form failed loudly on the upgrade rather than passing on wrong data.
+        rows = result.structured_content["result"]
         self.assertEqual(rows[0]["thread_id"], "t1")
         # The text content mirrors the same payload.
-        self.assertIn("t1", content_blocks[0].text)
+        self.assertIn("t1", result.content[0].text)
+        # A successful call must not be flagged as an error.
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_list_collections(self):
         srv = server.build_server()
         rows = [{"name": "work-rag", "points_count": 3, "is_default": True}]
         with mock.patch("src.mcp_server.server.list_collections", return_value=rows):
-            _, structured = asyncio.run(srv.call_tool("list_collections", {}))
-        self.assertEqual(structured["result"][0]["name"], "work-rag")
+            result = asyncio.run(srv.call_tool("list_collections", {}))
+        self.assertEqual(result.structured_content["result"][0]["name"], "work-rag")
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_answer_question(self):
         srv = server.build_server()
@@ -639,17 +644,17 @@ class TestServerRegistration(unittest.TestCase):
             mock.patch("src.mcp_server.server.answer_from_threads", return_value="A"),
             mock.patch("src.llm.client.healthcheck", return_value=None),
         ):
-            _, structured = asyncio.run(
-                srv.call_tool("answer_question", {"query": "when?", "k": 1})
-            )
-        self.assertEqual(structured["result"]["answer"], "A")
+            result = asyncio.run(srv.call_tool("answer_question", {"query": "when?", "k": 1}))
+        self.assertEqual(result.structured_content["result"]["answer"], "A")
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_list_attachments(self):
         srv = server.build_server()
         store = _FakeStore([_FakeMeta("abc", "f.pdf", "application/pdf", 1, "t1", "m1")])
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
-            _, structured = asyncio.run(srv.call_tool("list_attachments", {"thread_id": "t1"}))
-        self.assertEqual(structured["result"][0]["sha256"], "abc")
+            result = asyncio.run(srv.call_tool("list_attachments", {"thread_id": "t1"}))
+        self.assertEqual(result.structured_content["result"][0]["sha256"], "abc")
+        self.assertFalse(result.is_error)
 
     def test_call_tool_dispatches_into_get_attachment(self):
         srv = server.build_server()
@@ -665,8 +670,99 @@ class TestServerRegistration(unittest.TestCase):
             }
         )
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
-            _, structured = asyncio.run(srv.call_tool("get_attachment", {"sha256": "abc"}))
-        self.assertEqual(structured["result"]["text"], "body")
+            result = asyncio.run(srv.call_tool("get_attachment", {"sha256": "abc"}))
+        self.assertEqual(result.structured_content["result"]["text"], "body")
+        self.assertFalse(result.is_error)
+
+    def test_call_tool_dispatches_into_grep_email(self):
+        srv = server.build_server()
+        rows = [{"subject": "hit", "thread_id": "t1", "line": "an invoice line"}]
+        with mock.patch("src.mcp_server.server._grep_email", return_value=rows) as grep:
+            result = asyncio.run(srv.call_tool("grep_email", {"pattern": "invoice"}))
+        self.assertEqual(result.structured_content["result"][0]["subject"], "hit")
+        self.assertFalse(result.is_error)
+        # The pattern reaches the grep layer rather than being dropped or reused
+        # as a semantic query — grep_email is the no-embeddings path.
+        self.assertEqual(grep.call_args.args[0], "invoice")
+
+    def test_call_tool_dispatches_into_get_thread(self):
+        srv = server.build_server()
+        searcher = _FakeSearcher(_threads())
+        with mock.patch("src.mcp_server.server.get_searcher", return_value=searcher):
+            result = asyncio.run(srv.call_tool("get_thread", {"thread_id": "t1"}))
+        self.assertFalse(result.is_error)
+        row = result.structured_content["result"]
+        self.assertEqual(row["thread_id"], "t1")
+        # get_thread is the FULL-body companion to the bounded search_email, so
+        # the whole text must come back, not a snippet.
+        self.assertEqual(row["text"], "thread one body")
+
+    def test_invalid_argument_round_trips_as_a_protocol_error(self):
+        """A rejected argument must reach the client as ``is_error``, not a crash.
+
+        Driven through the SDK v2 in-memory ``Client`` rather than
+        ``srv.call_tool`` directly, because the two behave differently: the
+        direct call raises ``ToolError`` in-process, and it is the protocol
+        layer that converts that into ``CallToolResult(is_error=True)``. Only
+        the client path exercises what a real MCP consumer actually sees.
+
+        The happy-path tests above pin ``is_error is False``, which alone would
+        still pass if the flag were hard-wired False; this pins the other
+        direction.
+        """
+        from mcp import Client
+
+        srv = server.build_server()
+
+        async def run():
+            async with Client(srv) as client:
+                return await client.call_tool("search_email", {"query": "   "})
+
+        # No get_searcher mock: search_email validates the query before it ever
+        # builds a searcher, so on this path a mock would be inert and would only
+        # suggest the searcher is involved in the failure.
+        result = asyncio.run(run())
+        self.assertTrue(result.is_error)
+        # Some reason reaches the caller rather than being swallowed — but the
+        # assertion deliberately stops at "non-empty text". The wording of the
+        # message is ours, and the "Error executing tool <name>:" framing around
+        # it is the SDK's error-formatting choice; neither is part of the MCP
+        # protocol contract, so matching either would couple this test to a
+        # string that can change while the behaviour it checks stays correct.
+        self.assertTrue(result.content)
+        # Assert the block type rather than assuming it: content is a union of
+        # text/image/resource blocks, so reaching .text blindly would fail as an
+        # AttributeError instead of a readable assertion.
+        self.assertEqual(result.content[0].type, "text")
+        self.assertTrue(result.content[0].text)
+
+    def test_session_survives_an_errored_call(self):
+        """An errored call must leave the session able to serve the next one.
+
+        Guards the failure mode where an exception escapes the tool wrapper and
+        tears down the connection — which no single-call test can detect. This
+        is the unit-level counterpart of the live stdio smoke test.
+        """
+        from mcp import Client
+
+        srv = server.build_server()
+
+        async def run():
+            async with Client(srv) as client:
+                bad = await client.call_tool("search_email", {"query": "   "})
+                good = await client.call_tool("search_email", {"query": "invoices", "top_k": 1})
+                return bad, good
+
+        # The mock is load-bearing only for the second (valid) call: the first
+        # fails at search_email's blank-query guard before any searcher is built,
+        # so it is not suppressing any part of the error path under test.
+        with mock.patch(
+            "src.mcp_server.server.get_searcher", return_value=_FakeSearcher(_threads())
+        ):
+            bad, good = asyncio.run(run())
+        self.assertTrue(bad.is_error)
+        self.assertFalse(good.is_error)
+        self.assertEqual(good.structured_content["result"][0]["thread_id"], "t1")
 
 
 class TestCliWiring(unittest.TestCase):
