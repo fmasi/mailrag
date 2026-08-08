@@ -695,10 +695,10 @@ class TestServerRegistration(unittest.TestCase):
             async with Client(srv) as client:
                 return await client.call_tool("search_email", {"query": "   "})
 
-        with mock.patch(
-            "src.mcp_server.server.get_searcher", return_value=_FakeSearcher(_threads())
-        ):
-            result = asyncio.run(run())
+        # No get_searcher mock: search_email validates the query before it ever
+        # builds a searcher, so on this path a mock would be inert and would only
+        # suggest the searcher is involved in the failure.
+        result = asyncio.run(run())
         self.assertTrue(result.is_error)
         # Some reason reaches the caller rather than being swallowed — but the
         # assertion deliberately stops at "non-empty text". The wording of the
@@ -707,6 +707,10 @@ class TestServerRegistration(unittest.TestCase):
         # protocol contract, so matching either would couple this test to a
         # string that can change while the behaviour it checks stays correct.
         self.assertTrue(result.content)
+        # Assert the block type rather than assuming it: content is a union of
+        # text/image/resource blocks, so reaching .text blindly would fail as an
+        # AttributeError instead of a readable assertion.
+        self.assertEqual(result.content[0].type, "text")
         self.assertTrue(result.content[0].text)
 
     def test_session_survives_an_errored_call(self):
