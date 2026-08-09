@@ -44,9 +44,11 @@ map — this is the canonical reading order.
 ## Operations & reference
 
 - **[`CLOUD_STORAGE_SETUP.md`](CLOUD_STORAGE_SETUP.md)** — Azure Blob Storage + Qdrant Cloud:
-  batch indexing, cost estimates, validation, and reset.
+  batch indexing, cost estimates, validation, and reset. (The optional Pinecone path
+  documented here has been retired — mailrag has consolidated on Qdrant.)
 - **[`ARCHITECTURE_DIAGRAMS.py`](ARCHITECTURE_DIAGRAMS.py)** — runnable script that prints the
-  data-lifecycle and query-flow diagrams.
+  data-lifecycle and query-flow diagrams as terminal ASCII, annotated with the module
+  behind each stage.
 - **[`POETRY_MIGRATION.md`](POETRY_MIGRATION.md)** — Poetry dependency-management notes (the
   conda + `requirements.txt` install path in [`SETUP.md`](SETUP.md) is the supported one).
 
