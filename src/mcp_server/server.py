@@ -306,22 +306,38 @@ def get_thread(
 
     The full-body companion to the bounded ``search_email`` (issue #84): given a
     ``thread_id`` returned by ``search_email``, return that thread's complete
-    attributed text plus metadata. Resolves the thread by re-running retrieval
-    for ``thread_id`` and selecting the matching context (no full-corpus dump).
+    attributed text plus metadata.
+
+    Resolution is an exact **key lookup** against the ``thread_id`` payload
+    field, not a search. It used to re-run retrieval with the thread_id as the
+    query and scan the hits for a matching id, which meant a successful lookup
+    depended on an opaque message-id embedding near its own thread — it
+    resolved only ~25% of the ids ``search_email`` had just returned (#109).
+
+    ``mode`` is accepted for backward compatibility but no longer influences the
+    result: a key fetch has no ranking to vary. It still selects which cached
+    searcher is used, and all of them share one Qdrant client and collection.
 
     ``searcher`` is injectable for tests. Raises ``ValueError`` on a blank id, an
     unknown thread, or an unconfigured corpus.
     """
-    if not thread_id or not thread_id.strip():
+    # Normalise BEFORE validating, so the guards see the canonical form. Stored
+    # thread_ids carry no angle brackets, but message_id does (`<abc@host>` vs
+    # `abc@host`) and callers hand us ids from both fields, so normalise rather
+    # than fail an otherwise-correct lookup on punctuation. Order matters: strip
+    # after the emptiness check and `<>` survives it as a "real" id, only to come
+    # back as `unknown thread ''` — sending the caller hunting for a thread that
+    # was never named.
+    thread_id = (thread_id or "").strip().strip("<>").strip()
+    if not thread_id:
         raise ValueError("thread_id must be a non-empty string")
     if mode not in VALID_MODES:
         raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
     searcher = searcher or get_searcher(collection, mode=mode)
-    contexts = searcher.search_threads(thread_id)
-    for c in contexts:
-        if c.thread_id == thread_id:
-            return _thread_to_full_dict(c)
-    raise ValueError(f"unknown thread {thread_id!r}")
+    context = searcher.thread_by_id(thread_id)
+    if context is None:
+        raise ValueError(f"unknown thread {thread_id!r}")
+    return _thread_to_full_dict(context)
 
 
 def grep_email(

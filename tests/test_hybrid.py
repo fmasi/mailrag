@@ -213,6 +213,39 @@ class TestThreadExpansion(unittest.TestCase):
         with self.assertRaises(ValueError):
             searcher.search_threads("q")
 
+    def test_thread_by_id_is_a_key_lookup_not_a_search(self):
+        """Issue #109: resolving a known id must not go through the retriever.
+
+        The old path embedded the thread_id and searched with it, so a lookup
+        succeeded only if the id happened to rank near its own thread (~25% on
+        the live corpus). This pins the two properties that fix it: the id goes
+        straight to the exact-lookup builder, and the retriever is never called.
+        """
+        retriever = MagicMock()
+        client = MagicMock()
+        searcher = hybrid.HybridSearcher(
+            retriever, reranker=None, client=client, collection="work-rag"
+        )
+        with patch("src.query.hybrid.build_thread_contexts") as BTC:
+            BTC.return_value = ["ctx1"]
+            out = searcher.thread_by_id("abc@host")
+        BTC.assert_called_once_with(client, "work-rag", ["abc@host"])
+        self.assertEqual(out, "ctx1")
+        retriever.retrieve.assert_not_called()
+
+    def test_thread_by_id_returns_none_when_absent(self):
+        """A missing thread is None, not an exception or a wrong thread."""
+        searcher = hybrid.HybridSearcher(
+            MagicMock(), reranker=None, client=MagicMock(), collection="work-rag"
+        )
+        with patch("src.query.hybrid.build_thread_contexts", return_value=[]):
+            self.assertIsNone(searcher.thread_by_id("nope"))
+
+    def test_thread_by_id_requires_client(self):
+        searcher = hybrid.HybridSearcher(MagicMock(), reranker=None)
+        with self.assertRaises(ValueError):
+            searcher.thread_by_id("t1")
+
     def test_build_searcher_passes_client_and_collection(self):
         with (
             patch("src.query.hybrid.QdrantVectorStore"),

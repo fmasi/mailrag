@@ -36,6 +36,32 @@ class _FakeSearcher:
         self.calls.append(query)
         return self._contexts
 
+    def thread_by_id(self, thread_id):
+        """Exact lookup by id — deliberately NOT recorded in ``calls``.
+
+        Mirrors the real ``HybridSearcher``: a key fetch, independent of search.
+        Keeping it out of ``calls`` is what lets tests assert that resolving a
+        thread never touched retrieval.
+        """
+        return next((c for c in self._contexts if c.thread_id == thread_id), None)
+
+
+class _StoreBackedSearcher(_FakeSearcher):
+    """A searcher that can look a thread up by id WITHOUT going through search.
+
+    Models the real world in the way ``_FakeSearcher`` does not: ``search_threads``
+    returns whatever semantic retrieval happens to rank highly (which for an
+    opaque message-id query is usually not the thread you asked for), while the
+    thread itself is present in the store and reachable by exact key. See #109.
+    """
+
+    def __init__(self, search_returns, store):
+        super().__init__(search_returns)
+        self._store = store
+
+    def thread_by_id(self, thread_id):
+        return self._store.get(thread_id)
+
 
 def _threads():
     return [
@@ -211,9 +237,73 @@ class TestGetThread(unittest.TestCase):
         self.assertEqual(out["text"], "thread two body")
         self.assertIn("attachment_names", out)
 
+    def test_resolves_a_thread_that_semantic_search_never_returns(self):
+        """Issue #109: a thread_id is a key, not a query.
+
+        The old implementation resolved a thread by embedding the thread_id and
+        running retrieval with it, then scanning the hits for an exact id match.
+        A thread_id is an opaque message-id, so whether the owning thread ranks
+        in the top-k is chance — measured at 3/12 (25%) against the live
+        personal-rag collection, including an ordinary thread titled
+        "RE: Re: Meeting next Monday".
+
+        ``_FakeSearcher`` hid this because it returns every thread for every
+        query, so the id match always succeeded. ``_StoreBackedSearcher`` models
+        the real shape instead: the thread exists in the store, and semantic
+        search does not surface it. Resolution must not depend on retrieval.
+        """
+        target = _FakeThread("needle", "Found me", "the full body", n_emails=2)
+        searcher = _StoreBackedSearcher(search_returns=_threads(), store={"needle": target})
+        out = server.get_thread("needle", searcher=searcher)
+        self.assertEqual(out["thread_id"], "needle")
+        self.assertEqual(out["text"], "the full body")
+        self.assertEqual(out["num_emails"], 2)
+        # And it must not have gone anywhere near retrieval to do it.
+        self.assertEqual(searcher.calls, [])
+
     def test_unknown_thread_raises(self):
         with self.assertRaises(ValueError):
-            server.get_thread("nope", searcher=_FakeSearcher(_threads()))
+            server.get_thread("nope", searcher=_StoreBackedSearcher(_threads(), store={}))
+
+    def test_bracket_only_id_reports_a_blank_id_not_a_missing_thread(self):
+        """`<>` normalises to empty, so it is a malformed id — not a lookup miss.
+
+        Regression guard for the normalisation added alongside the #109 fix:
+        stripping brackets after the emptiness check let `<>` slip through as a
+        real id, then fail with `unknown thread ''` — which sends the caller
+        hunting for a thread that was never named.
+        """
+        for blank in ("<>", " <> ", "  ", ""):
+            with self.subTest(thread_id=blank):
+                with self.assertRaises(ValueError) as ctx:
+                    server.get_thread(blank, searcher=_StoreBackedSearcher([], store={}))
+                self.assertIn("non-empty", str(ctx.exception))
+
+    def test_angle_bracketed_id_is_normalised(self):
+        """`<abc@host>` and `abc@host` name the same thread.
+
+        Stored thread_ids carry no angle brackets but message_id does, and
+        search_email surfaces both fields — so a caller copying the wrong one
+        would otherwise get `unknown thread` for a thread that is right there.
+        """
+        target = _FakeThread("abc@host", "S", "body")
+        searcher = _StoreBackedSearcher(search_returns=[], store={"abc@host": target})
+        out = server.get_thread("<abc@host>", searcher=searcher)
+        self.assertEqual(out["thread_id"], "abc@host")
+
+    def test_mode_does_not_change_the_result(self):
+        """A key fetch has no ranking, so every mode must agree.
+
+        `mode` is kept for backward compatibility; this pins that it cannot
+        influence which thread comes back.
+        """
+        target = _FakeThread("t9", "S", "same body either way")
+        searcher = _StoreBackedSearcher(search_returns=_threads(), store={"t9": target})
+        results = [
+            server.get_thread("t9", mode=m, searcher=searcher)
+            for m in ("hybrid", "dense", "sparse")
+        ]
+        self.assertEqual([r["text"] for r in results], ["same body either way"] * 3)
 
     def test_blank_thread_id_rejected(self):
         with self.assertRaises(ValueError):
