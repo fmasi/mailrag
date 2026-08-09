@@ -185,6 +185,53 @@ class TestRenderThread(unittest.TestCase):
         self.assertLess(text.index("Please find details"), text.index("Lets do it"))
 
 
+class TestBuildThreadContexts(unittest.TestCase):
+    """The exact-lookup path underneath both assemble_threads and thread_by_id."""
+
+    def _pt(self, mid, tid, text):
+        p = MagicMock()
+        p.payload = {
+            "message_id": mid,
+            "thread_id": tid,
+            "sender": "a",
+            "date": "2024-05-01T00:00:00+00:00",
+            "text": text,
+        }
+        return p
+
+    def test_fetches_by_exact_thread_id_filter_without_any_search(self):
+        """Issue #109: ids are resolved by payload filter, never by similarity."""
+        client = MagicMock()
+        client.scroll.side_effect = [([self._pt("m1", "needle", "the body")], None)]
+        ctxs = te.build_thread_contexts(client, "work-rag", ["needle"])
+        self.assertEqual([c.thread_id for c in ctxs], ["needle"])
+        self.assertIn("the body", ctxs[0].text)
+        # The id reached Qdrant as a filter value, not as a query string.
+        flt = client.scroll.call_args.kwargs["scroll_filter"]
+        self.assertEqual(flt.must[0].key, "thread_id")
+        self.assertEqual(list(flt.must[0].match.any), ["needle"])
+
+    def test_preserves_requested_order(self):
+        client = MagicMock()
+        client.scroll.side_effect = [
+            ([self._pt("m2", "t2", "second"), self._pt("m1", "t1", "first")], None)
+        ]
+        ctxs = te.build_thread_contexts(client, "work-rag", ["t1", "t2"])
+        self.assertEqual([c.thread_id for c in ctxs], ["t1", "t2"])
+
+    def test_id_with_no_points_is_skipped_not_fabricated(self):
+        """A stale id yields fewer threads rather than an empty/wrong one."""
+        client = MagicMock()
+        client.scroll.side_effect = [([self._pt("m1", "t1", "only this")], None)]
+        ctxs = te.build_thread_contexts(client, "work-rag", ["t1", "ghost"])
+        self.assertEqual([c.thread_id for c in ctxs], ["t1"])
+
+    def test_empty_ids_short_circuits(self):
+        client = MagicMock()
+        self.assertEqual(te.build_thread_contexts(client, "work-rag", []), [])
+        client.scroll.assert_not_called()
+
+
 class TestAssembleThreads(unittest.TestCase):
     def test_end_to_end_with_mock_client(self):
         nodes = [

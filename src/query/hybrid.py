@@ -19,7 +19,7 @@ from src.query.bge_m3_embedding import (
 )
 from src.query.fusion import reciprocal_rank_fusion
 from src.query.summary_rerank import make_summary_reranker
-from src.query.thread_expand import assemble_threads
+from src.query.thread_expand import assemble_threads, build_thread_contexts
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
@@ -90,6 +90,22 @@ class HybridSearcher:
             raise ValueError("search_threads requires a Qdrant client and collection")
         nodes = self.search(query)
         return assemble_threads(nodes, self._client, self._collection)
+
+    def thread_by_id(self, thread_id: str):
+        """Fetch one thread by exact id, or ``None`` if it is not in the corpus.
+
+        A key lookup, not a search: the id goes to Qdrant as a payload filter,
+        so the result does not depend on whether the id happens to embed near
+        its own thread. Deliberately independent of the retrieval ``mode`` this
+        searcher was built with — a key fetch has no ranking to vary.
+
+        Exists because resolving a known thread_id by re-running retrieval with
+        it as the query succeeded only ~25% of the time (issue #109).
+        """
+        if self._client is None or self._collection is None:
+            raise ValueError("thread_by_id requires a Qdrant client and collection")
+        contexts = build_thread_contexts(self._client, self._collection, [thread_id])
+        return contexts[0] if contexts else None
 
 
 def build_hybrid_searcher(

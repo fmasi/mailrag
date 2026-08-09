@@ -120,13 +120,19 @@ def render_thread(thread_id: str, emails: List[ThreadEmail]) -> str:
     return "\n".join(lines).strip()
 
 
-def assemble_threads(nodes, client, collection: str) -> List[ThreadContext]:
-    """Expand retrieved nodes into ordered, attributed ThreadContexts.
+def build_thread_contexts(client, collection: str, thread_ids: List[str]) -> List[ThreadContext]:
+    """Build ordered, attributed ThreadContexts for exactly these thread_ids.
 
-    Fetches all points per thread_id once, then builds one ThreadContext per
-    thread_id (in hit order).
+    A pure **key lookup**: the ids are fetched by an exact payload filter (see
+    :func:`fetch_thread_payloads`), never by similarity. Returned in the order
+    the ids were given; ids with no points are skipped rather than erroring, so
+    a partially-stale id list degrades to fewer threads instead of failing.
+
+    Split out of :func:`assemble_threads` so callers that already KNOW the
+    thread_id can reach it without a retrieval round-trip — see issue #109,
+    where resolving a known id by re-running search found it only ~25% of the
+    time.
     """
-    thread_ids = extract_thread_ids(nodes)
     if not thread_ids:
         return []
     payloads = fetch_thread_payloads(client, collection, thread_ids)
@@ -152,6 +158,17 @@ def assemble_threads(nodes, client, collection: str) -> List[ThreadContext]:
             )
         )
     return contexts
+
+
+def assemble_threads(nodes, client, collection: str) -> List[ThreadContext]:
+    """Expand retrieved nodes into ordered, attributed ThreadContexts.
+
+    Fetches all points per thread_id once, then builds one ThreadContext per
+    thread_id (in hit order). Search is used only to DISCOVER which threads are
+    relevant; turning those ids into threads is the exact lookup in
+    :func:`build_thread_contexts`.
+    """
+    return build_thread_contexts(client, collection, extract_thread_ids(nodes))
 
 
 def estimate_tokens(text: str) -> int:
