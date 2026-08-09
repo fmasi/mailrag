@@ -265,6 +265,20 @@ class TestGetThread(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.get_thread("nope", searcher=_StoreBackedSearcher(_threads(), store={}))
 
+    def test_bracket_only_id_reports_a_blank_id_not_a_missing_thread(self):
+        """`<>` normalises to empty, so it is a malformed id — not a lookup miss.
+
+        Regression guard for the normalisation added alongside the #109 fix:
+        stripping brackets after the emptiness check let `<>` slip through as a
+        real id, then fail with `unknown thread ''` — which sends the caller
+        hunting for a thread that was never named.
+        """
+        for blank in ("<>", " <> ", "  ", ""):
+            with self.subTest(thread_id=blank):
+                with self.assertRaises(ValueError) as ctx:
+                    server.get_thread(blank, searcher=_StoreBackedSearcher([], store={}))
+                self.assertIn("non-empty", str(ctx.exception))
+
     def test_angle_bracketed_id_is_normalised(self):
         """`<abc@host>` and `abc@host` name the same thread.
 

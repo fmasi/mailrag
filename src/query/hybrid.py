@@ -8,7 +8,7 @@ RRF callback (src/query/fusion.py). FlagEmbedding/reranker imports are lazy so t
 module imports cleanly in the unit-test env.
 """
 
-from typing import List
+from typing import List, Optional
 
 from llama_index.core import VectorStoreIndex
 from llama_index.vector_stores.qdrant import QdrantVectorStore
@@ -19,7 +19,7 @@ from src.query.bge_m3_embedding import (
 )
 from src.query.fusion import reciprocal_rank_fusion
 from src.query.summary_rerank import make_summary_reranker
-from src.query.thread_expand import assemble_threads, build_thread_contexts
+from src.query.thread_expand import ThreadContext, assemble_threads, build_thread_contexts
 
 DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "sparse"
@@ -84,14 +84,14 @@ class HybridSearcher:
             nodes = self._reranker.postprocess_nodes(nodes, query_str=query)
         return nodes
 
-    def search_threads(self, query: str):
+    def search_threads(self, query: str) -> List[ThreadContext]:
         """Search, then expand the hits into attributed ThreadContexts."""
         if self._client is None or self._collection is None:
             raise ValueError("search_threads requires a Qdrant client and collection")
         nodes = self.search(query)
         return assemble_threads(nodes, self._client, self._collection)
 
-    def thread_by_id(self, thread_id: str):
+    def thread_by_id(self, thread_id: str) -> Optional[ThreadContext]:
         """Fetch one thread by exact id, or ``None`` if it is not in the corpus.
 
         A key lookup, not a search: the id goes to Qdrant as a payload filter,

@@ -321,14 +321,18 @@ def get_thread(
     ``searcher`` is injectable for tests. Raises ``ValueError`` on a blank id, an
     unknown thread, or an unconfigured corpus.
     """
-    if not thread_id or not thread_id.strip():
+    # Normalise BEFORE validating, so the guards see the canonical form. Stored
+    # thread_ids carry no angle brackets, but message_id does (`<abc@host>` vs
+    # `abc@host`) and callers hand us ids from both fields, so normalise rather
+    # than fail an otherwise-correct lookup on punctuation. Order matters: strip
+    # after the emptiness check and `<>` survives it as a "real" id, only to come
+    # back as `unknown thread ''` — sending the caller hunting for a thread that
+    # was never named.
+    thread_id = (thread_id or "").strip().strip("<>").strip()
+    if not thread_id:
         raise ValueError("thread_id must be a non-empty string")
     if mode not in VALID_MODES:
         raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
-    # Stored thread_ids carry no angle brackets, but message_id does
-    # (`<abc@host>` vs `abc@host`). Callers hand us ids from both fields, so
-    # normalise rather than fail an otherwise-correct lookup on punctuation.
-    thread_id = thread_id.strip().strip("<>")
     searcher = searcher or get_searcher(collection, mode=mode)
     context = searcher.thread_by_id(thread_id)
     if context is None:
