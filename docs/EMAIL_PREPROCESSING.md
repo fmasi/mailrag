@@ -234,7 +234,7 @@ _REPLY_SEPARATOR_RE = re.compile(
 ### Step 4 — Add test cases
 
 Add corresponding test cases to `tests/test_reply_chain_stripping.py` before
-shipping. The test file has **45 tests** across six classes:
+shipping. The test file has **81 tests** across thirteen classes, including:
 
 | Class | What it covers |
 |---|---|

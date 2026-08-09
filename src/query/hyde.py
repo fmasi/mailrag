@@ -4,8 +4,7 @@
 Bridge the query->document vocabulary gap: instead of searching with the user's
 question, generate a hypothetical answer and search with that (it "looks like" a
 real answer email, so it matches better). Pure logic (prompt + combine) lives here
-and is unit-tested; the LLM call is a thin glue function. See
-docs/superpowers/specs/2026-05-30-hyde-query-side-design.md.
+and is unit-tested; the LLM call is a thin glue function.
 """
 
 from __future__ import annotations

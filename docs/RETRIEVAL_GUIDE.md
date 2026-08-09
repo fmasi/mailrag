@@ -432,10 +432,12 @@ specifically, MLX is dense-only** (no learned sparse), which is why a hybrid bui
 
 - **Must run on the host, not a devcontainer** — Docker on macOS has **no Metal/MPS
   passthrough**, so GPU acceleration is host-only. (A *host* conda env keeps package isolation.)
-- **Default: [Infinity](https://github.com/michaelfeil/infinity) on `--device mps` with
-  fp16.** One server returns dense + learned-sparse + ColBERT; fp16 boosts throughput with
-  negligible retrieval impact; push batch size up (UMA has headroom); try
-  `PYTORCH_MPS_PREFER_METAL=1`.
+- **What mailrag actually does: in-process FlagEmbedding on PyTorch-MPS with fp16**
+  (`src/ingest/embedder.py`) — no serving layer at all; dense + learned-sparse come from
+  one forward pass. If you *do* want a server (shared across processes),
+  [Infinity](https://github.com/michaelfeil/infinity) on `--device mps` with fp16 is the
+  natural choice: one server returns dense + learned-sparse + ColBERT; push batch size up
+  (UMA has headroom); try `PYTORCH_MPS_PREFER_METAL=1`.
 - **Max-performance option:** split — **MLX-fp16 for dense** (hits the M5 tensor units) +
   Infinity/CPU for sparse. More plumbing; only worth it if a quick benchmark shows MLX is
   dramatically faster. Quality is identical either way, so benchmark and decide empirically.
@@ -559,8 +561,8 @@ Each `ThreadContext` has:
 - `.emails` — list of `ThreadEmail` objects (one per reconstructed email)
 - `.text` — the fully rendered, attributed block ready to pass to an LLM
 
-`build_hybrid_searcher` accepts `mode="hybrid"` (default) or `"dense"`, and `rerank=True`
-to attach the cross-encoder before thread expansion:
+`build_hybrid_searcher` accepts `mode="hybrid"` (default), `"dense"`, or `"sparse"`, and
+`rerank=True` to attach the cross-encoder before thread expansion:
 
 ```python
 searcher = build_hybrid_searcher("my-collection", mode="hybrid", rerank=True)

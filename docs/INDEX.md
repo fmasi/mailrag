@@ -24,9 +24,10 @@ map — this is the canonical reading order.
    - **[`SYNC.md`](SYNC.md)** — keeping a collection live: `accounts.yaml`, secret references
      (`keychain:` / `env:` / `file:`), folder **roles**, stage-skipping when a backend is down,
      launchd & systemd scheduling, and the `MessageSource` seam for adding a provider.
-   - **[`MCP_SERVER.md`](MCP_SERVER.md)** — the multi-collection stdio MCP server: the five tools
-     (`list_collections` / `search_email` / `answer_question` / `list_attachments` /
-     `get_attachment`), collection discovery, client setup, and the CLI↔MCP capability matrix.
+   - **[`MCP_SERVER.md`](MCP_SERVER.md)** — the multi-collection stdio MCP server: the seven tools
+     (`list_collections` / `search_email` / `get_thread` / `grep_email` / `answer_question` /
+     `list_attachments` / `get_attachment`), collection discovery, client setup, and the
+     CLI↔MCP capability matrix.
    - **[`ARCHITECTURE.md`](ARCHITECTURE.md)** — design decisions and extension points.
    - **[`EMAIL_PREPROCESSING.md`](EMAIL_PREPROCESSING.md)** — reply-chain stripping, posting
      styles, and chunk-size tuning.
@@ -43,9 +44,11 @@ map — this is the canonical reading order.
 ## Operations & reference
 
 - **[`CLOUD_STORAGE_SETUP.md`](CLOUD_STORAGE_SETUP.md)** — Azure Blob Storage + Qdrant Cloud:
-  batch indexing, cost estimates, validation, and reset.
+  batch indexing, cost estimates, validation, and reset. (The optional Pinecone path
+  documented here has been retired — mailrag has consolidated on Qdrant.)
 - **[`ARCHITECTURE_DIAGRAMS.py`](ARCHITECTURE_DIAGRAMS.py)** — runnable script that prints the
-  data-lifecycle and query-flow diagrams.
+  data-lifecycle and query-flow diagrams as terminal ASCII, annotated with the module
+  behind each stage.
 - **[`POETRY_MIGRATION.md`](POETRY_MIGRATION.md)** — Poetry dependency-management notes (the
   conda + `requirements.txt` install path in [`SETUP.md`](SETUP.md) is the supported one).
 

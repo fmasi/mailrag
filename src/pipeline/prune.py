@@ -5,7 +5,6 @@ content-addressed blacklist (src/data/blacklist.py). `summarize`/`index` then sk
 those files via ``resolve_index_files``, so the drop happens BEFORE the expensive
 LLM pass. Nothing is deleted — only a text file of hashes is written, and a
 verify-before-prune confirmation shows a sample first.
-See docs/superpowers/specs/2026-06-05-persona-engine-judge-prune-design.md.
 """
 
 from __future__ import annotations

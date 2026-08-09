@@ -21,13 +21,11 @@ migration with real `.eml` data.
 | `AZURE_STORAGE_CONNECTION_STRING` | Phase 1 | — | Azure Storage account connection string |
 | `AZURE_BLOB_CONTAINER` | Phase 1 | `eml-archive` | Blob container holding `.eml` files |
 | `AZURE_BLOB_PREFIX` | No | `""` (all blobs) | Scope listing to a subfolder, e.g. `Inbox/` |
-| `VECTOR_STORE_PROVIDER` | Phase 2 | `simple` | `simple` (local JSON), `qdrant`, or `pinecone` |
+| `VECTOR_STORE_PROVIDER` | Phase 2 | `simple` | Set to `qdrant`. `simple` is a local-JSON dev store only (no hybrid retrieval); `pinecone` is retired — see below |
 | `QDRANT_URL` | Qdrant mode | — | Qdrant cluster URL (`https://...:6333`) |
 | `QDRANT_API_KEY` | Qdrant Cloud | `""` | Qdrant API key (not needed for local Docker) |
 | `QDRANT_COLLECTION_NAME` | Qdrant mode | `email-rag` | Collection used for vectors |
 | `QDRANT_PREFER_GRPC` | No | `false` | Use gRPC transport for Qdrant client (recommended: `true` for cloud Qdrant) |
-| `PINECONE_API_KEY` | Pinecone mode | — | Pinecone API key |
-| `PINECONE_INDEX_NAME` | Pinecone mode | `email-rag` | Name of the Pinecone serverless index |
 
 All variables are read from `.env` (via `python-dotenv`) or from the shell
 environment.  Copy the template and fill in your values:
@@ -256,130 +254,21 @@ poetry run python scripts/reset_qdrant_index.py --drop-schema
 Both modes also remove `scripts/.vector_batch_checkpoint.txt` so batch indexing
 starts from the beginning.
 
-## Phase 2b — Pinecone (Optional Legacy Path)
+## Pinecone — removed
 
-### 1. Create a Free Pinecone Account
+An optional Pinecone path used to be documented here. It has been retired.
 
-1. Sign up at <https://app.pinecone.io/>.
-2. The **Starter (free)** plan gives you 1 serverless index, 2 GB storage,
-   and ~100 K vectors — enough for 68 K emails.
+mailrag has consolidated on **Qdrant as its vector backend**. The capability the
+retrieval path depends on — learned-sparse vectors stored alongside dense ones as
+named vectors on the same points — is a Qdrant-specific facility, so maintaining a
+second backend bought a portability the project does not want at the cost of using
+the one backend well. See [ROADMAP.md](ROADMAP.md) for the decision and
+[ARCHITECTURE.md](ARCHITECTURE.md) for how the store is actually used.
 
-### 2. Create a Serverless Index
-
-In the Pinecone console:
-
-1. Click **Create Index**.
-2. **Index name**: `email-rag` (matches the default `PINECONE_INDEX_NAME`).
-3. **Dimensions**: `1536` — must match `text-embedding-3-small` output.
-4. **Metric**: `cosine`.
-5. **Environment type**: **Serverless**.
-6. **Cloud / Region**: AWS `us-east-1` (free-tier region).
-7. Click **Create Index**.
-
-### 3. Get the API Key
-
-1. Go to **API Keys** in the Pinecone sidebar.
-2. Copy the default key.
-3. Add to `.env`:
-
-```bash
-PINECONE_API_KEY=pcsk_XXXXXXXXXXXX
-PINECONE_INDEX_NAME=email-rag
-VECTOR_STORE_PROVIDER=pinecone
-```
-
-### 4. Small-Scale Test (10 Emails → Pinecone)
-
-This end-to-end test loads 10 emails from Azure, embeds them, and pushes
-vectors to Pinecone:
-
-```bash
-poetry run python -c "
-from dotenv import load_dotenv; load_dotenv()
-from src.config.settings import RAGConfig
-from src.data.loader import load_emails
-from src.storage.persist import StorageManager
-
-RAGConfig.initialize_settings()
-
-docs = load_emails(source='azure_blob', num_samples=10)
-print(f'Loaded {len(docs)} documents from Azure')
-
-index = StorageManager.create_and_save_index(docs)
-print('Index created in Pinecone')
-
-# Verify vectors exist
-print(f'Index has vectors: {StorageManager.index_exists()}')
-"
-```
-
-### 5. Full Batch Indexing (68 K Emails)
-
-The batch script processes emails in chunks of 200 with checkpoint
-resumption:
-
-```bash
-poetry run python scripts/batch_index_to_vector_store.py
-```
-
-The script:
-- Lists all `.eml` blobs in the Azure container.
-- Downloads each batch of 200 to a temporary directory (auto-deleted after
-  each batch).
-- Parses via `MailArchiveXLoader`, embeds via OpenAI, and upserts to Pinecone.
-- Writes `scripts/.vector_batch_checkpoint.txt` after each batch so you
-  can safely Ctrl-C and resume later.
-
-> **Batch size note:** The default batch size is 200 emails, tuned for
-> memory-constrained environments like GitHub Codespaces (2-core, 4 GB).
-> You can increase `BATCH_SIZE` in the script if you have more RAM.
-
-### 5a. Resetting the Index
-
-To wipe all vectors and restart indexing from scratch (e.g., after changing
-chunk size or metadata format):
-
-```bash
-poetry run python scripts/reset_pinecone_index.py
-```
-
-This deletes all vectors from the Pinecone index **and** removes the
-checkpoint file so the batch script starts from email 0.
-
-### 5b. Metadata Limits & Safety
-
-Document metadata is automatically trimmed to stay within two hard limits:
-
-| Limit | Source | Value |
-|---|---|---|
-| Chunk-size ceiling | LlamaIndex sentence splitter | `RAG_CHUNK_SIZE` (default 2048) |
-| Per-vector metadata | Pinecone API | 40 960 bytes |
-
-Bulky fields (`source_id`, `to_full`, `cc_full`) are excluded from
-embedding/LLM context so they don't count toward the chunk-size ceiling,
-but they are still stored in Pinecone for filtering.
-
-To validate these limits locally **before** indexing:
-
-```bash
-poetry run pytest tests/test_document_metadata_limits.py -v
-```
-
-### 6. Query Against Pinecone (Optional Legacy Path)
-
-Once vectors are in Pinecone, any query path automatically uses it when
-`VECTOR_STORE_PROVIDER=pinecone`:
-
-```bash
-python -c "
-from dotenv import load_dotenv; load_dotenv()
-from src.query.hybrid import build_hybrid_searcher
-
-searcher = build_hybrid_searcher('your-collection', mode='hybrid')
-for ctx in searcher.search_threads('meeting schedule'):
-    print(ctx.subject)
-"
-```
+The `VECTOR_STORE_PROVIDER` switch and the Pinecone branches in
+`src/storage/persist.py` still exist but are reachable only from two legacy
+scripts, not from the live pipeline. Their removal is tracked in
+[#49](https://github.com/fmasi/mailrag/issues/49).
 
 ---
 
@@ -415,9 +304,10 @@ QDRANT_PREFER_GRPC=true         # gRPC is faster than REST for bulk upserts
 # QDRANT_PREFER_GRPC=true
 ```
 
-To test **only Phase 1** (Azure loader + local vector store), omit the
-Qdrant/Pinecone variables and keep `VECTOR_STORE_PROVIDER=simple` (or leave it
-unset — `simple` is the default).
+To test **only Phase 1** (the Azure loader, without a remote vector store), omit
+the Qdrant variables. Note that the resulting local store is a development
+convenience only — it cannot serve the hybrid dense+sparse retrieval the query
+path expects, so it is not a supported way to run mailrag.
 
 ---
 
@@ -460,14 +350,10 @@ QDRANT_API_KEY=
 | `ValueError: QDRANT_URL environment variable is not set` | Set `QDRANT_URL` in `.env` when `VECTOR_STORE_PROVIDER=qdrant` |
 | `Connection refused` to `host.docker.internal:1234` | Ensure LM Studio server is running on host and exposes an OpenAI-compatible endpoint |
 | Qdrant insert/query auth errors | Verify `QDRANT_API_KEY` and `QDRANT_URL` match your cloud cluster |
-| `ValueError: PINECONE_API_KEY environment variable is not set` | Set `PINECONE_API_KEY` in `.env` or as a codespace secret |
 | `Connection string is either blank or malformed` | Make sure the full string is on one line with no line breaks |
-| Pinecone upsert errors about dimension mismatch | Ensure the index was created with **1536** dimensions (matching `text-embedding-3-small`) |
 | `ValueError: Metadata length ... is longer than chunk size` | Increase `RAG_CHUNK_SIZE` in `.env` (e.g. 2048). The metadata truncation in `models.py` should prevent this — run `pytest tests/test_document_metadata_limits.py` to verify |
-| `PineconeApiException: Metadata size ... exceeds the limit of 40960 bytes` | Recipient/CC fields are too large. The `_MAX_RECIPIENT_FULL_LEN` cap in `models.py` should prevent this — run the metadata limit tests to verify |
 | Exit code 139 (segfault / OOM kill) | Reduce `BATCH_SIZE` in `scripts/batch_index_to_vector_store.py` (default 200). Codespace smallest tier has ~2 GB RAM |
 | Slow Azure downloads | Check the storage account region matches your runtime region |
 | `scripts/batch_index_to_vector_store.py` stops mid-way | Just re-run — it resumes from `scripts/.vector_batch_checkpoint.txt` |
 | Want to re-index Qdrant but keep schema | Run `poetry run python scripts/reset_qdrant_index.py` |
 | Want to re-index Qdrant and delete schema too | Run `poetry run python scripts/reset_qdrant_index.py --drop-schema` |
-| Want to re-index Pinecone from scratch | Run `poetry run python scripts/reset_pinecone_index.py` |

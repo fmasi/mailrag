@@ -3,8 +3,7 @@
 
 Rank-finding + miss-classification over ranked hit lists. Qdrant-free: operates on
 plain dicts ({"thread_id", "message_id"}) so it unit-tests in the lightweight env.
-The live driver is scripts/eval/diagnose_coverage.py. See
-docs/superpowers/specs/2026-05-30-coverage-miss-diagnostic-design.md.
+The live driver is scripts/eval/diagnose_coverage.py.
 """
 
 from __future__ import annotations
