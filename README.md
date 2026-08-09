@@ -15,12 +15,13 @@ It ships as a CLI, a full-screen TUI wizard, a scheduled continuous-sync agent
 path into agents like Claude Code.
 
 **What it buys you.** A generic RAG treats every email as an isolated document. On a real
-~32k-email corporate mailbox that plain-dense baseline finds the right message only **46%** of
+~32k-email corporate mailbox that plain-dense baseline finds the right message only **45.6%** of
 the time (recall@5). mailrag is built for how email actually works: it answers from the whole
-**thread**, not one message, and that takes recall@5 to **93%**. The metric shifts from
+**thread**, not one message, and that takes recall@5 to **93.3%**. The metric shifts from
 message-level to thread-level *on purpose* — for a conversation the thread is the right unit of
-truth. Reconstructing it is the single biggest lever (**+29**, from a 64% message-level base),
-just ahead of a per-email contextual summary (**+13**). Neither is a fancier embedding model.
+truth. Reconstructing it is the single biggest lever (**+29.1**, from a 64.2% message-level
+base), just ahead of a per-email contextual summary (**+12.8**). Neither is a fancier
+embedding model.
 As a yardstick the email-tuned hybrid is benchmarked against NVIDIA's general-purpose retrieval
 stack: it wins on email, while NVIDIA's stack wins on broad legal e-discovery (TREC) — same
 systems, opposite winners, task-dependent. Numbers are author-reported on a *private* mailbox
@@ -221,7 +222,7 @@ write-up:
 | **+ LLM noise removal** | precision — catches the ~⅓ of noise regex can't, and clears junk out of the top results (measured below) | one-time LLM cost (see above) |
 | **+ contextual retrieval** (prepend each email's summary before embedding — the `C′` / `work-rag-ctx-*` collection) | short/terse emails match by *gist*; the best ranked arm *and* the end-to-end winner | one extra embedded collection to build/maintain |
 | **+ cross-encoder reranker** | small precision lift on pointed queries (**+2.5 R@5**) | **demotes the answer on thread-spanning queries** (and hurt outright under the earlier LLM-judged eval, §9); off by default |
-| **+ thread reconstruction** (pull the full conversation of each top hit) | **message-level recall@5 64% → thread-level 93%** — match a small unit, answer from its whole thread | larger context per query (tunable: expand top-N threads) |
+| **+ thread reconstruction** (pull the full conversation of each top hit) | **message-level recall@5 64.2% → thread-level 93.3%** — match a small unit, answer from its whole thread | larger context per query (tunable: expand top-N threads) |
 
 **How the eval was run.** The eval set is **360 synthetic queries** (144 terse / 144 content /
 72 spanning), each generated from a known email so the **recall ladder is scored against hard
@@ -237,8 +238,8 @@ Significance tests and confound controls are in
 [`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29):
 
 - **Thread reconstruction is the biggest single win — and needs no LLM.** Matching a small unit
-  and returning its whole conversation lifts **recall@5 from 64% (message-level) → 93%
-  (thread-level)** (+29) — it trades "find the needle" for "find the right thread," which the
+  and returning its whole conversation lifts **recall@5 from 64.2% (message-level) → 93.3%
+  (thread-level)** (+29.1) — it trades "find the needle" for "find the right thread," which the
   conversation then answers. The target shifts from one message to its thread by design: for a
   conversation, the thread is the right unit of truth.
 - **Thread-aware *summaries* help where they're designed to — terse replies.** *(Note:
@@ -271,11 +272,11 @@ scored on the 360 queries against hard gold labels (no LLM judge), reproducible 
 
 | step | recall@5 | gain |
 |------|----------|------|
-| plain dense | 46% | — |
-| + learned sparse | 49% | +3 |
-| + contextual summary | 62% | +13 |
-| + reranking | 64% | +2 |
-| **+ thread reconstruction** ★ | **93%** | **+29** |
+| plain dense | 45.6% | — |
+| + learned sparse | 48.9% | +3.3 |
+| + contextual summary | 61.7% | +12.8 |
+| + reranking | 64.2% | +2.5 |
+| **+ thread reconstruction** ★ | **93.3%** | **+29.1** |
 
 ★ The last step switches from "find the exact email" to "find its *thread*" — a legitimately
 easier, more useful target (thread-recall). The two biggest levers (thread reconstruction +29,

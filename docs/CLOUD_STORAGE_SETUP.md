@@ -21,7 +21,7 @@ migration with real `.eml` data.
 | `AZURE_STORAGE_CONNECTION_STRING` | Phase 1 | — | Azure Storage account connection string |
 | `AZURE_BLOB_CONTAINER` | Phase 1 | `eml-archive` | Blob container holding `.eml` files |
 | `AZURE_BLOB_PREFIX` | No | `""` (all blobs) | Scope listing to a subfolder, e.g. `Inbox/` |
-| `VECTOR_STORE_PROVIDER` | Phase 2 | `simple` | Set to `qdrant`. The `simple` default is a local-JSON development store and cannot serve hybrid retrieval; a `pinecone` branch survives in legacy scripts but is retired (see below) |
+| `VECTOR_STORE_PROVIDER` | Phase 2 | `simple` | Set to `qdrant`. `simple` is a local-JSON dev store only (no hybrid retrieval); `pinecone` is retired — see below |
 | `QDRANT_URL` | Qdrant mode | — | Qdrant cluster URL (`https://...:6333`) |
 | `QDRANT_API_KEY` | Qdrant Cloud | `""` | Qdrant API key (not needed for local Docker) |
 | `QDRANT_COLLECTION_NAME` | Qdrant mode | `email-rag` | Collection used for vectors |
