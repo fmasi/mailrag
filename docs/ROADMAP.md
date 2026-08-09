@@ -49,6 +49,14 @@ The open issues cluster into six streams, which the milestones below draw from:
    periodic ecosystem re-check
    ([#95](https://github.com/fmasi/mailrag/issues/95)).
 
+There is also a research stream around the noise-cleaning pipeline
+([#28](https://github.com/fmasi/mailrag/issues/28),
+[#30](https://github.com/fmasi/mailrag/issues/30),
+[#9](https://github.com/fmasi/mailrag/issues/9),
+[#10](https://github.com/fmasi/mailrag/issues/10)) that is explicitly not on
+the 1.0 path — the current calibrate-then-sweep pipeline works, and these are
+refinements to its cost/quality trade-off.
+
 ## The backend decision
 
 mailrag commits to **Qdrant as the vector backend**. It does not maintain a
@@ -69,14 +77,6 @@ rather than reconciliation. And the effort redirects forward, starting with
 server-side fusion through Qdrant's native Query API
 ([#1](https://github.com/fmasi/mailrag/issues/1)) instead of the client-side RRF
 callback used today.
-
-There is also a research stream around the noise-cleaning pipeline
-([#28](https://github.com/fmasi/mailrag/issues/28),
-[#30](https://github.com/fmasi/mailrag/issues/30),
-[#9](https://github.com/fmasi/mailrag/issues/9),
-[#10](https://github.com/fmasi/mailrag/issues/10)) that is explicitly not on
-the 1.0 path — the current calibrate-then-sweep pipeline works, and these are
-refinements to its cost/quality trade-off.
 
 ## Milestones
 
@@ -108,7 +108,7 @@ deferred, however interesting.
 | [#97](https://github.com/fmasi/mailrag/issues/97) | One reproducible public recall@5 number — turnkey `make bench` on Enron-QA | Converts the project's central claim from "trust me" to "check me". For a public 1.0 this is the difference between a demo and a result |
 | [#42](https://github.com/fmasi/mailrag/issues/42) | Finish the verb rename in code identifiers (pass1/pass2/explore/build → tag/summarize/scan/index) | Mass renames are exactly what a 1.0 boundary is for; doing it afterwards churns a supposedly stable codebase |
 | [#50](https://github.com/fmasi/mailrag/issues/50) | Unit tests for the load-bearing untested modules (contextual_index, data models, rubrics, calibration, runner) | The untested orchestration seams are where a silent bug corrupts an index rather than throwing; 1.0 should not ship with them uncovered |
-| [#49](https://github.com/fmasi/mailrag/issues/49) | Act on the backend decision — remove the dead Pinecone/SimpleVectorStore branches, retire the legacy cloud-storage doc, regenerate the architecture diagrams | **The decision itself is made: Qdrant is the backend** (see below). What remains is alignment — 1.0 must not advertise backends the query layer cannot actually search |
+| [#49](https://github.com/fmasi/mailrag/issues/49) | Act on the backend decision — remove the dead Pinecone/SimpleVectorStore branches, retire the legacy cloud-storage doc, regenerate the architecture diagrams | **The decision itself is made: Qdrant is the backend** (see above). What remains is alignment — 1.0 must not advertise backends the query layer cannot actually search |
 | [#34](https://github.com/fmasi/mailrag/issues/34) / [#76](https://github.com/fmasi/mailrag/issues/76) | Manual/integration passes: persona pipeline live, TUI end-to-end, doc screenshots | Release gate, not a feature — the parts the unit suite cannot reach (TTY, live LLM, GPU) get one honest human pass before 1.0 |
 
 What is *not* in 1.0, deliberately: retrieval experiments
@@ -121,7 +121,7 @@ rare events thanks to incremental sync; and all of the noise-pipeline research.
 #### What "improve MCP capability" means concretely
 
 The MCP server currently exposes seven tools (`list_collections`,
-`search_email`, `answer_question`, `get_thread`, `grep_email`,
+`search_email`, `get_thread`, `grep_email`, `answer_question`,
 `list_attachments`, `get_attachment`) and nothing else — no structured filters,
 no Prompts, no Resources. [#93](https://github.com/fmasi/mailrag/issues/93) is
 the audit; its first slice is the 1.0 scope:

@@ -106,8 +106,9 @@ are normalised before lookup, so `<abc@host>` and `abc@host` both work.
 - **Args:**
   - `thread_id` (str, required) — the id from a `search_email` result row.
   - `collection` (str, optional) — corpus to read; defaults to the resolved default.
-  - `mode` (str, default `"hybrid"`) — accepted for backward compatibility; a key
-    lookup has no ranking to vary, so it no longer influences the result.
+  - `mode` (str, **ignored**) — accepted for backward compatibility only; was the
+    retrieval leg before #109. A key lookup has no ranking to vary, so passing it
+    changes nothing.
 - **Returns:** `{thread_id, subject, num_emails, text, date, last_date, from, to, message_ids, attachment_names}`.
 - **Errors:** `ValueError` on a blank id, an unknown thread, or an unconfigured corpus.
 

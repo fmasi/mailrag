@@ -4,8 +4,8 @@
 
 This is the first tagged release of mailrag, so these notes introduce the whole
 project rather than a delta. The repository has been developed in public since
-May 2026 (365 commits, 52 merged PRs); everything below describes the state of
-`main` at the tag.
+May 2026 — 365 commits and 52 merged PRs as at this tag. Everything below
+describes the state of `main` at the tag.
 
 ## What mailrag is
 
@@ -64,10 +64,19 @@ load (.eml / Enron / Azure) → tag (regex, no LLM) → scan (clusters, no LLM)
   → query (thread expansion · optional rerank) → CLI / TUI / MCP
 ```
 
-Backends are pluggable: any OpenAI-compatible LLM endpoint (LM Studio, Ollama,
-vLLM, NVIDIA NIM, OpenAI) via one LlamaIndex `Settings.llm` seam, and Qdrant,
-local persistence or Pinecone for storage. See `docs/ARCHITECTURE.md`,
-`docs/BACKENDS.md` and `docs/CHUNKING.md`.
+The LLM is pluggable: any OpenAI-compatible endpoint (LM Studio, Ollama, vLLM,
+NVIDIA NIM, OpenAI) through one LlamaIndex `Settings.llm` seam, so the answer
+model is a configuration choice rather than a code change.
+
+**Storage is not pluggable, by decision.** mailrag has consolidated on Qdrant.
+The retrieval path depends on learned-sparse vectors stored alongside dense
+ones as named vectors on the same points — a Qdrant-specific facility — so a
+second backend would buy a portability the project does not want at the cost
+of using this one well. Pinecone and local-persistence branches survive in
+`src/storage/persist.py`, reachable only from two legacy scripts; their removal
+is tracked in [#49](https://github.com/fmasi/mailrag/issues/49). Do not treat
+them as supported. See `docs/ARCHITECTURE.md`, `docs/BACKENDS.md` and
+`docs/CHUNKING.md`.
 
 ## Install and run
 
@@ -154,7 +163,8 @@ For your own mail, start with `./mailrag onboard` or the wizard
 - The pip-audit CI gate now runs with an empty ignore list, and the workflow
   documents the policy for keeping it that way.
 - The Qdrant server image is pinned by tag **and** digest
-  (`qdrant/qdrant:v1.18.1@sha256:45f8e3…`) rather than tracking `:latest`:
+  (`qdrant/qdrant:v1.18.1@sha256:45f8e3dd…`, abbreviated here — see
+  `docker-compose.yml` for the full digest) rather than tracking `:latest`:
   Qdrant's storage-format migrations are one-way, so an accidental
   `docker compose pull` across a version boundary must not be possible.
 
