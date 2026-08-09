@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rag-study"
-version = "0.1.0"
+version = "0.9.0"
 description = "RAG study project"
 authors = ["Frederic Masi"]
 license = "Apache-2.0"

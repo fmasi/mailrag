@@ -4,7 +4,6 @@ Reuses the Pass-2 machinery (resumable cache, resilient identity, thread pool) b
 with the rubric's verdict-only `judge_template`, so each call's output is short. Run
 ONLY on the scan-flagged suspects (clusters at/above a score cutoff) — the threads we
 intend to drop — so `prune` can blacklist them before the expensive summary pass.
-See docs/superpowers/specs/2026-06-05-persona-engine-judge-prune-design.md.
 """
 
 from __future__ import annotations

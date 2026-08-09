@@ -24,9 +24,10 @@ map — this is the canonical reading order.
    - **[`SYNC.md`](SYNC.md)** — keeping a collection live: `accounts.yaml`, secret references
      (`keychain:` / `env:` / `file:`), folder **roles**, stage-skipping when a backend is down,
      launchd & systemd scheduling, and the `MessageSource` seam for adding a provider.
-   - **[`MCP_SERVER.md`](MCP_SERVER.md)** — the multi-collection stdio MCP server: the five tools
-     (`list_collections` / `search_email` / `answer_question` / `list_attachments` /
-     `get_attachment`), collection discovery, client setup, and the CLI↔MCP capability matrix.
+   - **[`MCP_SERVER.md`](MCP_SERVER.md)** — the multi-collection stdio MCP server: the seven tools
+     (`list_collections` / `search_email` / `get_thread` / `grep_email` / `answer_question` /
+     `list_attachments` / `get_attachment`), collection discovery, client setup, and the
+     CLI↔MCP capability matrix.
    - **[`ARCHITECTURE.md`](ARCHITECTURE.md)** — design decisions and extension points.
    - **[`EMAIL_PREPROCESSING.md`](EMAIL_PREPROCESSING.md)** — reply-chain stripping, posting
      styles, and chunk-size tuning.

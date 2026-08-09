@@ -829,8 +829,9 @@ mail left the machine.
 - ~~**Doc-side queryable summaries (#11/#13)**~~ — DONE (§13). Preceding-thread-context embedded
   summaries **significantly improve terse-reply retrieval** (75%→81% covered@3, p=0.035, same-quant
   n=360); corpus-wide effect modest (+3pp, n.s.). Key lesson: an earlier +6pp was half a 6→8bit
-  **quant confound** — the same-quant control halved it. Whole-thread (bidirectional) control PENDING
-  to settle the append-only novelty framing. **#14 (chunk-size) closed via `embed_max_length` decoupling.**
+  **quant confound** — the same-quant control halved it. Whole-thread (bidirectional) control DONE
+  (§13): whole ≈ preceding at top-3 (p=0.82), so the append-only property comes for free.
+  **#14 (chunk-size) closed via `embed_max_length` decoupling.**
 - ~~**Deduplicate results by email** (#2)~~ — subsumed by thread-aware retrieval (§8): grouping
   by `thread_id` and deduplicating by `message_id` inside expansion is the dedup.
 - **Finer targeted-LLM** — extend the subject signal to subdivide the dominant work domain

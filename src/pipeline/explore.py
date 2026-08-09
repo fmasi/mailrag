@@ -3,7 +3,7 @@ noise pockets without spending the LLM.
 
 Vectors auto-resolve: reuse the profile's Qdrant collection if it exists, else
 embed fresh with BGE-M3. Metadata + pass1 tags always come from loading the
-selected .eml on disk. See docs/superpowers/specs/2026-06-05-explore-verb-design.md.
+selected .eml on disk.
 """
 
 from __future__ import annotations

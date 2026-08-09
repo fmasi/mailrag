@@ -1,6 +1,5 @@
 """ZTH onboarding: build a validated thread-aware contextual assistant from an
-.eml directory in one bounded LLM pass. See
-docs/superpowers/specs/2026-06-02-zth-onboard-design.md.
+.eml directory in one bounded LLM pass.
 """
 
 import json

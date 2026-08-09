@@ -97,10 +97,17 @@ Fetch the **full text** of one thread by `thread_id` — the full-body companion
 the bounded `search_email` (issue #84). Given an id from a `search_email` hit,
 returns that thread's complete attributed text plus metadata.
 
+Resolution is an exact **payload-filter key lookup** on the stored `thread_id`
+(`HybridSearcher.thread_by_id`), not a search — so any id `search_email` returns
+resolves deterministically. (It used to re-run retrieval with the id as the query
+and scan the hits, which resolved only ~25% of ids — fixed in issue #109.) Ids
+are normalised before lookup, so `<abc@host>` and `abc@host` both work.
+
 - **Args:**
   - `thread_id` (str, required) — the id from a `search_email` result row.
   - `collection` (str, optional) — corpus to read; defaults to the resolved default.
-  - `mode` (str, default `"hybrid"`) — retrieval leg used to resolve the thread.
+  - `mode` (str, default `"hybrid"`) — accepted for backward compatibility; a key
+    lookup has no ranking to vary, so it no longer influences the result.
 - **Returns:** `{thread_id, subject, num_emails, text, date, last_date, from, to, message_ids, attachment_names}`.
 - **Errors:** `ValueError` on a blank id, an unknown thread, or an unconfigured corpus.
 
@@ -376,7 +383,7 @@ tools are the agent-facing subset.
 | Discover indexed corpora | *(implicit)* | `list_collections` | Read-only lookup — cheap and safe for agents. |
 | Search threads (bounded) | `ask` / `query` (retrieval) | `search_email` | Pure query; snippet + metadata, the agent's raw-material path. |
 | Fetch a full thread | *(implicit)* | `get_thread` | Full-body opt-in companion to the bounded `search_email`. |
-| Literal / regex needle hunt | `grep` (raw files) | `grep_email` | No embeddings; exact match over the raw corpus (numbers, IDs, error strings). |
+| Literal / regex needle hunt | *(shell `grep` over the raw `.eml` tree)* | `grep_email` | No embeddings; exact match over the raw corpus (numbers, IDs, error strings). |
 | Grounded answer | `ask` / `query` | `answer_question` | Pure query + one LLM call (with a startup healthcheck); the agent's answer path. |
 | List attachments | `attachments list` | `list_attachments` | Read-only metadata lookup. |
 | Read attachment text | `attachments get --text` | `get_attachment` | Read-only text extraction (never raw bytes over MCP). |

@@ -2,7 +2,7 @@
 
 Bytes live at ``<root>/blobs/{first-2}/{sha256}`` (write-once, dedup); metadata in
 a sqlite index; extracted text cached by sha. Any ingester (.eml now; IMAP/AppleScript
-later) feeds the same store. See docs/superpowers/specs/2026-06-07-attachments-1a-store-fetch-design.md.
+later) feeds the same store.
 """
 
 from __future__ import annotations

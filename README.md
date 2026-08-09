@@ -1,28 +1,32 @@
 # mailrag
 
-> Private, self-hosted **Email RAG**: turn your own mail archive into a queryable knowledge
+> Private, self-hosted **email RAG**: turn your own mail archive into a queryable knowledge
 > base that runs on your hardware, on open models, with nothing required to leave your network.
-> A faithful, private record of what you've written and received — an AI memory you actually own,
-> one half of a context stack you own. (The other half is
-> [parley](https://github.com/fmasi/parley), for calls and meetings.)
+> A faithful, private record of what you've written and received — one half of a context
+> stack you own. (The other half is [parley](https://github.com/fmasi/parley), for calls
+> and meetings.)
 
 [![Test Suite](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml/badge.svg)](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
-> **What it buys you.** A generic RAG treats every email as an isolated document. On a real
-> ~32k-email corporate mailbox that plain-dense baseline finds the right message only **46%** of
-> the time (recall@5). mailrag is built for how email actually works: it answers from the whole
-> **thread**, not one message, and that takes recall@5 to **93%**. The metric shifts from
-> message-level to thread-level *on purpose* — for a conversation the thread is the right unit of
-> truth. Reconstructing it is the single biggest lever (**+29**, from a 64% message-level base),
-> just ahead of a per-email contextual summary (**+13**). Neither is a fancier embedding model.
-> As a yardstick the email-tuned hybrid is benchmarked against NVIDIA's general-purpose retrieval
-> stack: it wins on email, while NVIDIA's stack wins on broad legal e-discovery (TREC) — same
-> systems, opposite winners, task-dependent. Numbers are author-reported on a *private* mailbox
-> (cross-checked on public Enron-QA, same ordering). `make demo` reproduces the *method* on
-> public Enron data, not the private figures. Full write-up and scripts in the
-> [case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
+It ships as a CLI, a full-screen TUI wizard, a scheduled continuous-sync agent
+(launchd/systemd), and a seven-tool [MCP server](docs/MCP_SERVER.md) that plugs the query
+path into agents like Claude Code.
+
+**What it buys you.** A generic RAG treats every email as an isolated document. On a real
+~32k-email corporate mailbox that plain-dense baseline finds the right message only **46%** of
+the time (recall@5). mailrag is built for how email actually works: it answers from the whole
+**thread**, not one message, and that takes recall@5 to **93%**. The metric shifts from
+message-level to thread-level *on purpose* — for a conversation the thread is the right unit of
+truth. Reconstructing it is the single biggest lever (**+29**, from a 64% message-level base),
+just ahead of a per-email contextual summary (**+13**). Neither is a fancier embedding model.
+As a yardstick the email-tuned hybrid is benchmarked against NVIDIA's general-purpose retrieval
+stack: it wins on email, while NVIDIA's stack wins on broad legal e-discovery (TREC) — same
+systems, opposite winners, task-dependent. Numbers are author-reported on a *private* mailbox
+(cross-checked on public Enron-QA, same ordering). `make demo` reproduces the *method* on
+public Enron data, not the private figures. Full write-up and scripts in the
+[case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
 ## Why this exists
 
@@ -72,6 +76,10 @@ The point was never a single app — it's a private, open stack of context I own
   ids are deterministic, so re-indexing replaces rather than duplicates; the content-addressed
   cache means only *new* mail costs an LLM call. Behind a provider-agnostic seam — any
   account, any provider, any collection (see [`docs/SYNC.md`](docs/SYNC.md)).
+- **Agent-ready over MCP** — `./mailrag mcp` runs a read-only, multi-collection stdio
+  server with seven tools (search, exact grep, thread fetch, Q&A, attachments), so an MCP
+  client such as Claude Code can use the archive as context without touching the internals
+  (see [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md)).
 - **A measured methodology** — a 360-query retrieval eval that prices each technique,
   controls for confounds, and reports significance, overturning the intuitive choice more
   than once. It also caught its own headline overstating: an early +6pp gain was half a
@@ -80,6 +88,8 @@ The point was never a single app — it's a private, open stack of context I own
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
 
 ## Quickstart (thread-aware contextual RAG over the public Enron dataset)
+
+Prerequisites: Python 3.11+ and Docker (for the Qdrant container).
 
 ```bash
 git clone https://github.com/fmasi/mailrag.git
@@ -102,13 +112,15 @@ expose it to any agent over the **[Model Context Protocol](docs/MCP_SERVER.md)**
 ./mailrag mcp                     # stdio MCP server (multi-collection)
 ```
 
-The server is multi-collection and read-only: one process exposes five tools —
-`list_collections`, `search_email`, `answer_question`, `list_attachments` and
-`get_attachment` — so an agent can discover your indexed corpora, search and
-question them, and read attachment text. Build/ingest/interactive steps stay on
-the CLI. See [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) for the tool reference,
-collection discovery, client setup (Claude Code / opencode), and the full
-CLI↔MCP capability matrix.
+The server is multi-collection and read-only: one process exposes seven tools —
+`list_collections`, `search_email`, `get_thread`, `grep_email`, `answer_question`,
+`list_attachments` and `get_attachment` — so an agent can discover your indexed
+corpora, search and question them, pull a whole thread by id (an exact key lookup,
+not a search), grep the raw corpus for literal needles that embeddings miss, and
+read attachment text. Build/ingest/interactive steps stay on the CLI. See
+[`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) for the tool reference, collection
+discovery, client setup (Claude Code / opencode), and the full CLI↔MCP capability
+matrix.
 
 ## Architecture
 
@@ -218,11 +230,10 @@ circularity (the query could echo the target's exact tokens), so the queries com
 content under a rule that bans artifact/metadata questions plus a validation pass, and the
 load-bearing guard is external: the ordering holds on public **Enron-QA** (questions written
 independently of this generator) and on TREC's real human judgments, below. A *separate*
-answer-quality lens does use a local LLM
-judge, calibrated against a stronger reference model (Cohen's κ = **0.52** on the 0–3 scale,
-**0.80** binary at the relevance threshold actually used; Spearman 0.74). The core techniques
-were cross-checked on the **TREC Legal Track's real human judgments** and on public **Enron-QA**,
-which agreed on ordering. Significance tests and confound controls are in
+answer-quality lens does use a local LLM judge, calibrated against a stronger reference
+model on 514 pooled pairs (Cohen's κ = **0.52** on the 0–3 scale, Spearman 0.74 — and,
+the decisive check, both pre-registered decisions came out identical under both judges).
+Significance tests and confound controls are in
 [`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29):
 
 - **Thread reconstruction is the biggest single win — and needs no LLM.** Matching a small unit
@@ -249,9 +260,10 @@ which agreed on ordering. Significance tests and confound controls are in
   message looks like the whole answer) — and it hurt outright under the earlier LLM-judged
   answer-quality eval. Query-side HyDE never beat the raw query on this entity-rich corpus. Both
   stay in-tree, off by default, for corpora where they'd pay off.
-- **The ceiling is retrieval, not the model.** With the answer in context, even a 4 B model
-  answered ~88% correctly; the lost points are queries where retrieval never surfaced the
-  thread. Model size was second-order.
+- **The ceiling is retrieval, not the model.** With the answer in context the answer model
+  was right ~88% of the time, and at matched precision a 4 B model essentially tied a
+  6×-larger one; the lost points are queries where retrieval never surfaced the thread.
+  Model size was second-order.
 
 **The compound effect — the canonical recall@5 ladder.** Each technique added one at a time,
 scored on the 360 queries against hard gold labels (no LLM judge), reproducible via
@@ -292,10 +304,16 @@ Programme"), at the cost of extra queries per search.
 | `src/attachments/` | Attachment extraction (PDF/Office/HTML/image) + OCR (Tesseract / local vision model) |
 | `src/storage/` | Persistence (local / Pinecone / Qdrant) |
 | `src/query/` | Retrieval + RAG query engine |
-| `src/mcp_server/` | Multi-collection MCP (stdio) server: discovery, search, answer, attachments |
+| `src/mcp_server/` | Multi-collection MCP (stdio) server: discovery, search, grep, threads, answer, attachments |
 | `src/llm/` | Optional LLM `summarize` pass (per-email summary + noise verdict) + cache |
-| `scripts/` | Build / index / maintenance utilities |
-| `tests/` | Test suite (pytest) |
+| `src/sync/` | Continuous sync: provider-agnostic `MessageSource` seam (IMAP / Maildir), state, scheduling |
+| `src/pipeline/` | The CLI verbs' pipeline stages (tag, scan, calibrate, judge, index, …) |
+| `src/persona/` | Persona recipes: named budget-vs-quality presets for `run` / `wizard` |
+| `src/tui/` | The full-screen `wizard` (Textual) |
+| `src/cluster/` | `scan`: embedding-cluster noise-pocket triage (no LLM) |
+| `src/eval/` | Pure-logic eval modules behind `scripts/eval/` |
+| `scripts/` | Build / index / eval / maintenance utilities |
+| `tests/` | Test suite (pytest, ~1,500 tests) |
 | `docs/` | Architecture, quickstart, preprocessing guides |
 
 ## CI / quality gates
@@ -307,11 +325,11 @@ workflow file to pin):
 
 | Gate | Required? | What it enforces | Run locally |
 |------|-----------|------------------|-------------|
-| `pytest` | ✅ required | Full test suite + a coverage floor of **85%** (current ~89%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
+| `pytest` | ✅ required | Full test suite (~1,500 tests) + a coverage floor of **85%** (currently ~87%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
 | `CodeQL` | ✅ required | Static security analysis — GitHub **default setup** (managed, no workflow file) | (runs on GitHub) |
 | `ruff (lint + format)` | advisory | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
 | `mypy (type check)` | advisory | Type-checks `src/` (lenient: `ignore_missing_imports`; CI runs deps-free so third-party imports are `Any` and results are deterministic; per-module opt-outs for legacy modules) | `poetry run mypy src/` |
-| `pip-audit (dependency CVEs)` | advisory | Known CVEs in the locked deps (OSV) | `poetry run pip-audit --vulnerability-service osv` |
+| `pip-audit (dependency CVEs)` | advisory | Known CVEs in the locked deps (OSV) — with **zero** `--ignore-vuln` entries | `poetry run pip-audit --vulnerability-service osv` |
 | `dependency-review` | advisory | Blocks PRs that add deps with `moderate`+ advisories | (PR-only; runs on GitHub) |
 | Claude review | advisory | Automated PR review + `@claude` mentions (`claude.yml`, `claude-code-review.yml`; skipped until the app token is set) | (runs on GitHub) |
 
@@ -320,9 +338,12 @@ under `.github/workflows/` (`ci.yml`, `test-suite.yml`, `dependency-review.yml`,
 `claude.yml`, `claude-code-review.yml`); CodeQL has no file (GitHub default setup).
 `ruff check --fix .` and `ruff format .` auto-fix most lint/format findings.
 
-Two transitive advisories with no upstream fix (`nltk` path-traversal, `torch`
-`jit.script` memory corruption) are ignored by ID in `ci.yml` with links; every
-*fixable* advisory was resolved by bumping the lockfile instead.
+Supply-chain state at the time of writing: **zero open Dependabot alerts** and a
+pip-audit with **no ignore entries** — every advisory that reached us is resolved by
+constraint floors in `pyproject.toml`, not waived. The Qdrant server image is pinned
+by digest (not `:latest`), and `qdrant-client` is deliberately capped `<1.19`
+because that release removed a symbol `llama-index-vector-stores-qdrant` still
+imports ([#106](https://github.com/fmasi/mailrag/issues/106) tracks lifting it).
 
 ## Documentation
 
@@ -337,7 +358,7 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
    - [`docs/BACKENDS.md`](docs/BACKENDS.md) — point mailrag at the LLM / embedder / vector store of your choice (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI, Qdrant), with the dense-only "sparse caveat".
    - [`docs/VERBS.md`](docs/VERBS.md) — the CLI source of truth: every verb (including `ask` and `mcp`), the cost-ordered ladder, the alias table, and the persona recipes.
    - [`docs/SYNC.md`](docs/SYNC.md) — continuous sync: account config, secret references, folder *roles* (so "everything but junk" means the same on every provider), what happens when the network / LLM / Qdrant is down, launchd & systemd scheduling, and how to add a provider.
-   - [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — the multi-collection stdio MCP server: the `list_collections` / `search_email` / `answer_question` / `list_attachments` / `get_attachment` tools, collection discovery & selection, config, client setup (Claude Code / opencode), and the CLI↔MCP capability matrix.
+   - [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) — the multi-collection stdio MCP server: the seven tools (`list_collections` / `search_email` / `get_thread` / `grep_email` / `answer_question` / `list_attachments` / `get_attachment`), collection discovery & selection, config, client setup (Claude Code / opencode), and the CLI↔MCP capability matrix.
    - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — design decisions & extension points.
    - [`docs/EMAIL_PREPROCESSING.md`](docs/EMAIL_PREPROCESSING.md) — reply-chain stripping & chunk tuning.
    - [`docs/CHUNKING.md`](docs/CHUNKING.md) — how one email becomes two kinds of chunk: a body chunk with its summary baked into the vector, and summary-free attachment chunks split by their own structure (spreadsheet rows, PDF pages, slides), stitched back together at query time by `thread_id`.
@@ -346,18 +367,18 @@ Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The reader jou
 
 Reference: [`config/community_blocklist.template.yaml`](config/community_blocklist.template.yaml) — portable starter noise rules (~1/3 of corporate-mail noise, corpus-independent).
 
-## Roadmap
+## Status
 
-mailrag is built to be one node in a private context stack — so the next steps make it
-easier for agents to reach, and keep its memory current:
+mailrag is built to be one node in a private context stack — reachable by agents, with a
+memory that stays current. The three pillars that make that true have all shipped:
 
-- **MCP server** ([#32](https://github.com/fmasi/mailrag/issues/32)) — live: a single,
-  multi-collection stdio server exposing the full query/read surface over the Model Context
-  Protocol — `list_collections`, `search_email`, `answer_question`, `list_attachments` and
-  `get_attachment` — so any agent can discover, query and read your mail (including
-  attachment text) without touching the internals (see
+- **MCP server** ([#67](https://github.com/fmasi/mailrag/pull/67), [#74](https://github.com/fmasi/mailrag/pull/74)) — a single,
+  multi-collection stdio server (MCP SDK v2) exposing the full query/read surface over the
+  Model Context Protocol — seven tools spanning discovery, hybrid search, exact thread
+  fetch, raw-corpus grep, Q&A and attachments — so any agent can discover, query and read
+  your mail without touching the internals (see
   [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md)).
-- **Live ingestion** ([#101](https://github.com/fmasi/mailrag/issues/101)) — live:
+- **Live ingestion** ([#101](https://github.com/fmasi/mailrag/issues/101)) —
   `./mailrag sync` moves mailrag from one-time imports to incremental ingest, so the index is a
   *living* context source rather than a static snapshot. New mail is fetched from any
   configured account, spooled as `.eml`, and run through the *same* pipeline — so the cleaning
@@ -366,8 +387,8 @@ easier for agents to reach, and keep its memory current:
   Graph delta tokens need no schema change), and each stage degrades independently: mail is
   still fetched when the LLM is down, still judged when Qdrant is down (see
   [`docs/SYNC.md`](docs/SYNC.md)).
-- **Guided TUI** ([#36](https://github.com/fmasi/mailrag/issues/36)) — ✅ shipped:
-  `./mailrag wizard` is now a full-screen terminal app ([Textual](https://textual.textualize.io/)):
+- **Guided TUI** ([#36](https://github.com/fmasi/mailrag/issues/36)) —
+  `./mailrag wizard` is a full-screen terminal app ([Textual](https://textual.textualize.io/)):
   pick a persona, scope folders on a tree, review the plan, and watch the run live — with the
   calibrate and confirm-before-spend gates as dialogs (see
   [`docs/GUIDE.md`](docs/GUIDE.md#what-to-expect-from-the-wizard)). The old prompt flow
