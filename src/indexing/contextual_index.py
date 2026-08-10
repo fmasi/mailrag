@@ -162,7 +162,10 @@ def build_contextual_index(
     # 2. Inject summaries into .summary field (surfaced by to_document())
     if summaries:
         for e in emails:
-            s = summaries.get(getattr(e, "message_id", None))
+            # Header-less corpora leave message_id empty; those emails simply
+            # have no summary to inject rather than keying the map on None.
+            message_id = getattr(e, "message_id", None)
+            s = summaries.get(message_id) if message_id else None
             if s:
                 e.summary = s
 

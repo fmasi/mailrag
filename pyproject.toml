@@ -226,24 +226,12 @@ warn_unused_ignores = false
 warn_redundant_casts = false
 files = ["src"]
 
-# Pre-existing type-debt: these modules were written before any typing pass and
-# trip mypy on Optional-vs-required args, invariant dicts, and library return
-# types. Properly annotating them is a code change out of scope for this
-# CI-only PR, so we silence errors per-module (the other ~88 modules stay fully
-# checked, so the gate still catches regressions in new/clean code).
+# The last remaining type-debt exclusion. `src/storage/persist.py` is the legacy
+# SimpleVectorStore/Pinecone backend: nothing in the live pipeline imports it and
+# its removal is scoped in #49, so it is not worth annotating on the way out.
+# Every other module in src/ is fully checked.
 [[tool.mypy.overrides]]
 module = [
-	"src.config.settings",
-	"src.data.models",
-	"src.data.noise_filter",
-	"src.data.loaders.mail_archive_x",
-	"src.data.loaders.azure_blob",
-	"src.eval.metrics",
-	"src.indexing.contextual_index",
-	"src.ingest.embedder",
-	"src.llm.summary",
-	"src.pipeline.prune",
-	"src.query.summary_rerank",
 	"src.storage.persist",
 ]
 ignore_errors = true

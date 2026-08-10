@@ -8,8 +8,14 @@ without changing other parts of the codebase.
 """
 
 import os
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from llama_index.core import Settings
+
+if TYPE_CHECKING:
+    # Type-only: the concrete LLM integrations stay lazily imported at call time
+    # (see configure_settings), so this must not become a runtime import.
+    from llama_index.core.llms import LLM
 
 
 class RAGConfig:
@@ -235,7 +241,10 @@ class RAGConfig:
         # Load config from environment variables
         RAGConfig.load_from_env()
 
-        llm = None
+        # Annotated to the shared base class: the branches below build one of
+        # several concrete integrations, and without this the first branch's
+        # type would be taken as the variable's type.
+        llm: Optional["LLM"] = None
         if include_llm:
             # Lazy imports: only require llama_index.llms.* when we actually
             # build the LLM.  This keeps ``import src.config.settings`` safe in
@@ -302,7 +311,10 @@ class RAGConfig:
                     num_workers=RAGConfig.EMBEDDING_NUM_WORKERS,
                 )
             elif RAGConfig.EMBEDDING_PROVIDER == "lmstudio":
-                embedding_kwargs = {
+                # Dict[str, Any], not the inferred dict[str, object]: the values are
+                # deliberately heterogeneous and this dict is splatted into a
+                # typed constructor below.
+                embedding_kwargs: Dict[str, Any] = {
                     # LlamaIndex OpenAIEmbedding validates `model` against OpenAI enums.
                     # Use `model_name` to support arbitrary OpenAI-compatible model IDs
                     # served by LM Studio (e.g., text-embedding-bge-m3).

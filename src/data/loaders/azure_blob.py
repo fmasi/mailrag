@@ -37,14 +37,16 @@ class AzureBlobEmailLoader(EmailLoader):
             blob_prefix: Optional prefix to scope blob listing.
                 Falls back to ``AZURE_BLOB_PREFIX`` env var.
         """
-        self.connection_string = connection_string or os.environ.get(
-            "AZURE_STORAGE_CONNECTION_STRING"
-        )
-        if not self.connection_string:
+        resolved = connection_string or os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+        if not resolved:
             raise ValueError(
                 "Azure connection string is required. Pass connection_string "
                 "or set AZURE_STORAGE_CONNECTION_STRING environment variable."
             )
+        # Bind after the guard so the attribute's type is `str`, not `str | None`:
+        # the guard above is what makes that true, but mypy cannot carry a
+        # narrowing from __init__ into the methods that use it.
+        self.connection_string: str = resolved
         self.container_name = container_name or os.environ.get(
             "AZURE_BLOB_CONTAINER", "eml-archive"
         )

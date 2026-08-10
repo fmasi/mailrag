@@ -118,5 +118,40 @@ class TestLoaderVerbosity(unittest.TestCase):
             os.unlink(path)
 
 
+class TestLoaderConstructionGuards(unittest.TestCase):
+    """The two ways of pointing the loader at input are mutually exclusive.
+
+    ``__init__`` validates ``backup_dir`` only in the mode that actually walks it.
+    These pin that split: without them, folding the directory check back out to
+    the top level would reject a perfectly valid explicit-file-list loader whose
+    ``backup_dir`` happens to be unset or stale, and nothing would catch it.
+    """
+
+    def test_neither_source_is_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            MailArchiveXLoader()
+        self.assertIn("Provide either backup_dir or eml_files", str(ctx.exception))
+
+    def test_missing_backup_dir_is_rejected_when_walking(self):
+        missing = os.path.join(tempfile.gettempdir(), "mailrag-no-such-dir-xyz")
+        self.assertFalse(os.path.isdir(missing))
+        with self.assertRaises(ValueError) as ctx:
+            MailArchiveXLoader(backup_dir=missing)
+        self.assertIn("Backup directory not found", str(ctx.exception))
+        self.assertIn(missing, str(ctx.exception))
+
+    def test_explicit_file_list_does_not_validate_backup_dir(self):
+        """An explicit list means backup_dir is never walked, so it is not checked."""
+        missing = os.path.join(tempfile.gettempdir(), "mailrag-no-such-dir-xyz")
+        loader = MailArchiveXLoader(eml_files=["/tmp/a.eml"], backup_dir=missing)
+        self.assertEqual(loader.eml_files, ["/tmp/a.eml"])
+
+    def test_existing_backup_dir_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            loader = MailArchiveXLoader(backup_dir=tmp)
+            self.assertEqual(loader.backup_dir, tmp)
+            self.assertIsNone(loader.eml_files)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -326,10 +326,10 @@ workflow file to pin):
 
 | Gate | Required? | What it enforces | Run locally |
 |------|-----------|------------------|-------------|
-| `pytest` | ✅ required | Full test suite (~1,500 tests) + a coverage floor of **85%** (currently ~87%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
+| `pytest` | ✅ required | Full test suite (~1,500 tests) + a coverage floor of **85%** (currently ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
 | `CodeQL` | ✅ required | Static security analysis — GitHub **default setup** (managed, no workflow file) | (runs on GitHub) |
 | `ruff (lint + format)` | advisory | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
-| `mypy (type check)` | advisory | Type-checks `src/` (lenient: `ignore_missing_imports`; CI runs deps-free so third-party imports are `Any` and results are deterministic; per-module opt-outs for legacy modules) | `poetry run mypy src/` |
+| `mypy (type check)` | advisory | Type-checks `src/`, including the bodies of unannotated functions (`check_untyped_defs`). Lenient only about third-party imports (`ignore_missing_imports`; CI runs deps-free so they resolve to `Any` and results stay deterministic). One module is excluded — `src/storage/persist.py`, the legacy backend being removed in [#49](https://github.com/fmasi/mailrag/issues/49) | `poetry run mypy src/` |
 | `pip-audit (dependency CVEs)` | advisory | Known CVEs in the locked deps (OSV) — with **zero** `--ignore-vuln` entries | `poetry run pip-audit --vulnerability-service osv` |
 | `dependency-review` | advisory | Blocks PRs that add deps with `moderate`+ advisories | (PR-only; runs on GitHub) |
 | Claude review | advisory | Automated PR review + `@claude` mentions (`claude.yml`, `claude-code-review.yml`; skipped until the app token is set) | (runs on GitHub) |

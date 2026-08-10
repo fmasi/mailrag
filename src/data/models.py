@@ -89,7 +89,9 @@ class NormalizedEmail:
         key = self.message_key()
         if doc_id is None:
             doc_id = f"body:{key}"
-        metadata = {
+        # Values are not all strings: the bulk markers below are booleans, so the
+        # payload is heterogeneous by design.
+        metadata: Dict[str, Any] = {
             # Stable per-email identity, indexed as a Qdrant payload keyword so an
             # incremental run can delete exactly this email's chunks (body AND
             # attachments, which carry the same key) before re-upserting them.

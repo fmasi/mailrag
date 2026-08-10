@@ -8,10 +8,12 @@ judged pool for that query, not absolute corpus recall (documented in §3.3).
 from __future__ import annotations
 
 import math
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 
-def dcg(grades: List[float]) -> float:
+# Sequence, not List: callers pass the List[int] grade vectors, and List is
+# invariant so List[int] is not a List[float].
+def dcg(grades: Sequence[float]) -> float:
     return sum(g / math.log2(i + 2) for i, g in enumerate(grades))
 
 
@@ -54,7 +56,7 @@ def aggregate(rows: List[Dict], metric_keys: List[str]) -> Dict[str, Dict[str, f
         groups.setdefault(r["category"], []).append(r)
     out: Dict[str, Dict[str, float]] = {}
     for name, grp in groups.items():
-        d = {"n": len(grp)}
+        d: Dict[str, float] = {"n": len(grp)}
         for key in metric_keys:
             vals = [r[key] for r in grp if key in r]
             d[key] = sum(vals) / len(vals) if vals else 0.0
