@@ -81,7 +81,7 @@ def _cmd_summarize(args):
     if not prof.rubric:
         raise ValueError("profile has no rubric set")
     cal = prof.calibration
-    calibrated = bool(cal) and cal.get("rubric") == prof.rubric and cal.get("passed")
+    calibrated = cal is not None and cal.get("rubric") == prof.rubric and cal.get("passed")
     if not args.force and not calibrated:
         print(
             f"error: rubric '{prof.rubric}' is not calibrated; run "
@@ -100,7 +100,7 @@ def _cmd_judge(args):
     if not prof.rubric:
         raise ValueError("profile has no rubric set")
     cal = prof.calibration
-    calibrated = bool(cal) and cal.get("rubric") == prof.rubric and cal.get("passed")
+    calibrated = cal is not None and cal.get("rubric") == prof.rubric and cal.get("passed")
     if not args.force and not calibrated:
         print(
             f"error: rubric '{prof.rubric}' is not calibrated; run "

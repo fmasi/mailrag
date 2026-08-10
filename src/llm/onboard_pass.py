@@ -38,7 +38,7 @@ def generate_thread_judgments(emails, *, cache, model=None, client=None, progres
     out = {}
     for _tid_key, thread in by_thread.items():
         thread = sorted(thread, key=_dkey)
-        preceding = []
+        preceding: list[dict] = []
         for e in thread:
             mid = getattr(e, "message_id", "") or ""
             ed = _as_dict(e)

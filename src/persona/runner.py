@@ -46,6 +46,23 @@ def build_handlers(
     _confirm = prune_confirm or (lambda preview: True)
     _scan_json = profile_path.rsplit(".", 1)[0] + ".scan.json"
 
+    def _require_model() -> str:
+        """The model id, or a clear error if an LLM step was reached without one.
+
+        ``model`` is optional because non-LLM personas do not need one, but the
+        LLM steps below cannot run without it. Both callers (the wizard and the
+        TUI) already prompt for a model before an LLM verb — this makes that
+        invariant explicit at the point of use, so a caller that forgets fails
+        here with an actionable message instead of somewhere inside the LLM
+        client with an opaque one.
+        """
+        if not model:
+            raise ValueError(
+                "this step needs an LLM model: pass model= to build_handlers, "
+                "use --model, or set RAG_LLM_MODEL"
+            )
+        return model
+
     def _default_blacklist(prof):
         if not getattr(prof, "blacklist", None):
             prof.blacklist = profile_path.rsplit(".", 1)[0] + ".blacklist.txt"
@@ -72,7 +89,7 @@ def build_handlers(
         return explore_stage.run(prof, json_path=out, profile_path=profile_path, limit=limit)
 
     def _calibrate(prof, **_):
-        report = calibrate_stage.run(prof, model=model, workers=workers, progress=True)
+        report = calibrate_stage.run(prof, model=_require_model(), workers=workers, progress=True)
         prof.calibration = {
             "rubric": report.rubric,
             "passed": True,
@@ -85,7 +102,7 @@ def build_handlers(
         return report
 
     def _summarize(prof, target="all", **_):
-        return pass2_stage.run(prof, model=model, workers=workers, limit=limit)
+        return pass2_stage.run(prof, model=_require_model(), workers=workers, limit=limit)
 
     def _index(prof, embed="summary", **_):
         from src.ingest.embedder import BgeM3Embedder
@@ -95,7 +112,7 @@ def build_handlers(
 
     def _judge(prof, min_score=0.6, **_):
         return judge_stage.run(
-            prof, model=model, scan_json=_scan_json, min_score=min_score, workers=workers
+            prof, model=_require_model(), scan_json=_scan_json, min_score=min_score, workers=workers
         )
 
     def _prune(prof, **params):
