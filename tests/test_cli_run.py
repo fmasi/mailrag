@@ -94,6 +94,50 @@ class TestRunLimit(unittest.TestCase):
 
 
 class TestBuildHandlers(unittest.TestCase):
+    def test_llm_step_without_a_model_fails_with_an_actionable_error(self):
+        """An LLM verb reached without a model must say so, here and clearly.
+
+        `model` is optional because non-LLM personas do not need one, and both
+        callers (wizard and TUI) prompt before an LLM verb — so the invariant
+        held by convention across two files with nothing enforcing it. Without
+        this guard a caller that forgot passed None all the way into the LLM
+        client, which fails far from the cause.
+        """
+        from src.persona.runner import build_handlers
+
+        handlers = build_handlers(profile_path="p.json", model=None)
+        for verb in ("calibrate", "summarize", "judge"):
+            with self.subTest(verb=verb):
+                with self.assertRaises(ValueError) as ctx:
+                    handlers[verb](mock.Mock())
+                msg = str(ctx.exception)
+                self.assertIn("needs an LLM model", msg)
+                # The message must name a way out, not just state the problem.
+                self.assertIn("RAG_LLM_MODEL", msg)
+
+    def test_non_llm_steps_do_not_require_a_model(self):
+        """The guard must not spread to verbs that never call an LLM.
+
+        Pins the other direction: `model=None` is a legitimate configuration,
+        so building the handler map and reaching a non-LLM verb stays valid.
+        """
+        from src.persona.runner import build_handlers
+
+        handlers = build_handlers(profile_path="p.json", model=None)
+        with mock.patch("src.pipeline.select.run", return_value={"kept": 1}) as run:
+            out = handlers["scope"](mock.Mock())
+        run.assert_called_once()
+        self.assertEqual(out, {"kept": 1})
+
+    def test_model_reaches_the_llm_stage_when_supplied(self):
+        """The happy path still forwards the model rather than swallowing it."""
+        from src.persona.runner import build_handlers
+
+        handlers = build_handlers(profile_path="p.json", model="qwen3-8b")
+        with mock.patch("src.pipeline.pass2.run", return_value={"done": 2}) as run:
+            handlers["summarize"](mock.Mock())
+        self.assertEqual(run.call_args.kwargs["model"], "qwen3-8b")
+
     def test_exposes_implemented_verbs_only(self):
         from src.persona.runner import build_handlers
 

@@ -56,7 +56,7 @@ _ARTIFACT_RULE = (
 
 def _sample_threads(client, collection, k, min_emails, max_emails, seed):
     """Collect threads with email-count in [min,max]; return up to k (seeded shuffle)."""
-    by_tid = {}
+    by_tid: dict[str, list] = {}
     offset = None
     while True:
         points, offset = client.scroll(

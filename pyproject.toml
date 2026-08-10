@@ -216,9 +216,12 @@ ignore = [
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-# Untyped defs are fine (most of the codebase); we only type-check bodies where
-# annotations are present, so partially-typed modules still pass cleanly.
-check_untyped_defs = false
+# Check function bodies even when the def carries no annotations. Without this
+# mypy silently skips any unannotated function — which meant the gate covered
+# only ~74% of src/ and, worse, gave new unannotated code a free pass, so it
+# never ratcheted. Turning it on cost six fixes; leaving it off cost coverage
+# every time someone added a function without types.
+check_untyped_defs = true
 warn_unused_ignores = false
 warn_redundant_casts = false
 files = ["src"]
