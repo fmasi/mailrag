@@ -9,7 +9,7 @@ import re
 from email import policy
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional
 
 # Matches lines that definitively start a quoted/forwarded block.
 _REPLY_SEPARATOR_RE = re.compile(
@@ -228,8 +228,12 @@ class MailArchiveXLoader(EmailLoader):
             return self.eml_files
         eml_files = []
         # Reaching here means no explicit file list, and __init__ rejects that
-        # mode unless backup_dir is a directory that exists.
-        for dirpath, dirnames, filenames in os.walk(cast(str, self.backup_dir)):
+        # mode unless backup_dir is a directory that exists. Re-checking keeps a
+        # real error (rather than os.walk(None) silently yielding nothing) if a
+        # later refactor moves that guard, and narrows the type for the walk.
+        if self.backup_dir is None:  # pragma: no cover - unreachable via __init__
+            raise ValueError("Provide either backup_dir or eml_files")
+        for dirpath, dirnames, filenames in os.walk(self.backup_dir):
             for filename in filenames:
                 if filename.endswith(".eml"):
                     eml_files.append(os.path.join(dirpath, filename))
