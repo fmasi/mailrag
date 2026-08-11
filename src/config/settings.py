@@ -27,8 +27,7 @@ class RAGConfig:
     LLM and embedding models.
     """
 
-    # Storage and data paths
-    STORAGE_DIR: str = "./storage"
+    # Data paths
     DATA_CACHE_DIR: str = "./data_cache"
 
     # LLM Configuration
@@ -55,15 +54,9 @@ class RAGConfig:
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 64
 
-    # Azure Blob Storage (Phase 1)
-    AZURE_STORAGE_CONNECTION_STRING: str = ""
-    AZURE_BLOB_CONTAINER: str = "eml-archive"
-    AZURE_BLOB_PREFIX: str = ""
-
-    # Vector Store Configuration (Phase 2)
-    VECTOR_STORE_PROVIDER: str = "simple"  # "simple", "pinecone", or "qdrant"
-    PINECONE_API_KEY: str = ""
-    PINECONE_INDEX_NAME: str = "email-rag"
+    # Vector store. Qdrant is the only backend (see docs/ROADMAP.md) — there is
+    # no provider switch, because the learned-sparse-alongside-dense seam the
+    # retrieval path depends on is Qdrant-specific.
     QDRANT_URL: str = ""
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION_NAME: str = "mailrag-demo"
@@ -91,7 +84,6 @@ class RAGConfig:
             - RAG_EMBEDDING_NUM_WORKERS (int): embedding worker count for supported providers
             - RAG_CHUNK_SIZE (int): document chunk size for indexing
             - RAG_CHUNK_OVERLAP (int): overlap between adjacent chunks
-            - STORAGE_DIR (str): path to persist index/storage artifacts
         """
 
         def _env_str(var_name: str, current_value: str) -> str:
@@ -154,7 +146,6 @@ class RAGConfig:
         RAGConfig.LLM_MODEL = _env_str("RAG_LLM_MODEL", RAGConfig.LLM_MODEL)
         RAGConfig.LLM_API_BASE = _env_str("RAG_LLM_API_BASE", RAGConfig.LLM_API_BASE)
         RAGConfig.LLM_API_KEY = _env_str("RAG_LLM_API_KEY", RAGConfig.LLM_API_KEY)
-        RAGConfig.STORAGE_DIR = _env_str("STORAGE_DIR", RAGConfig.STORAGE_DIR)
 
         embedding_provider = _env_str(
             "RAG_EMBEDDING_PROVIDER", RAGConfig.EMBEDDING_PROVIDER
@@ -183,28 +174,7 @@ class RAGConfig:
         RAGConfig.CHUNK_OVERLAP = _env_int("RAG_CHUNK_OVERLAP", RAGConfig.CHUNK_OVERLAP)
         RAGConfig.LLM_TEMPERATURE = _env_float("RAG_LLM_TEMPERATURE", RAGConfig.LLM_TEMPERATURE)
 
-        # Azure Blob Storage
-        RAGConfig.AZURE_STORAGE_CONNECTION_STRING = _env_str(
-            "AZURE_STORAGE_CONNECTION_STRING", RAGConfig.AZURE_STORAGE_CONNECTION_STRING
-        )
-        RAGConfig.AZURE_BLOB_CONTAINER = _env_str(
-            "AZURE_BLOB_CONTAINER", RAGConfig.AZURE_BLOB_CONTAINER
-        )
-        RAGConfig.AZURE_BLOB_PREFIX = _env_str("AZURE_BLOB_PREFIX", RAGConfig.AZURE_BLOB_PREFIX)
-
-        # Vector Store Provider
-        vector_provider = _env_str("VECTOR_STORE_PROVIDER", RAGConfig.VECTOR_STORE_PROVIDER).lower()
-        if vector_provider in {"simple", "pinecone", "qdrant"}:
-            RAGConfig.VECTOR_STORE_PROVIDER = vector_provider
-        else:
-            print(
-                f"Warning: Invalid VECTOR_STORE_PROVIDER='{vector_provider}'. "
-                f"Using default '{RAGConfig.VECTOR_STORE_PROVIDER}'."
-            )
-        RAGConfig.PINECONE_API_KEY = _env_str("PINECONE_API_KEY", RAGConfig.PINECONE_API_KEY)
-        RAGConfig.PINECONE_INDEX_NAME = _env_str(
-            "PINECONE_INDEX_NAME", RAGConfig.PINECONE_INDEX_NAME
-        )
+        # Vector store (Qdrant only)
         RAGConfig.QDRANT_URL = _env_str("QDRANT_URL", RAGConfig.QDRANT_URL)
         RAGConfig.QDRANT_API_KEY = _env_str("QDRANT_API_KEY", RAGConfig.QDRANT_API_KEY)
         RAGConfig.QDRANT_COLLECTION_NAME = _env_str(
@@ -345,12 +315,6 @@ class RAGConfig:
             Settings.llm = llm
         Settings.chunk_size = RAGConfig.CHUNK_SIZE
         Settings.chunk_overlap = RAGConfig.CHUNK_OVERLAP
-
-    @staticmethod
-    def get_storage_dir() -> str:
-        """Get the storage directory path, creating it if it doesn't exist."""
-        os.makedirs(RAGConfig.STORAGE_DIR, exist_ok=True)
-        return RAGConfig.STORAGE_DIR
 
     @staticmethod
     def get_data_cache_dir() -> str:

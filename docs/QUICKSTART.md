@@ -50,7 +50,6 @@ and local Qdrant:
 RAG_LLM_PROVIDER=lmstudio
 RAG_LLM_API_BASE=http://localhost:1234/v1
 RAG_LLM_MODEL=<your-local-model>          # must be non-empty and loaded on the endpoint
-VECTOR_STORE_PROVIDER=qdrant
 QDRANT_URL=http://localhost:6333
 ```
 
@@ -85,7 +84,7 @@ reference retired classes — they no longer exist.)
 | Problem | Solution |
 |---------|----------|
 | `RAG_LLM_MODEL` empty / answer step fails | Set `RAG_LLM_MODEL` to a model actually loaded on the endpoint. |
-| "QDRANT_URL environment variable is not set" | Set `QDRANT_URL` when `VECTOR_STORE_PROVIDER=qdrant`. |
+| "QDRANT_URL environment variable is not set" | Set `QDRANT_URL` — Qdrant is required (`docker compose up -d qdrant` for the local one). |
 | First run is slow | Normal — the first run downloads bge-m3 weights and embeds the corpus. Set `HF_HUB_OFFLINE=1` afterwards. |
 | bge-m3 tries to reach the Hub offline | Weights aren't cached yet — run once online, then export `HF_HUB_OFFLINE=1`. |
 | Out of memory | Lower the sample count (`run_demo(num_samples=…)`) or the chunk size. |

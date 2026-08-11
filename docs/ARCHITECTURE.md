@@ -58,10 +58,10 @@ Three ways in:
   (`imap_source.py`), spools each message to disk as `.eml`
   (`spool.py`), then judges and indexes the delta. See [SYNC.md](SYNC.md).
 - **Other loaders** (`src/data/loaders/`) — a small pluggable family behind the
-  `EmailLoader` base class: the public Enron dataset (HuggingFace) used by the
-  demo and evals, and an Azure Blob loader for `.eml` files held in cloud
-  storage. All loaders normalise into one `NormalizedEmail` dataclass
-  (`src/data/models.py`), so downstream code never knows the source.
+  `EmailLoader` base class; today that means the public Enron dataset
+  (HuggingFace) used by the demo and evals. All loaders normalise into one
+  `NormalizedEmail` dataclass (`src/data/models.py`), so downstream code never
+  knows the source.
 
 Thread identity is derived at ingest (`src/data/threading.py`) from RFC 5322
 headers — the root of `References`, else `In-Reply-To`, else the message's own
@@ -174,13 +174,13 @@ payload carrying the email metadata, thread ID and message key
 built through a single seam (`src/config/qdrant.py`) so URL/auth handling
 lives in exactly one place.
 
-The project is consolidating on Qdrant as *the* vector backend. A legacy
-LlamaIndex persistence path (`src/storage/persist.py`, with
-`SimpleVectorStore` and Pinecone branches, configured by
-`src/config/settings.py`) still exists in the tree but is reached only from
-older scripts (`scripts/batch_index_to_vector_store.py`,
-`scripts/validate_cloud_setup.py`) — nothing in the live pipeline imports it,
-and it is slated for removal rather than investment.
+Qdrant is *the* vector backend — there is no provider switch and no second
+persistence path. The `SimpleVectorStore` and Pinecone branches, along with the
+Azure Blob loader and the cloud batch-indexing scripts that were their only
+callers, were removed in [#49](https://github.com/fmasi/mailrag/issues/49).
+The reasoning is in [ROADMAP.md](ROADMAP.md): storing learned-sparse vectors
+alongside dense ones as named vectors on the same point is a Qdrant-specific
+facility, so a portable posture would cost more than it buys.
 
 ## Retrieve
 
@@ -279,7 +279,7 @@ See [MCP_SERVER.md](MCP_SERVER.md).
 
 | Path | Responsibility |
 |---|---|
-| `src/data/loaders/` | Pluggable sources → `NormalizedEmail` (.eml archives, Enron/HF, Azure Blob) |
+| `src/data/loaders/` | Pluggable sources → `NormalizedEmail` (.eml archives, Enron/HF) |
 | `src/data/` | Models, threading, dedup, body cleanup, rule-based noise filter, blacklist |
 | `src/pipeline/` | The verb stages: profile, pass1, scan, judge, calibrate, pass2, prune, build |
 | `src/llm/` | Unified client, Pass-2 orchestration + cache, summaries, rubrics, answering |
@@ -293,7 +293,6 @@ See [MCP_SERVER.md](MCP_SERVER.md).
 | `src/cluster/` | Embedding-space noise-pocket discovery |
 | `src/eval/` | Retrieval/answer evaluation harness (dev-only) |
 | `src/config/` | Qdrant client seam, secrets; plus the legacy `RAGConfig` |
-| `src/storage/` | Legacy LlamaIndex persistence (scripts only; being retired) |
 
 ## Design decisions, in one place
 

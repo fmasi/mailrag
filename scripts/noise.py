@@ -17,14 +17,14 @@ Subcommands
                Results are merged into config/noise_rules.yaml — no duplicate
                keys are ever created.  Review via git diff, commit to approve.
 
-  purge        Delete emails that match the current noise_rules.yaml from
-               Qdrant and optionally from Azure Blob Storage.
+  purge        Delete emails that match the current noise_rules.yaml from the
+               Qdrant index.  Source .eml files on disk are left untouched.
 
   deep-clean   For general-purpose domains where no reliable rule could be
                created, classify each email individually with the LLM and
-               delete confirmed noise from Qdrant and Azure Blob.  If the LLM
-               can extract a reusable pattern after the batch it is also merged
-               into noise_rules.yaml.
+               delete confirmed noise from Qdrant.  If the LLM can extract a
+               reusable pattern after the batch it is also merged into
+               noise_rules.yaml.
 
 Usage
 -----
@@ -105,10 +105,6 @@ def _extract_domain(sender: str) -> str | None:
 def _domain_to_key(domain: str) -> str:
     """dots and hyphens → underscores, guarantees a valid YAML key."""
     return re.sub(r"[.\-]", "_", domain)
-
-
-def _blob_path(source_id: str) -> str:
-    return re.sub(r"^/tmp/[^/]+/", "", source_id)
 
 
 def _extract_body(payload: dict) -> str:
@@ -423,26 +419,6 @@ def _delete_qdrant_points(qdrant, collection: str, point_ids: list) -> int:
     return deleted
 
 
-def _delete_blobs(connection_string: str, container: str, blob_paths: list) -> int:
-    from azure.storage.blob import BlobServiceClient
-
-    cc = BlobServiceClient.from_connection_string(connection_string).get_container_client(container)
-    deleted = errors = 0
-    for i, path in enumerate(blob_paths, 1):
-        try:
-            cc.delete_blob(path)
-            deleted += 1
-        except Exception as exc:
-            print(f"  Warning: could not delete '{path}': {exc}")
-            errors += 1
-        if i % 50 == 0:
-            print(f"  Deleted {deleted}/{len(blob_paths)} blobs...", end="\r")
-    print()
-    if errors:
-        print(f"  {errors} blob(s) could not be deleted (may already be absent).")
-    return deleted
-
-
 # ── LLM helpers ───────────────────────────────────────────────────────────────
 
 
@@ -703,7 +679,7 @@ def _interactive_domain_prompt(
 # ── Subcommand: discover ──────────────────────────────────────────────────────
 
 
-def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, collection):
+def cmd_discover(args, qdrant, llm, model, collection):
     mode = "(DRY RUN) " if args.dry_run else ("(AUTO) " if args.auto else "(INTERACTIVE) ")
     print(f"\n{'=' * 60}")
     print(f"  Discover {mode}")
@@ -855,8 +831,6 @@ def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, coll
                 qdrant,
                 llm,
                 model,
-                azure_conn_str,
-                azure_container,
                 collection,
                 dry_run=False,
             )
@@ -865,7 +839,7 @@ def cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, coll
 # ── Subcommand: purge ─────────────────────────────────────────────────────────
 
 
-def cmd_purge(args, qdrant, azure_conn_str, azure_container, collection):
+def cmd_purge(args, qdrant, collection):
     from src.data.noise_filter import NoiseFilter
 
     print(f"\n{'=' * 60}")
@@ -929,18 +903,8 @@ def cmd_purge(args, qdrant, azure_conn_str, azure_container, collection):
     else:
         print("  Skipped Qdrant deletion.")
 
-    all_blob_paths = list(
-        {_blob_path(h["source_id"]) for hits in matches.values() for h in hits if h["source_id"]}
-    )
-    if not azure_conn_str:
-        print("\nAZURE_STORAGE_CONNECTION_STRING not set — skipping blob deletion.")
-        return
-    if _confirm(
-        f"Also delete {len(all_blob_paths)} .eml files from Azure Blob '{azure_container}'?"
-    ):
-        _delete_blobs(azure_conn_str, azure_container, all_blob_paths)
-    else:
-        print("  Skipped Azure Blob deletion.")
+    # Source .eml files are left in place: this removes them from the index, not
+    # from disk. Delete the originals yourself if that is what you meant.
 
 
 # ── Subcommand: deep-clean ────────────────────────────────────────────────────
@@ -951,8 +915,6 @@ def _deep_clean_domains(
     qdrant,
     llm,
     model,
-    azure_conn_str: str,
-    azure_container: str,
     collection: str,
     dry_run: bool,
 ) -> None:
@@ -1048,17 +1010,8 @@ def _deep_clean_domains(
         else:
             print("  Skipped Qdrant deletion.")
 
-        if azure_conn_str:
-            blob_paths = [_blob_path(sid) for sid in noise_source_ids]
-            if _confirm(f"Also delete {len(blob_paths)} .eml files from Azure Blob?"):
-                _delete_blobs(azure_conn_str, azure_container, blob_paths)
-            else:
-                print("  Skipped Azure Blob deletion.")
-        else:
-            print("  AZURE_STORAGE_CONNECTION_STRING not set — skipping blob deletion.")
 
-
-def cmd_deep_clean(args, qdrant, llm, model, azure_conn_str, azure_container, collection):
+def cmd_deep_clean(args, qdrant, llm, model, collection):
     print(f"\n{'=' * 60}")
     print(f"  Deep Clean {'(DRY RUN) ' if args.dry_run else ''}")
     print(f"  Model: {model}")
@@ -1079,8 +1032,6 @@ def cmd_deep_clean(args, qdrant, llm, model, azure_conn_str, azure_container, co
         qdrant,
         llm,
         model,
-        azure_conn_str,
-        azure_container,
         collection,
         dry_run=args.dry_run,
     )
@@ -1130,7 +1081,7 @@ def main():
 
     # purge
     p_purge = sub.add_parser(
-        "purge", help="Delete noise matched by noise_rules.yaml from Qdrant and Azure Blob"
+        "purge", help="Delete noise matched by noise_rules.yaml from the Qdrant index"
     )
     p_purge.add_argument("--dry-run", action="store_true", help="Show matches without deleting")
 
@@ -1148,15 +1099,13 @@ def main():
     qdrant_url = os.getenv("QDRANT_URL", "http://host.docker.internal:6333").strip()
     qdrant_api_key = os.getenv("QDRANT_API_KEY", "").strip() or None
     collection = os.getenv("QDRANT_COLLECTION_NAME", "email-rag").strip()
-    azure_conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "").strip()
-    azure_container = os.getenv("AZURE_BLOB_CONTAINER", "eml-archive").strip()
 
     from qdrant_client import QdrantClient
 
     qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
 
     if args.command == "purge":
-        cmd_purge(args, qdrant, azure_conn_str, azure_container, collection)
+        cmd_purge(args, qdrant, collection)
         return
 
     # discover and deep-clean both need the LLM
@@ -1170,9 +1119,9 @@ def main():
     model = os.getenv("RAG_LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
     if args.command == "discover":
-        cmd_discover(args, qdrant, llm, model, azure_conn_str, azure_container, collection)
+        cmd_discover(args, qdrant, llm, model, collection)
     elif args.command == "deep-clean":
-        cmd_deep_clean(args, qdrant, llm, model, azure_conn_str, azure_container, collection)
+        cmd_deep_clean(args, qdrant, llm, model, collection)
 
 
 if __name__ == "__main__":

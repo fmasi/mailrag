@@ -43,9 +43,6 @@ map — this is the canonical reading order.
 
 ## Operations & reference
 
-- **[`CLOUD_STORAGE_SETUP.md`](CLOUD_STORAGE_SETUP.md)** — Azure Blob Storage + Qdrant Cloud:
-  batch indexing, cost estimates, validation, and reset. (The optional Pinecone path
-  documented here has been retired — mailrag has consolidated on Qdrant.)
 - **[`ARCHITECTURE_DIAGRAMS.py`](ARCHITECTURE_DIAGRAMS.py)** — runnable script that prints the
   data-lifecycle and query-flow diagrams as terminal ASCII, annotated with the module
   behind each stage.
@@ -62,7 +59,7 @@ map — this is the canonical reading order.
 | Keep a collection fresh | `./mailrag sync` (see [`SYNC.md`](SYNC.md)) |
 | Build a contextual index from loaded emails | `build_contextual_index(...)` in `src/indexing/contextual_index.py` |
 | Query a collection from code | `build_hybrid_searcher(collection).search()` / `.search_threads()` in `src/query/hybrid.py` |
-| Load emails from a source | `load_emails(source="enron" \| "mail_archive_x" \| "azure_blob")` in `src/data/` |
+| Load emails from a source | `load_emails(source="enron" \| "mail_archive_x")` in `src/data/` |
 
 > Older docs may mention `EmailIndexer` (`src/indexing/indexer.py`) and `EmailQueryEngine`
 > (`src/query/engine.py`). Those classes have been **retired** — the live replacements are the

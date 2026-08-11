@@ -4,9 +4,9 @@
 Interactive guided selector for a LOCAL .eml export (Mail Archiver X EML).
 
 Walks a local export directory, shows the folder tree, and lets you pick which
-folders to index using the same ``prefix`` / level-2 / direct-files semantics as
-the Azure blob picker. Writes the chosen selection rules to a JSON file that the
-indexer consumes, so selection and indexing are decoupled.
+folders to index using the ``prefix`` / level-2 / direct-files semantics from
+``src/ingest/selection.py``. Writes the chosen selection rules to a JSON file
+that the indexer consumes, so selection and indexing are decoupled.
 
 Usage:
     python scripts/select_local_eml.py --root ~/rag_eml --out ~/rag_eml.selection.json

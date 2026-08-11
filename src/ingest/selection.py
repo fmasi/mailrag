@@ -1,11 +1,9 @@
 """Source-agnostic folder selection for choosing which .eml files to index.
 
-Everything here operates on ``/``-separated path *strings*, so the identical
-logic serves both Azure blob names and a local directory tree. This is the
-canonical implementation; the Azure batch script (``scripts/
-batch_index_to_vector_store.py``) currently has its own copies of the
-``prefix`` / ``direct-root-files`` / ``container-root`` rule semantics and will
-migrate to import from here (see follow-up).
+Everything here operates on ``/``-separated path *strings* rather than on
+``Path`` objects, which keeps the rule semantics independent of any particular
+storage layout. This is the canonical (and now only) implementation of the
+``prefix`` / ``direct-root-files`` / ``container-root`` rules.
 
 A *selection rule* is a dict of one of three shapes:
 

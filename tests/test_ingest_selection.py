@@ -1,7 +1,7 @@
 """Tests for the source-agnostic folder selection + local .eml source.
 
-Stdlib-only so the TDD loop runs under plain `python3` on the host (the Azure
-batch script pulls heavy deps and only runs in the devcontainer).
+Stdlib-only so the TDD loop runs under plain `python3` on the host, without
+pulling the indexing path's heavy dependencies.
 """
 
 import os

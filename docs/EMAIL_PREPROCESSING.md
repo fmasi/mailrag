@@ -113,55 +113,49 @@ uncommon in general work email.  It is most prevalent in:
 **To fix when needed:** Replace the single-boundary truncation logic in
 `_strip_reply_chain` with a line-by-line classifier that identifies and
 collects only non-`>`-prefixed lines throughout the full body.  Each new
-pattern needs corresponding test cases in `tests/test_reply_chain_stripping.py`
-and a re-run of `debug_strip_reply_chain.py` on real data.
+pattern needs corresponding test cases in `tests/test_reply_chain_stripping.py`,
+which is the regression guard for this logic.
 
 ---
 
 ## Automated validation
 
-The debug script includes an **invariant checker** that runs automatically
-whenever you call it. It checks every email where stripping fired and flags
-two classes of problems:
+Two invariants matter whenever `_strip_reply_chain` or `_REPLY_SEPARATOR_RE`
+changes:
 
 | Check | What it means if it fires |
 |---|---|
-| **FIRST LINE CHANGED** | Stripping removed content from the start of the body — a definitive false positive bug |
-| **NEAR-EMPTY OUTPUT** | < 5 tokens left from a > 100-token email — likely a genuine terse reply ("FYI.", "Thanks") but worth spot-checking |
+| **First line changed** | Stripping removed content from the start of the body — a definitive false-positive bug |
+| **Near-empty output** | < 5 tokens left from a > 100-token email — usually a genuine terse reply ("FYI.", "Thanks"), but worth spot-checking |
 
-Run it after any change to `_strip_reply_chain` or `_REPLY_SEPARATOR_RE`:
+`tests/test_reply_chain_stripping.py` is the guard: run it after any change.
 
 ```bash
-python scripts/debug_strip_reply_chain.py --sample 3000 --show 0
+poetry run python -m pytest tests/test_reply_chain_stripping.py -q
 ```
 
-**Expected healthy output:**
-```
-  Invariant check PASSED — all 1415 stripped emails preserved their first
-  line and produced non-empty output.
-```
-
-Any **FIRST LINE CHANGED** failure is a bug. **NEAR-EMPTY OUTPUT** cases
-should be spot-checked manually; on the sample corpus they are all
-genuine one-liner replies.
+> An earlier `scripts/debug_strip_reply_chain.py` ran these checks over a live
+> sample. It was coupled to Azure Blob storage and was removed along with the
+> rest of the Azure path in
+> [#49](https://github.com/fmasi/mailrag/issues/49); add a case to the test
+> file instead of sampling a corpus by hand.
 
 ---
 
 ## Adapting to a new email source
 
-When you point this project at a new mailbox or organisation, run the two
-analysis scripts below before indexing. They take 2–5 minutes and tell you
-whether the stripping is working and what chunk size to use.
+When you point this project at a new mailbox or organisation, profile the
+corpus before indexing: it takes a couple of minutes and tells you what chunk
+size to use.
 
 ### Step 1 — Profile email lengths
 
 ```bash
-python scripts/analyze_email_lengths.py --sample 2000
+./mailrag measure --profile <your-profile.json>
 ```
 
-This downloads a random sample of emails from your blob store (using the
-saved checkpoint selection if one exists), strips reply chains, and prints
-a token-length distribution.
+This samples the corpus described by the profile, strips reply chains, and
+prints a token-length distribution.
 
 **How to read the output:**
 
@@ -178,27 +172,15 @@ a token-length distribution.
 - If **mean >> median** (e.g., mean is 5× the median) → long-tail outliers
   exist; Step 2 will identify them.
 
-### Step 2 — Debug stripping on the worst offenders
+### Step 2 — Check stripping against your corpus
 
-```bash
-python scripts/debug_strip_reply_chain.py --sample 3000 --show 5
-```
+If Step 1 shows a long tail, the usual cause is a reply separator this codebase
+does not recognise yet, so bodies keep their quoted history.
 
-This downloads a sample, runs each body through `_strip_reply_chain` twice
-(before and after), and prints:
-
-- **Invariant validation** — flags any emails where stripping misbehaved
-  (see [Automated validation](#automated-validation) above)
-- Overall reduction stats (% of emails changed, total tokens removed)
-- The N longest raw emails with:
-  - Before/after token counts
-  - The first line that triggered stripping, or **"none found"** if stripping
-    had no effect on that email
-
-**What to look for in "none found" emails:**
-
-The raw body preview will show you exactly what separator format your email
-client uses. Common patterns not yet in the code:
+Take a few of the longest raw emails and run them through
+`_strip_reply_chain` directly — if the output is unchanged, that email's
+separator is unhandled. Its first quoted line tells you the format your
+correspondents' clients emit. Common patterns not yet in the code:
 
 ```
 # Lotus Notes
@@ -464,5 +446,5 @@ To rebuild from scratch:
 python scripts/reset_qdrant_index.py
 
 # Re-index from scratch
-python scripts/batch_index_to_vector_store.py
+./mailrag build
 ```

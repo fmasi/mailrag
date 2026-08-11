@@ -11,8 +11,8 @@ local or cloud. The short version:
   on real email — see [`EXPERIMENTS.md`](EXPERIMENTS.md)). You *can* swap in a
   remote OpenAI-compatible embedder, with **one honest caveat**: it's dense-only
   (see [The sparse caveat](#the-sparse-caveat)).
-- **Vector store — Qdrant** (local Docker or managed; or in-memory `simple` for
-  quick evaluation), behind a single client seam.
+- **Vector store — Qdrant** (local Docker or managed), behind a single client
+  seam. It is the only backend; see [`ROADMAP.md`](ROADMAP.md) for why.
 
 `mailrag` is local-first: the defaults run entirely on your machine, and every
 cloud option is opt-in. Copy [`.env.example`](../.env.example) to `.env` and set
@@ -151,14 +151,14 @@ The reranker is injectable, so you can supply either to `build_hybrid_searcher`.
 
 | Variable | Meaning |
 |----------|---------|
-| `VECTOR_STORE_PROVIDER` | `qdrant` (what the quickstart uses — set in `.env.example`), `simple` (in-memory/local; the code default), or `pinecone` (legacy — the query path is Qdrant-only). |
 | `QDRANT_URL` | `http://localhost:6333` (the quickstart's local Docker Qdrant) or a managed Qdrant Cloud URL. |
 | `QDRANT_API_KEY` | set for managed Qdrant. |
 | `QDRANT_COLLECTION_NAME` | collection to read/write. |
 
 The Qdrant connection is built in one place (`src/config/qdrant.py::get_qdrant_client`),
-so swapping local ↔ cloud is a single URL change. See
-[`CLOUD_STORAGE_SETUP.md`](CLOUD_STORAGE_SETUP.md) for managed Qdrant + Azure Blob.
+so swapping local ↔ cloud is a single URL change. There is no provider switch:
+Qdrant is the only backend, because storing learned-sparse vectors alongside
+dense ones as named vectors on one point is a Qdrant-specific facility.
 
 ---
 
@@ -172,7 +172,6 @@ RAG_LLM_API_BASE=http://localhost:1234/v1
 RAG_LLM_MODEL=mistralai/magistral-small-2509
 RAG_LLM_API_KEY=sk-lm-...            # only if LM Studio auth is on
 # embeddings: bge-m3 is local — nothing to configure for the contextual stack
-VECTOR_STORE_PROVIDER=qdrant
 QDRANT_URL=http://localhost:6333
 ```
 

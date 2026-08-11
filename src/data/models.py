@@ -20,7 +20,7 @@ _MAX_SENDER_LEN = 128
 _MAX_SUBJECT_LEN = 256
 _MAX_RECIPIENT_PREVIEW_LEN = 512
 _MAX_RECIPIENT_FULL_LEN = (
-    8192  # Keep some full data but trim to fit Pinecone's 40KB limit per vector
+    8192  # Keep some full data but stay inside the 40KB per-vector payload budget
 )
 _MAX_SUMMARY_LEN = 1024
 # Identity/threading headers are sender-supplied and were the only metadata that
