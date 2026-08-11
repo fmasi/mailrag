@@ -63,6 +63,20 @@ class TestLoadEmails(unittest.TestCase):
             load_emails(source="invalid_source")
         self.assertIn("Unknown source", str(context.exception))
 
+    def test_azure_blob_is_no_longer_a_source(self):
+        """`azure_blob` was a valid source until #49 retired the Azure path.
+
+        Pinned by name rather than left to the generic invalid-source test: a
+        caller with an old config or an old habit should get an error that names
+        the sources that do exist, not a stale dispatch into a deleted loader.
+        """
+        with self.assertRaises(ValueError) as context:
+            load_emails(source="azure_blob")
+        message = str(context.exception)
+        self.assertIn("Unknown source", message)
+        self.assertIn("enron", message)
+        self.assertIn("mail_archive_x", message)
+
     def test_load_enron_dataset_backward_compat(self):
         """Test backward-compatible load_enron_dataset wrapper."""
         mock_normalized_email = MagicMock()
