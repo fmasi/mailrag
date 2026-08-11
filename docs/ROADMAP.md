@@ -29,7 +29,9 @@ The open issues cluster into six streams, which the milestones below draw from:
    ([#4](https://github.com/fmasi/mailrag/issues/4)), chunk ordering
    ([#5](https://github.com/fmasi/mailrag/issues/5)), parallel full rebuilds
    ([#102](https://github.com/fmasi/mailrag/issues/102)), splitting the
-   overloaded loader ([#48](https://github.com/fmasi/mailrag/issues/48)).
+   overloaded loader ([#48](https://github.com/fmasi/mailrag/issues/48)), and
+   giving the two source seams one front door
+   ([#117](https://github.com/fmasi/mailrag/issues/117)).
 3. **MCP surface** — the capability audit and enhancement roadmap
    ([#93](https://github.com/fmasi/mailrag/issues/93)), supported by the unified
    config layer ([#39](https://github.com/fmasi/mailrag/issues/39)).
@@ -41,7 +43,9 @@ The open issues cluster into six streams, which the milestones below draw from:
    ([#42](https://github.com/fmasi/mailrag/issues/42)), prompt
    dedup ([#46](https://github.com/fmasi/mailrag/issues/46)), root-script
    removal ([#43](https://github.com/fmasi/mailrag/issues/43)), small tidy-ups
-   ([#51](https://github.com/fmasi/mailrag/issues/51)).
+   ([#51](https://github.com/fmasi/mailrag/issues/51)), and a cold new-user
+   run of the whole product
+   ([#118](https://github.com/fmasi/mailrag/issues/118)).
 6. **Dependency and backend health** — the qdrant-client version cap
    ([#106](https://github.com/fmasi/mailrag/issues/106)) and the periodic
    ecosystem re-check ([#95](https://github.com/fmasi/mailrag/issues/95)).
@@ -105,6 +109,8 @@ deferred, however interesting.
 | [#39](https://github.com/fmasi/mailrag/issues/39) | Unified config file (file < env < CLI precedence) | MCP settings are where config finally pays for itself; the issue itself targets landing alongside the MCP work |
 | [#97](https://github.com/fmasi/mailrag/issues/97) | One reproducible public recall@5 number — turnkey `make bench` on Enron-QA | Converts the project's central claim from "trust me" to "check me". For a public 1.0 this is the difference between a demo and a result |
 | [#42](https://github.com/fmasi/mailrag/issues/42) | Finish the verb rename in code identifiers (pass1/pass2/explore/build → tag/summarize/scan/index) | Mass renames are exactly what a 1.0 boundary is for; doing it afterwards churns a supposedly stable codebase |
+| [#117](https://github.com/fmasi/mailrag/issues/117) | Make the source story coherent — one front door over the loader (`.eml`, Enron) and sync (`IMAP`, Maildir) seams | 1.0 must actually be ready to take mail from more than one place, even shipping only two. Today "pluggable loaders" is advertised while all nine pipeline call sites hardcode one loader, and a user has to learn two vocabularies to answer "where can this get my mail from?" |
+| [#118](https://github.com/fmasi/mailrag/issues/118) | Walk the whole product as a brand-new user on a clean machine, both sources, docs as written | Ready-for-users is a claim that has to be tested by someone starting from zero. The quickstart currently ends at the Enron demo and never mentions IMAP |
 | [#34](https://github.com/fmasi/mailrag/issues/34) / [#76](https://github.com/fmasi/mailrag/issues/76) | Manual/integration passes: persona pipeline live, TUI end-to-end, doc screenshots | Release gate, not a feature — the parts the unit suite cannot reach (TTY, live LLM, GPU) get one honest human pass before 1.0 |
 
 What is *not* in 1.0, deliberately: retrieval experiments
