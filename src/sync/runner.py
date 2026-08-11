@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
 from src.sync.accounts import AccountConfig
 from src.sync.sources import Folder, MessageSource
@@ -410,7 +410,7 @@ def index_pending(
     state: SyncState,
     *,
     profile,
-    embedder,
+    embedder_factory: Callable[[], Any],
     report: Optional[SyncReport] = None,
     index_fn: Optional[Callable] = None,
     require_judged: bool = True,
@@ -421,6 +421,11 @@ def index_pending(
     Uses ``recreate=False``, which is only safe because point ids are
     deterministic and each email's existing points are deleted before its new
     ones land (issue #101, slice 1).
+
+    ``embedder_factory`` is a zero-arg callable, not an embedder: building one
+    loads a ~2 GB model onto the GPU, and every scheduled tick that finds nothing
+    to index would otherwise pay for it. It is called only once the delta is known
+    to be non-empty — below the early returns, immediately before the indexer.
     """
     report = report or SyncReport(account_id=account.id)
     # The lifecycle decides what is indexable — not an ad-hoc filter here. With a
@@ -446,6 +451,10 @@ def index_pending(
             del by_path[path]
     if not by_path:
         return report
+
+    # Below every early return: the delta is non-empty, so the model load is work
+    # we are definitely going to use.
+    embedder = embedder_factory()
 
     try:
         result = (index_fn or _default_index)(
@@ -596,7 +605,7 @@ def sync_account(
     state: SyncState,
     source_factory: Callable[[AccountConfig], MessageSource],
     profile=None,
-    embedder=None,
+    embedder_factory: Optional[Callable[[], Any]] = None,
     model: str = "",
     workers: int = 1,
     fetch_only: bool = False,
@@ -637,12 +646,12 @@ def sync_account(
                 # clean "ok" while silently indexing unjudged mail hides the
                 # single most consequential thing about the run.
                 report.skipped_stages.append("judge (no --model)")
-        if not fetch_only and profile is not None and embedder is not None:
+        if not fetch_only and profile is not None and embedder_factory is not None:
             index_pending(
                 account,
                 state,
                 profile=profile,
-                embedder=embedder,
+                embedder_factory=embedder_factory,
                 report=report,
                 # With no judge stage configured, waiting for judgments that will
                 # never come would mean never indexing at all.

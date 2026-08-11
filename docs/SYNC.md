@@ -256,6 +256,13 @@ reporting the LLM and vector store as unavailable. Override with
 `environment={...}` if your endpoints live elsewhere. The backstop is
 `sync --status`, which warns when the last successful sync was over 48 hours ago.
 
+**An idle tick is cheap, so a short interval is affordable.** The embedder is
+passed down as a factory rather than an instance, and is called only once the
+delta is known to be non-empty — so a tick that finds no new mail never loads
+bge-m3 (~2 GB onto the GPU). The factory is also memoised across accounts, so a
+multi-account tick loads the model once, not once per account. Pick the interval
+from how fresh you want the index, not from what a wasted model load costs.
+
 ## Deletes
 
 Deleting mail on the server does **not** remove it from the index. This is an

@@ -7,6 +7,7 @@ genuine integration tests of the orchestration — no fake source, no network.
 from __future__ import annotations
 
 import contextlib
+import functools
 import os
 import shutil
 import tempfile
@@ -345,6 +346,103 @@ class TestJudgeStage(_RunnerTest):
         self.assertEqual(self.state.counts("acct")["pending_judge"], 2)
 
 
+class TestEmbedderIsBuiltOnlyWhenNeeded(_RunnerTest):
+    """The embedder is a ~2 GB model load. Constructing it before knowing whether
+    there is anything to index made every idle cadence tick pay for it."""
+
+    def _profile(self):
+        return mock.Mock(pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x")
+
+    def test_an_empty_delta_never_builds_the_embedder(self):
+        calls = []
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder_factory=lambda: calls.append(1) or mock.Mock(),
+            index_fn=lambda **kw: (0, set()),
+            require_judged=False,
+        )
+        self.assertEqual(calls, [], "embedder was built with nothing to index")
+        self.assertEqual(report.indexed, 0)
+
+    def test_a_non_empty_delta_builds_it_once_and_passes_it_down(self):
+        self._deliver("m1", "<1@x>", mtime=1000)
+        self._sync()
+        built = mock.Mock()
+        calls = []
+        seen = {}
+
+        def factory():
+            calls.append(1)
+            return built
+
+        def fake_index(*, profile, embedder, paths, collection, embed_summary=True):
+            seen["embedder"] = embedder
+            return 3, self._keys_for(paths)
+
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder_factory=factory,
+            index_fn=fake_index,
+            require_judged=False,
+        )
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(len(calls), 1, "embedder should be built exactly once")
+        self.assertIs(seen["embedder"], built, "the built embedder must reach the indexer")
+
+    def test_sync_account_does_not_build_it_when_there_is_no_mail(self):
+        """The idle tick — nothing fetched, nothing spooled, no model load."""
+        calls = []
+        sync_account(
+            self.account,
+            state=self.state,
+            source_factory=build_source,
+            profile=self._profile(),
+            embedder_factory=lambda: calls.append(1) or mock.Mock(),
+        )
+        self.assertEqual(calls, [], "an idle sync tick built the embedder")
+
+    def test_two_accounts_share_one_embedder_when_the_factory_memoises(self):
+        """cli passes a memoising factory so a multi-account tick loads once, not
+        once per account."""
+        other_dir = os.path.join(self.d, "Other")
+        for sub in ("cur", "new"):
+            os.makedirs(os.path.join(other_dir, sub))
+        with open(os.path.join(other_dir, "cur", "o1"), "wb") as fh:
+            fh.write(_eml("<o@x>"))
+        other = AccountConfig(
+            id="other",
+            source="maildir",
+            path=other_dir,
+            collection="other-collection",
+            spool_root=os.path.join(self.d, "incoming-other"),
+        )
+        self._deliver("m1", "<1@x>", mtime=1000)
+        calls = []
+        factory = functools.cache(lambda: calls.append(1) or mock.Mock())
+        got = []
+
+        def fake_index(*, profile, embedder, paths, collection, embed_summary=True):
+            got.append(embedder)
+            return 3, self._keys_for(paths)
+
+        with mock.patch("src.sync.runner._default_index", side_effect=fake_index):
+            for acct in (self.account, other):
+                sync_account(
+                    acct,
+                    state=self.state,
+                    source_factory=build_source,
+                    profile=self._profile(),
+                    embedder_factory=factory,
+                )
+        self.assertEqual(len(calls), 1, "the model was loaded once per account")
+        self.assertEqual(len(got), 2)
+        self.assertIs(got[0], got[1])
+
+
 class TestIndexStage(_RunnerTest):
     def _profile(self):
         return mock.Mock(pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x")
@@ -362,7 +460,7 @@ class TestIndexStage(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=fake_index,
             require_judged=False,
         )
@@ -386,7 +484,7 @@ class TestIndexStage(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=broken,
             require_judged=False,
         )
@@ -401,7 +499,7 @@ class TestIndexStage(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (_ for _ in ()).throw(ConnectionError("down")),
             require_judged=False,
         )
@@ -409,7 +507,7 @@ class TestIndexStage(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (3, self._keys_for(kw["paths"])),
             require_judged=False,
         )
@@ -528,7 +626,7 @@ class TestReviewRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (
                 called.setdefault("yes", True) or (1, self._keys_for(kw["paths"]))
             ),
@@ -551,7 +649,7 @@ class TestReviewRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (1, self._keys_for(kw["paths"])),
             require_judged=True,
         )
@@ -568,7 +666,7 @@ class TestReviewRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (0, frozenset()),  # nothing survived
             require_judged=False,
         )
@@ -591,7 +689,7 @@ class TestReviewRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=refuses,
             require_judged=False,
         )
@@ -607,7 +705,7 @@ class TestReviewRegressions(_RunnerTest):
             state=self.state,
             source_factory=build_source,
             profile=self._profile(),
-            embedder=None,
+            embedder_factory=None,
             model="",
         )
         self.assertTrue(any("judge" in s for s in report.skipped_stages))
@@ -667,7 +765,7 @@ class TestSecondRoundRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (0, keys),
             require_judged=False,
         )
@@ -681,7 +779,7 @@ class TestSecondRoundRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (0, set()),
             require_judged=False,
         )
@@ -703,7 +801,7 @@ class TestSecondRoundRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (1, keys),
             require_judged=False,  # the no-model path
         )
@@ -772,7 +870,7 @@ class TestSecondRoundRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (_ for _ in ()).throw(PermanentIndexError("policy mismatch")),
             require_judged=False,
         )
@@ -797,7 +895,7 @@ class TestThirdRoundRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: (len(keys), keys),
             require_judged=require_judged,
         )
@@ -852,7 +950,7 @@ class TestThirdRoundRegressions(_RunnerTest):
             self.account,
             self.state,
             profile=self._profile(),
-            embedder=mock.Mock(),
+            embedder_factory=lambda: mock.Mock(),
             index_fn=lambda **kw: self.fail("must not reach the indexer"),
             require_judged=False,
         )
@@ -914,7 +1012,7 @@ class TestThirdRoundRegressions(_RunnerTest):
                 self.account,
                 self.state,
                 profile=self._profile(),
-                embedder=mock.Mock(),
+                embedder_factory=lambda: mock.Mock(),
                 index_fn=lambda **kw: (len(kw["paths"]), set(keys)),
                 require_judged=True,
             )

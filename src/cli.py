@@ -11,6 +11,7 @@ aliases for one release.
 
 import argparse
 import datetime
+import functools
 import os
 import sys
 
@@ -658,9 +659,15 @@ def _cmd_sync(args):
         from src.sync.factory import build_source  # noqa: PLC0415
         from src.sync.runner import sync_account  # noqa: PLC0415
 
+        # Memoised and hoisted out of the loop deliberately: `functools.cache`
+        # makes a multi-account tick load bge-m3 at most once instead of once per
+        # account, and passing the factory (not an embedder) means an idle tick —
+        # no new mail on any account — never loads it at all.
+        embedder_factory = functools.cache(lambda: BgeM3Embedder(device="mps", use_fp16=True))
+
         rc = 0
         for account in accounts:
-            profile, embedder = None, None
+            profile, factory = None, None
             if not args.fetch_only:
                 if not account.profile:
                     raise SystemExit(
@@ -671,13 +678,13 @@ def _cmd_sync(args):
                 # The embedder is needed to INDEX; --model only gates the LLM
                 # judge pass. Tying the two would make "keep the index fresh
                 # without paying for summaries" impossible.
-                embedder = BgeM3Embedder(device="mps", use_fp16=True)
+                factory = embedder_factory
             report = sync_account(
                 account,
                 state=state,
                 source_factory=build_source,
                 profile=profile,
-                embedder=embedder,
+                embedder_factory=factory,
                 model=args.model or "",
                 workers=args.workers,
                 fetch_only=args.fetch_only,
