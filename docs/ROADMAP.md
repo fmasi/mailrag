@@ -38,16 +38,13 @@ The open issues cluster into six streams, which the milestones below draw from:
    reproduction of the full canonical eval
    ([#20](https://github.com/fmasi/mailrag/issues/20)).
 5. **Code health and test depth** — the verb rename
-   ([#42](https://github.com/fmasi/mailrag/issues/42)), tests for load-bearing
-   untested modules ([#50](https://github.com/fmasi/mailrag/issues/50)), prompt
+   ([#42](https://github.com/fmasi/mailrag/issues/42)), prompt
    dedup ([#46](https://github.com/fmasi/mailrag/issues/46)), root-script
    removal ([#43](https://github.com/fmasi/mailrag/issues/43)), small tidy-ups
    ([#51](https://github.com/fmasi/mailrag/issues/51)).
 6. **Dependency and backend health** — the qdrant-client version cap
-   ([#106](https://github.com/fmasi/mailrag/issues/106)), acting on the settled
-   backend decision ([#49](https://github.com/fmasi/mailrag/issues/49)), and the
-   periodic ecosystem re-check
-   ([#95](https://github.com/fmasi/mailrag/issues/95)).
+   ([#106](https://github.com/fmasi/mailrag/issues/106)) and the periodic
+   ecosystem re-check ([#95](https://github.com/fmasi/mailrag/issues/95)).
 
 There is also a research stream around the noise-cleaning pipeline
 ([#28](https://github.com/fmasi/mailrag/issues/28),
@@ -70,13 +67,14 @@ something every vector store supports. Once that is true, keeping alternative
 backends alive buys a portability the project does not want, at the cost of the
 effort that should go into using the one backend properly.
 
-Two consequences follow. The dead branches go: `src/storage/persist.py` still
-carries SimpleVectorStore and Pinecone paths, but nothing in the live pipeline
-reaches them — they are imported only by two legacy scripts, so this is removal
-rather than reconciliation. And the effort redirects forward, starting with
-server-side fusion through Qdrant's native Query API
-([#1](https://github.com/fmasi/mailrag/issues/1)) instead of the client-side RRF
-callback used today.
+Two consequences follow. The dead branches went: `src/storage/persist.py` and
+its SimpleVectorStore/Pinecone paths, the `VECTOR_STORE_PROVIDER` switch, and
+the Azure Blob loader and cloud batch scripts that were their only callers were
+all removed in [#49](https://github.com/fmasi/mailrag/issues/49) — removal
+rather than reconciliation, since nothing in the live pipeline reached them.
+And the effort redirects forward, starting with server-side fusion through
+Qdrant's native Query API ([#1](https://github.com/fmasi/mailrag/issues/1))
+instead of the client-side RRF callback used today.
 
 ## Milestones
 
@@ -107,8 +105,6 @@ deferred, however interesting.
 | [#39](https://github.com/fmasi/mailrag/issues/39) | Unified config file (file < env < CLI precedence) | MCP settings are where config finally pays for itself; the issue itself targets landing alongside the MCP work |
 | [#97](https://github.com/fmasi/mailrag/issues/97) | One reproducible public recall@5 number — turnkey `make bench` on Enron-QA | Converts the project's central claim from "trust me" to "check me". For a public 1.0 this is the difference between a demo and a result |
 | [#42](https://github.com/fmasi/mailrag/issues/42) | Finish the verb rename in code identifiers (pass1/pass2/explore/build → tag/summarize/scan/index) | Mass renames are exactly what a 1.0 boundary is for; doing it afterwards churns a supposedly stable codebase |
-| [#50](https://github.com/fmasi/mailrag/issues/50) | Unit tests for the load-bearing untested modules (contextual_index, data models, rubrics, calibration, runner) | The untested orchestration seams are where a silent bug corrupts an index rather than throwing; 1.0 should not ship with them uncovered |
-| [#49](https://github.com/fmasi/mailrag/issues/49) | Act on the backend decision — remove the dead Pinecone/SimpleVectorStore branches, retire the legacy cloud-storage doc, regenerate the architecture diagrams | **The decision itself is made: Qdrant is the backend** (see above). What remains is alignment — 1.0 must not advertise backends the query layer cannot actually search |
 | [#34](https://github.com/fmasi/mailrag/issues/34) / [#76](https://github.com/fmasi/mailrag/issues/76) | Manual/integration passes: persona pipeline live, TUI end-to-end, doc screenshots | Release gate, not a feature — the parts the unit suite cannot reach (TTY, live LLM, GPU) get one honest human pass before 1.0 |
 
 What is *not* in 1.0, deliberately: retrieval experiments
@@ -184,9 +180,8 @@ because they are scheduled.
   token-budget knob. Explicitly deferred by design until a small-context LLM or
   an oversized thread actually forces it.
 - [#95](https://github.com/fmasi/mailrag/issues/95) — periodic vector-DB
-  ecosystem re-check. Re-run when the backend decision
-  ([#49](https://github.com/fmasi/mailrag/issues/49)) or a Qdrant limitation
-  makes it relevant; no action otherwise.
+  ecosystem re-check. Re-run when a Qdrant limitation makes it relevant; no
+  action otherwise.
 
 ## Release cadence and policy
 

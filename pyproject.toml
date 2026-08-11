@@ -35,8 +35,6 @@ huggingface-hub = "^1.4.1"
 python-dotenv = "^1.2.1"
 pydantic = "^2.12.5"
 rich = "^14.0.0"
-azure-storage-blob = "^12.28.0"
-llama-index-vector-stores-pinecone = "^0.7.1"
 # PINNED BELOW 1.19 — do not widen to a caret without re-running the suite.
 # qdrant-client 1.19.0 deleted `IDF_EMBEDDING_MODELS` from
 # qdrant_client.qdrant_fastembed (it had already been emptied to a zero-length
@@ -120,10 +118,12 @@ click = "^8.4.1"
 #             GHSA-mfx4-hv73-q22v + GHSA-mq44-7p77-q5h7 fixed in 3.14.2,
 #             GHSA-cq5v-8q36-5273 (high) fixed in 3.14.3.
 aiohttp = "^3.14.3"
-#   cryptography — via azure-storage-blob. GHSA-g6cj-pr64-35w5 (high) is fixed in
-#                  50.0.0, which is a major bump: 50.x drops the deprecated
-#                  OpenSSL 1.1.1 backend, an API we never touch (we only consume
-#                  it transitively for Azure blob auth).
+#   cryptography — via pyjwt[crypto] (was azure-storage-blob until Azure was
+#                  retired in #49). GHSA-g6cj-pr64-35w5 (high) is fixed in
+#                  50.0.0. pyjwt only asks for >=3.4.0, so this floor is what
+#                  keeps a re-lock from resolving back to a vulnerable release;
+#                  50.x drops the deprecated OpenSSL 1.1.1 backend, which we
+#                  never touch.
 cryptography = "^50.0.0"
 #   nltk — via llama-index-core. Four high advisories (GHSA-6hm5-jgcp-p838,
 #          GHSA-fg7f-2386-8897, GHSA-qvv7-cg9c-w4x3, GHSA-xh95-f55m-82fw) plus the
@@ -226,12 +226,3 @@ warn_unused_ignores = false
 warn_redundant_casts = false
 files = ["src"]
 
-# The last remaining type-debt exclusion. `src/storage/persist.py` is the legacy
-# SimpleVectorStore/Pinecone backend: nothing in the live pipeline imports it and
-# its removal is scoped in #49, so it is not worth annotating on the way out.
-# Every other module in src/ is fully checked.
-[[tool.mypy.overrides]]
-module = [
-	"src.storage.persist",
-]
-ignore_errors = true

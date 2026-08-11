@@ -2,7 +2,7 @@
 
 The one place that turns ``(url, api_key, prefer_grpc)`` — explicit args overriding
 the ``QDRANT_*`` environment — into a ``QdrantClient``. The former call sites
-(``query/hybrid``, ``storage/persist``, ``ingest/hybrid_qdrant``) delegate here so
+(``query/hybrid``, ``ingest/hybrid_qdrant``) delegate here so
 connection logic, env-var names and the grpc flag cannot drift apart (issue #45; the
 ``QDRANT_URL`` host gotcha of issue #29 is exactly the class of bug this prevents).
 

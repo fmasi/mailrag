@@ -1,8 +1,8 @@
 """Unit tests for the single Qdrant client seam (src.config.qdrant.get_qdrant_client).
 
 This factory is the one place that turns explicit args + the QDRANT_* environment
-into a QdrantClient, so the three former call sites (query/hybrid, storage/persist,
-ingest/hybrid_qdrant) cannot drift apart. Contract verified here:
+into a QdrantClient, so the call sites (query/hybrid, ingest/hybrid_qdrant)
+cannot drift apart. Contract verified here:
 
   url        explicit arg > $QDRANT_URL > ValueError; whitespace stripped.
   api_key    explicit arg > $QDRANT_API_KEY > None (empty string treated as None).

@@ -5,7 +5,7 @@ This script:
 1. Deletes all points while preserving collection schema/indexes (optional),
    or deletes the full collection
 2. Removes the batch checkpoint file
-3. Uses the same environment precedence as batch_index_to_vector_store.py
+3. Uses the standard environment precedence (see below)
 
 Environment variable precedence:
   1. System env / Codespace secrets
@@ -231,8 +231,8 @@ def main() -> None:
         print("✓ No checkpoint file found (already clean)")
 
     print("=" * 60)
-    print("✓ Reset complete. Ready to run:")
-    print("  poetry run python scripts/batch_index_to_vector_store.py")
+    print("✓ Reset complete. Ready to re-index:")
+    print("  ./mailrag build")
 
 
 if __name__ == "__main__":

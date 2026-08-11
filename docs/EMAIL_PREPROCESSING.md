@@ -464,5 +464,5 @@ To rebuild from scratch:
 python scripts/reset_qdrant_index.py
 
 # Re-index from scratch
-python scripts/batch_index_to_vector_store.py
+./mailrag build
 ```

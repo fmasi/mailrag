@@ -51,16 +51,15 @@ The point was never a single app — it's a private, open stack of context I own
 
 `mailrag` turns a mailbox into a queryable knowledge base, built on LlamaIndex:
 
-- **Pluggable loaders** — public Enron corpus (HuggingFace), local `.eml` archives,
-  or Azure Blob Storage, behind one `EmailLoader` interface.
+- **Pluggable loaders** — local `.eml` archives and the public Enron corpus
+  (HuggingFace), behind one `EmailLoader` interface.
 - **Email-aware preprocessing** — reply-chain stripping, calendar-invite collapsing,
   noise/newsletter filtering, exact-text chunk dedup.
 - **Thread-aware answers** (the flagship) — match a single small unit, then answer from
   its *entire* conversation. It roughly **doubles** answer coverage (terse replies 33% →
   ~80%), it's the biggest single retrieval win, and it needs no LLM.
-- **Hybrid retrieval** — bge-m3 dense + sparse vectors (RRF-fused) in Qdrant (also
-  supports local persistence and Pinecone). Gets both the concept and the rare exact
-  token — acronyms, IDs, reference numbers.
+- **Hybrid retrieval** — bge-m3 dense + sparse vectors (RRF-fused) in Qdrant. Gets
+  both the concept and the rare exact token — acronyms, IDs, reference numbers.
 - **Attachments, extracted and indexed** — text is pulled from PDFs, Office files
   (Word/Excel/PowerPoint), HTML and images, with OCR for scans and screenshots (local
   Tesseract, or a local vision model as the privacy-first default). Each attachment is then
@@ -86,7 +85,7 @@ The point was never a single app — it's a private, open stack of context I own
   than once. It also caught its own headline overstating: an early +6pp gain was half a
   quantization artifact, worth only **+3pp** once the control re-ran at matched precision.
   The core techniques were later confirmed against a public, human-judged benchmark.
-- **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x"|"azure_blob")`.
+- **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x")`.
 
 ## Quickstart (thread-aware contextual RAG over the public Enron dataset)
 
@@ -126,14 +125,14 @@ matrix.
 ## Architecture
 
 ```
-                       ┌─────────────────────────────┐
-   sources             │      EmailLoader (ABC)       │
-  ┌─────────┐          ├──────────┬─────────┬─────────┤
-  │  Enron  │──────────│  enron   │ mail_   │  azure  │
-  │ .eml    │          │          │ archive │  blob   │
-  │ Azure   │          └────┬─────┴────┬────┴────┬────┘
-  └─────────┘               │   NormalizedEmail    │
-                            ▼                      ▼
+                       ┌────────────────────────┐
+   sources             │    EmailLoader (ABC)    │
+  ┌─────────┐          ├───────────┬─────────────┤
+  │  .eml   │──────────│   mail_   │    enron    │
+  │  Enron  │          │  archive  │             │
+  └─────────┘          └─────┬─────┴──────┬──────┘
+                             │ NormalizedEmail   │
+                             ▼                   ▼
             tag: regex noise filter — flag bulk/newsletters   (no LLM)
                             ▼
             summarize: local LLM — summary + noise judgement, cached  (optional)
@@ -146,9 +145,7 @@ matrix.
                             ▼
             embed (bge-m3 dense + sparse)
                             ▼
-        ┌───────────────────┼────────────────────┐
-        ▼                   ▼                     ▼
-   local persist        Qdrant (hybrid)       Pinecone
+                    Qdrant (hybrid: named dense + sparse vectors)
                             ▼
             query engine (hybrid RRF · thread-aware expansion · optional rerank)
 ```
@@ -299,11 +296,10 @@ Programme"), at the cost of extra queries per search.
 |------|----------------|
 | `src/config/` | Configuration + LlamaIndex `Settings` |
 | `src/data/` | `NormalizedEmail` model, multi-source `load_emails` API |
-| `src/data/loaders/` | Pluggable source loaders (enron, mail_archive_x, azure_blob) |
+| `src/data/loaders/` | Pluggable source loaders (mail_archive_x, enron) |
 | `src/ingest/` | Embedding (bge-m3), sparse vectors, hybrid Qdrant upsert |
 | `src/indexing/` | Index creation/management + structure-aware attachment chunking |
 | `src/attachments/` | Attachment extraction (PDF/Office/HTML/image) + OCR (Tesseract / local vision model) |
-| `src/storage/` | Persistence (local / Pinecone / Qdrant) |
 | `src/query/` | Retrieval + RAG query engine |
 | `src/mcp_server/` | Multi-collection MCP (stdio) server: discovery, search, grep, threads, answer, attachments |
 | `src/llm/` | Optional LLM `summarize` pass (per-email summary + noise verdict) + cache |
@@ -329,7 +325,7 @@ workflow file to pin):
 | `pytest` | ✅ required | Full test suite (~1,500 tests) + a coverage floor of **85%** (currently ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
 | `CodeQL` | ✅ required | Static security analysis — GitHub **default setup** (managed, no workflow file) | (runs on GitHub) |
 | `ruff (lint + format)` | advisory | Import order + pyflakes/pycodestyle (`E,F,I,W`) and formatting | `ruff check .` and `ruff format --check .` |
-| `mypy (type check)` | advisory | Type-checks `src/`, including the bodies of unannotated functions (`check_untyped_defs`). Lenient only about third-party imports (`ignore_missing_imports`; CI runs deps-free so they resolve to `Any` and results stay deterministic). One module is excluded — `src/storage/persist.py`, the legacy backend being removed in [#49](https://github.com/fmasi/mailrag/issues/49) | `poetry run mypy src/` |
+| `mypy (type check)` | advisory | Type-checks all of `src/`, including the bodies of unannotated functions (`check_untyped_defs`). No per-module opt-outs. Lenient only about third-party imports (`ignore_missing_imports`; CI runs deps-free so they resolve to `Any` and results stay deterministic) | `poetry run mypy src/` |
 | `pip-audit (dependency CVEs)` | advisory | Known CVEs in the locked deps (OSV) — with **zero** `--ignore-vuln` entries | `poetry run pip-audit --vulnerability-service osv` |
 | `dependency-review` | advisory | Blocks PRs that add deps with `moderate`+ advisories | (PR-only; runs on GitHub) |
 | Claude review | advisory | Automated PR review + `@claude` mentions (`claude.yml`, `claude-code-review.yml`; skipped until the app token is set) | (runs on GitHub) |

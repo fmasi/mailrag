@@ -7,9 +7,12 @@ distinct failure modes:
    The sentence splitter refuses to chunk a node whose metadata string alone
    is longer than ``Settings.chunk_size``.
 
-2. Pinecone 400 Bad Request — metadata exceeds the 40 960-byte per-vector
-   limit.  Even after excluding keys from the embedding context, the full
-   metadata dict is still shipped to Pinecone and must stay under 40 KB.
+2. Oversized per-vector metadata.  Even after excluding keys from the
+   embedding context, the full metadata dict still ships to the vector store
+   as the point payload.  The 40 KB ceiling asserted below was originally
+   Pinecone's hard per-vector limit; that backend is retired, but the budget
+   is kept as a deliberate payload-size guard — a payload that blows past it
+   means a header field is being stored unbounded.
 
 3. Extreme edge cases — empty bodies, missing headers, non-ASCII senders,
    very long source_id paths — that should not crash the pipeline.
@@ -31,9 +34,9 @@ from src.data.models import (
 )
 
 # ---------------------------------------------------------------------------
-# Pinecone hard limit (bytes).  Metadata is JSON-serialised before upload.
+# Per-vector payload budget (bytes).  Metadata is JSON-serialised before upload.
 # ---------------------------------------------------------------------------
-PINECONE_MAX_METADATA_BYTES = 40_960
+MAX_METADATA_BYTES = 40_960
 
 # Default and increased chunk sizes we support.
 CHUNK_SIZE_DEFAULT = 1024
@@ -200,23 +203,24 @@ class TestMetadataFitsChunkSize(unittest.TestCase):
 
 
 # ===================================================================
-# 4. Total metadata fits within Pinecone's 40 KB limit
+# 4. Total metadata fits within the 40 KB per-vector payload budget
 # ===================================================================
-class TestMetadataFitsPineconeLimit(unittest.TestCase):
-    """Ensure serialised metadata never exceeds Pinecone's 40 960-byte limit.
+class TestMetadataFitsPayloadBudget(unittest.TestCase):
+    """Ensure serialised metadata never exceeds the 40 960-byte budget.
 
-    Reproduces the Pinecone 400 error:
+    The number comes from the 400 that retired Pinecone backend used to return:
       Metadata size is 49276 bytes, which exceeds the limit of 40960 bytes
+    Kept as a payload-size guard — see this module's docstring.
     """
 
-    def test_normal_email_under_pinecone_limit(self):
+    def test_normal_email_under_payload_budget(self):
         doc = _make_email().to_document(doc_id="test_0")
         self.assertLess(
             _metadata_byte_size(doc),
-            PINECONE_MAX_METADATA_BYTES,
+            MAX_METADATA_BYTES,
         )
 
-    def test_huge_recipient_list_under_pinecone_limit(self):
+    def test_huge_recipient_list_under_payload_budget(self):
         """Simulate a mass-mailing with 500+ recipients."""
         recipients = ", ".join(
             f'"User Number {i}" <user{i}@very-long-domain-name.example.com>' for i in range(500)
@@ -225,20 +229,20 @@ class TestMetadataFitsPineconeLimit(unittest.TestCase):
         doc = email.to_document(doc_id="test_1")
         self.assertLess(
             _metadata_byte_size(doc),
-            PINECONE_MAX_METADATA_BYTES,
-            "500-recipient email must stay under Pinecone 40KB limit",
+            MAX_METADATA_BYTES,
+            "500-recipient email must stay under the 40KB payload budget",
         )
 
-    def test_huge_cc_list_under_pinecone_limit(self):
+    def test_huge_cc_list_under_payload_budget(self):
         cc = ", ".join(f'"CC Person {i}" <cc{i}@long-domain.example.com>' for i in range(500))
         email = _make_email(cc=cc)
         doc = email.to_document(doc_id="test_2")
         self.assertLess(
             _metadata_byte_size(doc),
-            PINECONE_MAX_METADATA_BYTES,
+            MAX_METADATA_BYTES,
         )
 
-    def test_all_fields_maxed_under_pinecone_limit(self):
+    def test_all_fields_maxed_under_payload_budget(self):
         """Absolute worst case: every metadata field is maximally large."""
         email = _make_email(
             sender="s" * 1000,
@@ -253,8 +257,8 @@ class TestMetadataFitsPineconeLimit(unittest.TestCase):
         size = _metadata_byte_size(doc)
         self.assertLess(
             size,
-            PINECONE_MAX_METADATA_BYTES,
-            f"All-fields-maxed metadata is {size} bytes, exceeds Pinecone limit",
+            MAX_METADATA_BYTES,
+            f"All-fields-maxed metadata is {size} bytes, exceeds the payload budget",
         )
 
 
