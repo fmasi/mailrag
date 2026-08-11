@@ -9,7 +9,7 @@ that callers (collection sizing, hybrid-vs-dense selection) can read without loa
 the model.
 """
 
-from typing import Dict, List, Protocol, Tuple, runtime_checkable
+from typing import Dict, List, Literal, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 
@@ -97,7 +97,7 @@ class NimEmbedder:
         model: str = "nvidia/nv-embedqa-e5-v5",
         api_key: str | None = None,
         dim: int | None = None,
-        truncate: str = "NONE",
+        truncate: Literal["NONE", "START", "END"] = "NONE",
         **kwargs,
     ):
         import os
@@ -105,9 +105,12 @@ class NimEmbedder:
         from llama_index.embeddings.nvidia import NVIDIAEmbedding
 
         self.name = model
-        self.dim = dim if dim is not None else self._KNOWN_DIMS.get(model)
-        if self.dim is None:
+        resolved_dim = dim if dim is not None else self._KNOWN_DIMS.get(model)
+        if resolved_dim is None:
             raise ValueError(f"Unknown dim for embedder {model!r}; pass dim=... explicitly.")
+        # Bind after the guard: the ``Embedder`` protocol requires a plain ``int``,
+        # and only the raise above makes that true.
+        self.dim: int = resolved_dim
         key = api_key or os.environ.get("NVIDIA_API_KEY")
         self._embed = NVIDIAEmbedding(model=model, api_key=key, **kwargs)
         # truncate="NONE" => the NIM errors on over-length input rather than

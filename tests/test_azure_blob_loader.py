@@ -114,6 +114,17 @@ class TestAzureBlobEmailLoader(unittest.TestCase):
         self.assertEqual(loader.container_name, "env-container")
         self.assertEqual(loader.blob_prefix, "env-prefix")
 
+    def test_missing_connection_string_is_rejected(self):
+        """No argument and no env var must fail in the constructor.
+
+        The connection string is bound only after this guard, so every method
+        can rely on it being a real string rather than None.
+        """
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                AzureBlobEmailLoader()
+        self.assertIn("Azure connection string is required", str(ctx.exception))
+
     @patch("src.data.loaders.azure_blob.MailArchiveXLoader")
     @patch("src.data.loaders.azure_blob.BlobServiceClient", create=True)
     def test_blob_prefix_filtering(self, MockBlobService, MockMailLoader):

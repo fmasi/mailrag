@@ -34,7 +34,8 @@ def _from_tag(profile) -> Tuple[List[str], List[str]]:
     kept, _ = resolve_index_files(profile.resolved_root(), profile.selection_rules, None)
     emails = MailArchiveXLoader(eml_files=kept).load()
     pass1.run(emails, NoiseFilter.from_project_rules())
-    hashes, preview = [], []
+    hashes: List[str] = []
+    preview: List[str] = []
     for e in emails:
         if getattr(e, "noise_candidate", False) or getattr(e, "is_bulk", False):
             src = getattr(e, "source_id", "") or ""  # the .eml file path

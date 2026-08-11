@@ -1,8 +1,10 @@
 """Unit tests for the Mail Archive X loader."""
 
+import email
 import os
 import tempfile
 import unittest
+from email import policy
 from unittest.mock import patch
 
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
@@ -116,6 +118,80 @@ class TestLoaderVerbosity(unittest.TestCase):
             self.assertIn("Loaded 1 emails", buf.getvalue())
         finally:
             os.unlink(path)
+
+
+class TestPartPayloadDecoding(unittest.TestCase):
+    """``_decode_part_payload`` narrows on what ``decode=True`` actually returns.
+
+    ``get_payload(decode=True)`` yields bytes for a leaf part but ``None`` for a
+    multipart container. Testing ``isinstance(raw, bytes)`` rather than mere
+    truthiness is what makes the None case explicit instead of incidental.
+    """
+
+    @staticmethod
+    def _part(raw: str) -> email.message.Message:
+        return email.message_from_string(raw, policy=policy.compat32)
+
+    def test_multipart_container_yields_empty_string(self):
+        part = self._part(
+            'Content-Type: multipart/mixed; boundary="b"\n\n'
+            "--b\nContent-Type: text/plain\n\nhi\n--b--\n"
+        )
+        self.assertIsNone(part.get_payload(decode=True))
+        self.assertEqual(MailArchiveXLoader._decode_part_payload(part), "")
+
+    def test_empty_leaf_payload_yields_empty_string(self):
+        part = self._part("Content-Type: text/plain\n\n")
+        self.assertEqual(MailArchiveXLoader._decode_part_payload(part), "")
+
+    def test_leaf_bytes_are_decoded_with_the_part_charset(self):
+        part = self._part(
+            "Content-Type: text/plain; charset=iso-8859-1\n"
+            "Content-Transfer-Encoding: 8bit\n\ncaf\xe9\n"
+        )
+        self.assertEqual(MailArchiveXLoader._decode_part_payload(part).strip(), "café")
+
+    def test_unknown_charset_falls_back_to_utf8(self):
+        part = self._part(
+            "Content-Type: text/plain; charset=definitely-not-a-charset\n"
+            "Content-Transfer-Encoding: 8bit\n\nhello\n"
+        )
+        self.assertEqual(MailArchiveXLoader._decode_part_payload(part).strip(), "hello")
+
+
+class TestLoaderConstructionGuards(unittest.TestCase):
+    """The two ways of pointing the loader at input are mutually exclusive.
+
+    ``__init__`` validates ``backup_dir`` only in the mode that actually walks it.
+    These pin that split: without them, folding the directory check back out to
+    the top level would reject a perfectly valid explicit-file-list loader whose
+    ``backup_dir`` happens to be unset or stale, and nothing would catch it.
+    """
+
+    def test_neither_source_is_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            MailArchiveXLoader()
+        self.assertIn("Provide either backup_dir or eml_files", str(ctx.exception))
+
+    def test_missing_backup_dir_is_rejected_when_walking(self):
+        missing = os.path.join(tempfile.gettempdir(), "mailrag-no-such-dir-xyz")
+        self.assertFalse(os.path.isdir(missing))
+        with self.assertRaises(ValueError) as ctx:
+            MailArchiveXLoader(backup_dir=missing)
+        self.assertIn("Backup directory not found", str(ctx.exception))
+        self.assertIn(missing, str(ctx.exception))
+
+    def test_explicit_file_list_does_not_validate_backup_dir(self):
+        """An explicit list means backup_dir is never walked, so it is not checked."""
+        missing = os.path.join(tempfile.gettempdir(), "mailrag-no-such-dir-xyz")
+        loader = MailArchiveXLoader(eml_files=["/tmp/a.eml"], backup_dir=missing)
+        self.assertEqual(loader.eml_files, ["/tmp/a.eml"])
+
+    def test_existing_backup_dir_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            loader = MailArchiveXLoader(backup_dir=tmp)
+            self.assertEqual(loader.backup_dir, tmp)
+            self.assertIsNone(loader.eml_files)
 
 
 if __name__ == "__main__":

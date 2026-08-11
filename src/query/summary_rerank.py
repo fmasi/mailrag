@@ -7,7 +7,7 @@ matching LlamaIndex node postprocessors, so HybridSearcher uses it interchangeab
 FlagEmbeddingReranker. FlagReranker import is lazy.
 """
 
-from typing import List
+from typing import List, Optional
 
 DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 
@@ -49,7 +49,7 @@ class SummaryAwareReranker:
 
             self._reranker = FlagReranker(model, use_fp16=use_fp16)
 
-    def postprocess_nodes(self, nodes, query_str: str = None, query_bundle=None):
+    def postprocess_nodes(self, nodes, query_str: Optional[str] = None, query_bundle=None):
         if not nodes:
             return []
         q = (

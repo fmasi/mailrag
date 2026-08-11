@@ -270,7 +270,8 @@ def parse_response(text: str) -> Dict[str, Any]:
     try:
         data = _loads_lenient(cleaned)
     except Exception:
-        data = _extract_fields_regex(cleaned)
-        if data is None:
+        fallback = _extract_fields_regex(cleaned)
+        if fallback is None:
             raise ValueError("no JSON object found in response")
+        data = fallback
     return _normalize(data)

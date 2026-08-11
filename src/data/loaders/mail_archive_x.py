@@ -150,13 +150,19 @@ class MailArchiveXLoader(EmailLoader):
             a time, often across worker threads) so the loader stays silent without
             callers having to hijack the process-global ``sys.stdout``.
         """
-        if eml_files is None and backup_dir is None:
-            raise ValueError("Provide either backup_dir or eml_files")
+        # Both backup_dir checks live under `eml_files is None` because that is the
+        # only mode that reads the directory — an explicit file list makes
+        # backup_dir irrelevant. Nesting them (rather than testing the two
+        # conditions separately) is also what lets the type checker see that
+        # backup_dir is a real path wherever the walk mode uses it.
+        if eml_files is None:
+            if backup_dir is None:
+                raise ValueError("Provide either backup_dir or eml_files")
+            if not os.path.isdir(backup_dir):
+                raise ValueError(f"Backup directory not found: {backup_dir}")
         self.backup_dir = backup_dir
         self.eml_files = list(eml_files) if eml_files is not None else None
         self.verbose = verbose
-        if self.eml_files is None and not os.path.isdir(backup_dir):
-            raise ValueError(f"Backup directory not found: {backup_dir}")
 
     # Flow overview:
     # load()
@@ -221,6 +227,12 @@ class MailArchiveXLoader(EmailLoader):
         if self.eml_files is not None:
             return self.eml_files
         eml_files = []
+        # Reaching here means no explicit file list, and __init__ rejects that
+        # mode unless backup_dir is a directory that exists. Re-checking keeps a
+        # real error (rather than os.walk(None) silently yielding nothing) if a
+        # later refactor moves that guard, and narrows the type for the walk.
+        if self.backup_dir is None:  # pragma: no cover - unreachable via __init__
+            raise ValueError("Provide either backup_dir or eml_files")
         for dirpath, dirnames, filenames in os.walk(self.backup_dir):
             for filename in filenames:
                 if filename.endswith(".eml"):
@@ -357,7 +369,9 @@ class MailArchiveXLoader(EmailLoader):
         returns raw bytes that must be decoded using the part's charset.
         """
         raw = part.get_payload(decode=True)
-        if not raw:
+        # decode=True yields bytes for a leaf part and None for a multipart
+        # container; the isinstance test covers both, and empty bytes as well.
+        if not isinstance(raw, bytes) or not raw:
             return ""
         charset = part.get_content_charset() or "utf-8"
         try:

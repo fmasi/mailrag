@@ -197,9 +197,13 @@ class NoiseFilter:
             f"@{domain}" in sender_lower or f".{domain}" in sender_lower for domain in domains
         )
 
-    def _bulk_kept(self, sender_lower: str, subject: str) -> bool:
-        """Return True if a bulk-flagged email is spared by a keep-guard."""
-        b = self._bulk
+    def _bulk_kept(self, b: "_BulkRule", sender_lower: str, subject: str) -> bool:
+        """Return True if a bulk-flagged email is spared by a keep-guard.
+
+        The rule is passed in rather than read off ``self._bulk`` because that
+        attribute is optional: taking it as an argument puts the "only call me
+        when there is a bulk rule" precondition in the signature.
+        """
         if self._domains_match(sender_lower, b.keep_domains):
             return True
         if any(p.search(sender_lower) for p in b.keep_sender_patterns):
@@ -221,6 +225,10 @@ class NoiseFilter:
                 return True, rule.name
         # Bulk-header rule is evaluated last so an explicit category match always
         # wins and names the reason. Conservative: kept unless no guard spares it.
-        if is_bulk and self._bulk is not None and not self._bulk_kept(sender_lower, subject):
+        if (
+            is_bulk
+            and self._bulk is not None
+            and not self._bulk_kept(self._bulk, sender_lower, subject)
+        ):
             return True, self._bulk.name
         return False, None
