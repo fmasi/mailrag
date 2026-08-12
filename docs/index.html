@@ -105,7 +105,11 @@
 <span class="p">$</span> make demo                <span class="c"># Qdrant + a thread-aware index over 100 public Enron emails</span>
 <span class="p">$</span> ./mailrag ask <span class="o">"who approved the Q3 budget, and when?"</span>
   <span class="c">→ retrieves the matching message, expands to its full thread,</span>
-  <span class="c">  and answers from the whole conversation — with citations.</span></pre>
+  <span class="c">  and answers from the whole conversation — with citations.</span>
+
+<span class="p">$</span> make bench               <span class="c"># check the retrieval claim yourself, ~3 min</span>
+  <span class="c">→ dense         R@5  94.4 ±2.4</span>
+  <span class="c">  dense+sparse  R@5  97.5 ±1.6   (public Enron-QA, n=360)</span></pre>
     </div>
   </header>
 
@@ -212,8 +216,12 @@
        on legal e-discovery (the TREC Legal benchmark) and the order flips: a general-purpose dense+rerank
        stack (NVIDIA's retrieval NIMs) wins there instead — same systems, opposite result, because the
        task is different. All
-       references anonymized; the public <code>make demo</code> reproduces the <i>method</i>, not the
-       figures. Full write-up in the
+       references anonymized. <code>make demo</code> reproduces the <i>method</i>; <b><code>make bench</code>
+       reproduces a real number</b> — on public Enron-QA, no key and no private data, it scores 360
+       committed queries against 2 000 documents in about three minutes and prints
+       <b>R@5 94.4% dense vs 97.5% dense+learned-sparse</b> (±2.4 / ±1.6, 95% CI). Widen the
+       distractor pool 5× with <code>make bench SIZE=large</code> and the sparse advantage grows
+       rather than shrinks (+4.4pp), which is the directional claim that matters. Full write-up in the
        <a href="https://fmasi.eu/blog/email-rag-retrieval/">benchmark post</a> and the
        <a href="https://github.com/fmasi/mailrag#case-study-what-the-cleanup--retrieval-choices-actually-bought">case study</a>.</p>
   </section>

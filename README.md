@@ -24,9 +24,26 @@ base), just ahead of a per-email contextual summary (**+12.8**). Neither is a fa
 embedding model.
 As a yardstick the email-tuned hybrid is benchmarked against NVIDIA's general-purpose retrieval
 stack: it wins on email, while NVIDIA's stack wins on broad legal e-discovery (TREC) — same
-systems, opposite winners, task-dependent. Numbers are author-reported on a *private* mailbox
-(cross-checked on public Enron-QA, same ordering). `make demo` reproduces the *method* on
-public Enron data, not the private figures. Full write-up and scripts in the
+systems, opposite winners, task-dependent. The headline ladder above is author-reported on a
+*private* mailbox, so **`make bench` exists to let you check the core claim yourself** on public
+Enron-QA — no key, no private data:
+
+```
+make bench                    # 2 000 docs / 360 queries, ~3 min
+```
+
+| arm | R@1 | R@5 | R@10 |
+|---|---|---|---|
+| dense only | 87.5 ±3.4 | 94.4 ±2.4 | 95.3 ±2.2 |
+| **dense + learned-sparse** | **90.0 ±3.1** | **97.5 ±1.6** | **98.6 ±1.2** |
+
+`make bench SIZE=large` runs the same queries against a 5× bigger distractor pool (10 000 docs),
+where the task is harder and the sparse advantage *grows* — 90.0 → 94.4 R@5, **+4.4pp**. That
+directional result is the point: learned-sparse earns more as retrieval gets harder. (± is the
+95% Wilson interval; the benchmark deliberately omits rerank and thread reconstruction, neither
+of which is reproducible on public data — see
+[`scripts/eval/bench_public.py`](scripts/eval/bench_public.py) for why.) `make demo` separately
+reproduces the *method* end to end. Full write-up in the
 [case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
 ## Why this exists
@@ -97,6 +114,7 @@ cd mailrag
 pip install -r requirements.txt        # includes FlagEmbedding (bge-m3); first run downloads ~2 GB of weights
 cp .env.example .env                    # add an LLM key/endpoint (used for summaries + answers)
 make demo                               # starts Qdrant, builds the contextual index, runs thread-aware queries
+make bench                              # scores retrieval on public Enron-QA and prints recall@k
 ```
 
 `make demo` brings up Qdrant (Docker), builds a thread-aware contextual index over 100 Enron
@@ -104,6 +122,12 @@ emails — per-email preceding-context summaries embedded with bge-m3 hybrid vec
 answers example questions by retrieving and assembling whole threads. This is the
 [§13 stack](docs/EXPERIMENTS.md#13-doc-side-thread-aware-summaries--the-evolution-ladder-1113-2026-06-01);
 a small amount of LLM usage goes to the `summarize` step and the answers.
+
+`make bench` is the *verification* path rather than the demo path: it builds a fixed 2 000-document
+slice of public Enron-QA and scores 360 committed queries, printing the recall table shown above.
+It needs no LLM key and no private data — only Qdrant and the bge-m3 weights — so the retrieval
+claim is checkable by anyone in about three minutes. The corpus manifest and query set live in
+[`eval/public/`](eval/public/) so you can read exactly what is being scored.
 
 Once a collection is indexed, you can query it from the CLI (`./mailrag ask "..."`) or
 expose it to any agent over the **[Model Context Protocol](docs/MCP_SERVER.md)**:
