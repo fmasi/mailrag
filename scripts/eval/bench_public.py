@@ -19,8 +19,10 @@ unreproducible for a reader without a key. Both are measured in the private
 harness; this file only reports what a stranger can regenerate.
 
 Usage:
-    make bench                 # standard set (2000 docs / 360 queries, ~3 min)
+    make bench                 # standard set (2000 docs / 360 queries)
     make bench SIZE=large      # large set   (10000 docs / 360 queries, harder)
+
+Timings and the no-LLM guarantee are documented in docs/BENCHMARK.md.
     python -m scripts.eval.bench_public --size standard --skip-build
 """
 

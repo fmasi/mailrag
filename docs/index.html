@@ -107,7 +107,7 @@
   <span class="c">→ retrieves the matching message, expands to its full thread,</span>
   <span class="c">  and answers from the whole conversation — with citations.</span>
 
-<span class="p">$</span> make bench               <span class="c"># check the retrieval claim yourself, ~3 min</span>
+<span class="p">$</span> make bench               <span class="c"># check the retrieval claim yourself — no LLM, no key</span>
   <span class="c">→ dense         R@5  94.4 [91.6, 96.4]</span>
   <span class="c">  dense+sparse  R@5  97.5 [95.3, 98.7]</span>
   <span class="c">  paired @5: fixes 12, breaks 1 — McNemar p=0.0034</span></pre>
@@ -219,10 +219,11 @@
        task is different. All
        references anonymized. <code>make demo</code> reproduces the <i>method</i>; <b><code>make bench</code>
        reproduces a real number</b> — on public Enron-QA, no key and no private data, it scores 360
-       committed queries against 2 000 documents in about three minutes and prints
+       committed queries against 2 000 documents in a couple of minutes and prints
        <b>R@5 94.4% dense vs 97.5% dense+learned-sparse</b> (95% Wilson [91.6, 96.4] vs [95.3, 98.7]).
        Those intervals overlap, so the benchmark reports the <i>paired</i> test too — both arms answer
        the same queries — and learned-sparse fixes 12 while breaking 1, <b>McNemar exact p=0.0034</b>.
+       It spends no LLM calls at all (1.6 min on an M5 Pro GPU, 14.7 min CPU-only).
        Widen the distractor pool 5× with <code>make bench SIZE=large</code> and the advantage grows
        rather than shrinks (+4.4pp, p=0.0001), which is the directional claim that matters. Full write-up in the
        <a href="https://fmasi.eu/blog/email-rag-retrieval/">benchmark post</a> and the

@@ -11,11 +11,44 @@ few minutes.
 
 ```bash
 docker compose up -d          # Qdrant
-make bench                    # 2 000 docs / 360 queries  (~3 min)
-make bench SIZE=large         # 10 000 docs / 360 queries (~6 min, harder)
+make bench                    # 2 000 docs / 360 queries
+make bench SIZE=large         # 10 000 docs / 360 queries (harder)
 ```
 
 First run downloads bge-m3 (~2 GB) and the Enron-QA test split.
+
+### How long it takes
+
+Measured, not estimated — `make bench` at the default size, build **and** scoring:
+
+| device | wall clock |
+|---|---|
+| Apple Silicon GPU (MPS) | **1.6 min** |
+| CPU only | **14.7 min** |
+
+Hardware: Apple M5 Pro (6 performance + 12 efficiency cores, 48 GB), macOS 26.5.2,
+torch 2.13, Python 3.13. Measured on a working laptop with an editor and Docker
+running — not a dedicated benchmark host — with runs gated on a 1-minute load
+average below 2.5 and no other GPU work in flight. Two MPS repetitions agreed to
+within 2.3%. Treat these as indicative of the shape, not a spec sheet.
+
+**The 9× gap is the number to plan around.** PyTorch defaults to 6 threads here
+(the performance cores; the efficiency cores go unused) and the scoring half is
+latency-bound anyway — 720 sequential single-query searches, which no amount of
+parallelism shortens. Set `RAG_EMBED_DEVICE=cpu|mps|cuda` to force a device;
+otherwise it picks cuda > mps > cpu.
+
+### It costs no LLM calls
+
+The benchmark spends **zero** LLM tokens. It builds with `embed_summary=False` and
+`apply_noise_filter=False`, passes no corpus profile (so the Pass-2 cache path never
+runs), and scores with retrieval only — no answer generation, no cross-encoder. The
+times above are embedding plus Qdrant, nothing else.
+
+That is also the scope boundary: recall@k measures the **retrieval layer**, not the
+product. `make demo` and `./mailrag ask` do spend LLM calls for summaries and
+answers; `make bench` does not, which is exactly why it needs no API key and why
+anyone can reproduce it.
 
 ## What it measures
 

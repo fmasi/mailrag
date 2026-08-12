@@ -29,7 +29,7 @@ systems, opposite winners, task-dependent. The headline ladder above is author-r
 Enron-QA — no key, no private data:
 
 ```
-make bench                    # 2 000 docs / 360 queries, ~3 min
+make bench                    # 2 000 docs / 360 queries
 ```
 
 | arm | R@1 | R@5 | R@10 |
@@ -128,9 +128,11 @@ a small amount of LLM usage goes to the `summarize` step and the answers.
 
 `make bench` is the *verification* path rather than the demo path: it builds a fixed 2 000-document
 slice of public Enron-QA and scores 360 committed queries, printing the recall table shown above.
-It needs no LLM key and no private data — only Qdrant and the bge-m3 weights — so the retrieval
-claim is checkable by anyone in about three minutes. The corpus manifest and query set live in
-[`eval/public/`](eval/public/) so you can read exactly what is being scored.
+It spends **no LLM calls at all** — no summaries, no answer generation, no reranker — so it needs
+no API key and no private data, only Qdrant and the bge-m3 weights. Measured wall clock on an
+Apple M5 Pro (6P+12E, 48 GB): **1.6 min on the GPU (MPS), 14.7 min CPU-only**; see
+[`docs/BENCHMARK.md`](docs/BENCHMARK.md) for the conditions. The corpus manifest and query set
+live in [`eval/public/`](eval/public/) so you can read exactly what is being scored.
 
 Once a collection is indexed, you can query it from the CLI (`./mailrag ask "..."`) or
 expose it to any agent over the **[Model Context Protocol](docs/MCP_SERVER.md)**:
