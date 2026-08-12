@@ -40,6 +40,10 @@ map — this is the canonical reading order.
      and the negative results. Its
      **[terminology box](EXPERIMENTS.md#terminology-read-this-first)** defines the `C`/`C′`
      collection labels and the two senses of "thread-aware".
+   - **[`BENCHMARK.md`](BENCHMARK.md)** — `make bench`: the *public* retrieval number you can
+     regenerate yourself on Enron-QA, with no key and no private data. Covers what it measures,
+     what it deliberately omits (thread reconstruction, rerank — neither reproducible on public
+     data), and why the corpus is sized the way it is.
 
 ## Operations & reference
 
