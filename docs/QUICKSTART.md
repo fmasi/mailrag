@@ -26,6 +26,18 @@ index** over 100 Enron emails and answers example questions by retrieving and
 assembling whole threads. This is the §13 stack from the
 [case study](../README.md#case-study-what-the-cleanup--retrieval-choices-actually-bought).
 
+> **What the demo is and isn't.** It is a **walkthrough**, not a measurement: 100
+> emails, no scoring, no gold answers. It shows you the shape of the pipeline —
+> index, retrieve, expand to the thread, answer with citations — and it does spend
+> LLM calls to do it.
+>
+> If you want a **number** rather than a walkthrough, run
+> [`make bench`](BENCHMARK.md) instead: 2 000 documents, 360 committed queries,
+> recall@k with confidence intervals and a paired significance test, and no LLM
+> calls at all. Note that it scores the hybrid *retrieval layer* only — the
+> thread-reconstruction and summary levers are not reproducible on public data, and
+> `docs/BENCHMARK.md` says exactly what is left out.
+
 ## Ask a question
 
 Once a collection is indexed, query it from the repo root with the `./mailrag` shim:

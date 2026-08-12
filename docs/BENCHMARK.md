@@ -126,21 +126,38 @@ Query count, by contrast, is nearly free: scoring 360 queries across both arms c
 about 75 seconds against roughly 100 seconds to build the 2 000-document index. So
 queries are spent generously to tighten the interval rather than rationed for speed.
 
-## What it deliberately does not measure
+## What this proves — and what it does not
 
-Two real parts of the system are **absent on purpose**, because including them would
-produce a number a reader cannot reproduce:
+**Read this before quoting the number.**
 
-- **Thread reconstruction** — the single biggest lever in the private eval (+29.1
-  recall@5). Enron-QA rows carry no conversation linkage at all; the schema is
-  `email / questions / path / user / …` where `path` is a per-user mailbox path.
-  There are no threads to reconstruct, so the benchmark cannot score it.
-- **Cross-encoder rerank** — needs a paid NVIDIA endpoint. A benchmark whose headline
-  requires the reader to hold an API key is not a public benchmark.
+`make bench` validates **one layer** of mailrag: hybrid retrieval. It is not a
+reproduction of the headline result, and it is not a demonstration of the system as
+a whole. Every other lever is switched off:
 
-Both are measured in the private harness and reported in
-[`EXPERIMENTS.md`](EXPERIMENTS.md). This file only claims what a stranger can
-regenerate.
+| lever | private-eval value | in `make bench`? | why not |
+|---|---|---|---|
+| Thread reconstruction | **+29.1** recall@5 — the flagship | ❌ | Enron-QA rows carry no conversation linkage. The schema is `email / questions / path / user / …`; `path` is a per-user mailbox path. **There are no threads to reconstruct.** |
+| Contextual summaries | **+12.8** recall@5 | ❌ | Built with `embed_summary=False`. Generating per-email summaries needs an LLM, which would forfeit the no-key property. |
+| Cross-encoder rerank | +2.5 recall@5 | ❌ | Needs a paid NVIDIA endpoint. A benchmark whose headline requires the reader to hold an API key is not a public benchmark. |
+| Noise cleanup | precision, not recall | ❌ | Built with `apply_noise_filter=False` — the corpus *is* the benchmark, and dropping documents would change what is being scored. |
+| **Hybrid dense + learned-sparse** | — | ✅ | **+3.1 / +4.4 pp, the number above** |
+
+So the honest summary is:
+
+- **What it proves.** The retrieval floor is soundly built — the learned-sparse leg
+  is worth having, the advantage is statistically real under a paired test, and it
+  *grows* as the corpus gets harder. It also demonstrates that the project's numbers
+  are stated in a falsifiable form: committed fixtures, interval estimates, a paired
+  significance test, declared omissions, measured timings on named hardware.
+- **What it does not prove.** That mailrag beats a generic RAG on email. The
+  headline ladder — 45.6% → 93.3% — rests on the **private** corpus and is not
+  reproducible here. A reader should treat it as author-reported.
+
+The excluded levers are measured in the private harness and reported in
+[`EXPERIMENTS.md`](EXPERIMENTS.md). Closing this gap is tracked as a follow-up:
+joining Enron-QA's questions to the **full public Enron maildir** (whose messages do
+carry `Message-ID` / `In-Reply-To` / `References` headers) would make thread
+reconstruction publicly measurable for the first time.
 
 ## How reproducibility is pinned
 
