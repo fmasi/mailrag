@@ -97,17 +97,28 @@ patch releases as they land; none of them blocks 1.0 individually.
 
 ### v1.0.0 — a release a stranger can trust
 
-The bar for 1.0 is deliberately narrow: **a stranger can install it, verify the
-headline retrieval claim themselves, and use the MCP server as a genuinely
-capable interface — and the code they read matches the vocabulary the docs
-use.** Everything on this list serves that bar; everything that does not is
+The bar for 1.0 is deliberately narrow: **a stranger can install it, see what it
+is for, verify the headline retrieval claim themselves, and use the MCP server as
+a genuinely capable interface — and the code they read matches the vocabulary the
+docs use.** Everything on this list serves that bar; everything that does not is
 deferred, however interesting.
+
+"See what it is for" is new, and it is not a rewording. Shipping
+[#97](https://github.com/fmasi/mailrag/issues/97) exposed that the two commands a
+stranger actually runs both fall short of it from opposite directions: `make demo`
+shows the pipeline working but compares it to nothing, and `make bench` measures
+the hybrid layer while every lever behind the headline number is switched off. The
+project is therefore *demonstrable* and *measurable* but its central claim is
+neither shown nor checked. [#123](https://github.com/fmasi/mailrag/issues/123) and
+[#125](https://github.com/fmasi/mailrag/issues/125) close those two halves.
 
 | Issue | What | Why it gates 1.0 |
 |---|---|---|
 | [#93](https://github.com/fmasi/mailrag/issues/93) | MCP capability expansion (first slice — see below) | The MCP server is the flagship interface; 1.0 should ship more than tools-only query access |
 | [#39](https://github.com/fmasi/mailrag/issues/39) | Unified config file (file < env < CLI precedence) | MCP settings are where config finally pays for itself; the issue itself targets landing alongside the MCP work |
-| [#97](https://github.com/fmasi/mailrag/issues/97) | One reproducible public recall@5 number — turnkey `make bench` on Enron-QA | Converts the project's central claim from "trust me" to "check me". For a public 1.0 this is the difference between a demo and a result |
+| ~~[#97](https://github.com/fmasi/mailrag/issues/97)~~ **done** | One reproducible public recall@5 number — turnkey `make bench` on Enron-QA | Shipped in [#122](https://github.com/fmasi/mailrag/pull/122). Delivered less than the bar needs, though — see #123 below |
+| [#123](https://github.com/fmasi/mailrag/issues/123) | Make **thread reconstruction** publicly measurable, by joining Enron-QA's questions to the full Enron maildir | `make bench` validates the hybrid layer only (+3.1/+4.4pp). Every lever behind the headline ladder — thread reconstruction (+29.1), summaries (+12.8), rerank (+2.5) — is switched off, so **45.6 → 93.3 remains author-reported**. The 1.0 bar says a stranger can verify the headline claim; today they verify the foundation under it |
+| [#125](https://github.com/fmasi/mailrag/issues/125) | Make `make demo` showcase the value proposition — thread-aware vs naive RAG, side by side | The most-run command in the project currently proves the pipeline *runs*, not what it is *for*. Nothing is compared to anything, so the flagship claim is invisible. A stranger should learn "why this instead of a generic RAG?" in one screen |
 | [#42](https://github.com/fmasi/mailrag/issues/42) | Finish the verb rename in code identifiers (pass1/pass2/explore/build → tag/summarize/scan/index) | Mass renames are exactly what a 1.0 boundary is for; doing it afterwards churns a supposedly stable codebase |
 | [#117](https://github.com/fmasi/mailrag/issues/117) | Make the source story coherent — one front door over the loader (`.eml`, Enron) and sync (`IMAP`, Maildir) seams | 1.0 must actually be ready to take mail from more than one place, even shipping only two. Today "pluggable loaders" is advertised while all nine pipeline call sites hardcode one loader, and a user has to learn two vocabularies to answer "where can this get my mail from?" |
 | [#118](https://github.com/fmasi/mailrag/issues/118) | Walk the whole product as a brand-new user on a clean machine, both sources, docs as written | Ready-for-users is a claim that has to be tested by someone starting from zero. The quickstart currently ends at the Enron demo and never mentions IMAP |
