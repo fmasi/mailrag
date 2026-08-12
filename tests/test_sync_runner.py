@@ -438,7 +438,9 @@ class TestEmbedderIsBuiltOnlyWhenNeeded(_RunnerTest):
                     profile=self._profile(),
                     embedder_factory=factory,
                 )
-        self.assertEqual(len(calls), 1, "the model was loaded once per account")
+        self.assertEqual(
+            len(calls), 1, "the model was rebuilt per account instead of shared across the tick"
+        )
         self.assertEqual(len(got), 2)
         self.assertIs(got[0], got[1])
 
