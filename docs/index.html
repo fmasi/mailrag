@@ -225,7 +225,12 @@
        the same queries — and learned-sparse fixes 12 while breaking 1, <b>McNemar exact p=0.0034</b>.
        It spends no LLM calls at all (1.6 min on an M5 Pro GPU, 14.7 min CPU-only).
        Widen the distractor pool 5× with <code>make bench SIZE=large</code> and the advantage grows
-       rather than shrinks (+4.4pp, p=0.0001), which is the directional claim that matters. Full write-up in the
+       rather than shrinks (+4.4pp, p=0.0001), which is the directional claim that matters.
+       <b>Scope, stated plainly:</b> <code>make bench</code> checks the hybrid <i>retrieval layer</i> only —
+       thread reconstruction (+29.1), contextual summaries (+12.8) and reranking (+2.5) are all switched
+       off, because public Enron-QA carries no thread structure and the rest would need an API key.
+       It shows the foundation is sound and the claims are falsifiable; it does <i>not</i> reproduce the
+       45.6→93.3 ladder, which stays author-reported. Full write-up in the
        <a href="https://fmasi.eu/blog/email-rag-retrieval/">benchmark post</a> and the
        <a href="https://github.com/fmasi/mailrag#case-study-what-the-cleanup--retrieval-choices-actually-bought">case study</a>.</p>
   </section>

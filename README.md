@@ -24,9 +24,10 @@ base), just ahead of a per-email contextual summary (**+12.8**). Neither is a fa
 embedding model.
 As a yardstick the email-tuned hybrid is benchmarked against NVIDIA's general-purpose retrieval
 stack: it wins on email, while NVIDIA's stack wins on broad legal e-discovery (TREC) — same
-systems, opposite winners, task-dependent. The headline ladder above is author-reported on a
-*private* mailbox, so **`make bench` exists to let you check the core claim yourself** on public
-Enron-QA — no key, no private data:
+systems, opposite winners, task-dependent. **The ladder above is author-reported on a *private*
+mailbox and is not independently reproducible** — public email corpora don't carry the thread
+structure it depends on. What you *can* check yourself is the retrieval layer underneath it, on
+public Enron-QA with no key and no private data:
 
 ```
 make bench                    # 2 000 docs / 360 queries
@@ -44,9 +45,16 @@ R@5 learned-sparse **fixes 12 queries and breaks 1**, McNemar exact **p = 0.0034
 `make bench SIZE=large` runs the same queries against a 5× bigger distractor pool (10 000 docs),
 where the task is harder and the sparse advantage *grows* — 90.0 → 94.4 R@5, **+4.4pp**, fixing
 17 and breaking 1 (**p = 0.0001**). That directional result is the point: learned-sparse earns
-more as retrieval gets harder. The benchmark deliberately omits rerank and thread reconstruction,
-neither of which is reproducible on public data — see [`docs/BENCHMARK.md`](docs/BENCHMARK.md)
-for why. `make demo` separately reproduces the *method* end to end. Full write-up in the
+more as retrieval gets harder.
+
+**Be clear about the scope of that number.** `make bench` validates the *hybrid retrieval layer*
+and nothing else — thread reconstruction (+29.1), contextual summaries (+12.8), reranking (+2.5)
+and noise cleanup are all switched off, because none of them can be reproduced on a public corpus
+without either thread headers Enron-QA lacks or an API key a reader shouldn't need. It proves the
+foundation is sound and that the project's claims are stated falsifiably; it does **not**
+reproduce the headline ladder. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md) for the full
+exclusion table. `make demo` separately reproduces the *method* end to end — it is a walkthrough,
+not a measurement. Full write-up in the
 [case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
 ## Why this exists
@@ -125,6 +133,9 @@ emails — per-email preceding-context summaries embedded with bge-m3 hybrid vec
 answers example questions by retrieving and assembling whole threads. This is the
 [§13 stack](docs/EXPERIMENTS.md#13-doc-side-thread-aware-summaries--the-evolution-ladder-1113-2026-06-01);
 a small amount of LLM usage goes to the `summarize` step and the answers.
+
+`make demo` is a **walkthrough**: 100 emails, no scoring, no gold answers, and it does spend LLM
+calls. It shows the shape of the pipeline, not its accuracy.
 
 `make bench` is the *verification* path rather than the demo path: it builds a fixed 2 000-document
 slice of public Enron-QA and scores 360 committed queries, printing the recall table shown above.
