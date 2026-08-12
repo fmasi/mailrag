@@ -23,7 +23,7 @@ reproduces the same fixtures.
 
 Usage:
     python -m scripts.eval.gen_public_benchset            # both sizes
-    python -m scripts.eval.gen_public_benchset --size small
+    python -m scripts.eval.gen_public_benchset --size standard
 """
 
 from __future__ import annotations

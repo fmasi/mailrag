@@ -34,16 +34,19 @@ make bench                    # 2 000 docs / 360 queries, ~3 min
 
 | arm | R@1 | R@5 | R@10 |
 |---|---|---|---|
-| dense only | 87.5 ±3.4 | 94.4 ±2.4 | 95.3 ±2.2 |
-| **dense + learned-sparse** | **90.0 ±3.1** | **97.5 ±1.6** | **98.6 ±1.2** |
+| dense only | 87.5 [83.7, 90.5] | 94.4 [91.6, 96.4] | 95.3 [92.6, 97.0] |
+| **dense + learned-sparse** | **90.0 [86.5, 92.7]** | **97.5 [95.3, 98.7]** | **98.6 [96.8, 99.4]** |
+
+Brackets are 95% Wilson score intervals. They overlap — so the benchmark also reports the
+**paired** test, which is the right one here because both arms answer the identical queries: at
+R@5 learned-sparse **fixes 12 queries and breaks 1**, McNemar exact **p = 0.0034**.
 
 `make bench SIZE=large` runs the same queries against a 5× bigger distractor pool (10 000 docs),
-where the task is harder and the sparse advantage *grows* — 90.0 → 94.4 R@5, **+4.4pp**. That
-directional result is the point: learned-sparse earns more as retrieval gets harder. (± is the
-95% Wilson interval; the benchmark deliberately omits rerank and thread reconstruction, neither
-of which is reproducible on public data — see
-[`scripts/eval/bench_public.py`](scripts/eval/bench_public.py) for why.) `make demo` separately
-reproduces the *method* end to end. Full write-up in the
+where the task is harder and the sparse advantage *grows* — 90.0 → 94.4 R@5, **+4.4pp**, fixing
+17 and breaking 1 (**p = 0.0001**). That directional result is the point: learned-sparse earns
+more as retrieval gets harder. The benchmark deliberately omits rerank and thread reconstruction,
+neither of which is reproducible on public data — see [`docs/BENCHMARK.md`](docs/BENCHMARK.md)
+for why. `make demo` separately reproduces the *method* end to end. Full write-up in the
 [case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
 ## Why this exists

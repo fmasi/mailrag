@@ -123,17 +123,52 @@ def recall_at_k(ranks, k, n):
     return 100.0 * sum(1 for r in ranks if r is not None and r < k) / n
 
 
-def wilson_halfwidth(p_pct, n):
-    """Half-width of the 95% CI, in percentage points.
+Z = 1.96  # 95%
 
-    Reported next to every number because a few-hundred-query benchmark cannot
-    support the precision a bare "R@5 = 97.5" implies, and printing the point
-    estimate without the interval would overclaim.
+
+def wilson_interval(p_pct, n):
+    """The 95% Wilson score interval for a proportion, as (lo, hi) in percent.
+
+    Wilson rather than the textbook Wald interval (``z*sqrt(p(1-p)/n)``), and
+    bounds rather than a single ``±``, because this benchmark's recall values sit
+    at 0.76-0.99 — exactly where Wald misbehaves. At p=0.975, n=360 the true
+    interval is [95.3, 98.7]: 1.0 pp asymmetric, so a symmetric ± overstates the
+    upside and understates the downside. At p=1.0 Wald degenerates to ±0.00 and
+    would claim perfect certainty from 360 samples; Wilson gives [98.9, 100].
     """
     if not n:
-        return 0.0
-    p = p_pct / 100.0
-    return 100.0 * 1.96 * math.sqrt(max(p * (1 - p), 0.0) / n)
+        return (0.0, 0.0)
+    p = max(0.0, min(1.0, p_pct / 100.0))
+    denom = 1 + Z * Z / n
+    centre = (p + Z * Z / (2 * n)) / denom
+    half = (Z / denom) * math.sqrt(p * (1 - p) / n + Z * Z / (4 * n * n))
+    return (100.0 * max(centre - half, 0.0), 100.0 * min(centre + half, 1.0))
+
+
+def mcnemar_exact(ranks_a, ranks_b, k):
+    """Exact McNemar test that arm B beats arm A at @k. Returns (b, c, p_value).
+
+    The arms are scored on the *same* queries, so the comparison is paired and
+    the marginal confidence intervals — which overlap here — are the wrong test:
+    they discard the pairing and are badly conservative. McNemar looks only at
+    the queries the arms disagree on, where ``b`` = A hit and B missed, ``c`` =
+    B hit and A missed. Under the null those split 50/50, so the p-value is an
+    exact two-sided binomial rather than a chi-square approximation (the
+    discordant counts here are small enough that the approximation is unsafe).
+    """
+    b = c = 0
+    for ra, rb in zip(ranks_a, ranks_b):
+        hit_a = ra is not None and ra < k
+        hit_b = rb is not None and rb < k
+        if hit_a and not hit_b:
+            b += 1
+        elif hit_b and not hit_a:
+            c += 1
+    n = b + c
+    if not n:
+        return (0, 0, 1.0)
+    tail = sum(math.comb(n, i) for i in range(min(b, c) + 1)) / (2**n)
+    return (b, c, min(1.0, 2 * tail))
 
 
 def gold_rank(nodes, gold_path):
@@ -195,15 +230,26 @@ def score(queries, collection, embedder):
 
 def report(results, n, size):
     print(f"\n  Enron-QA ({size}) — public retrieval benchmark, n={n} queries")
-    print(f"  {'arm':14s}" + "".join(f"{'R@' + str(k):>14s}" for k in KS))
+    print(f"  {'arm':14s}" + "".join(f"{'R@' + str(k):>22s}" for k in KS))
     for arm in ARMS:
         row = f"  {arm:14s}"
         for k in KS:
             val = recall_at_k(results[arm], k, n)
-            row += f"{val:8.1f} ±{wilson_halfwidth(val, n):.1f}"
+            lo, hi = wilson_interval(val, n)
+            row += f"{val:8.1f} [{lo:4.1f},{hi:5.1f}]"
         print(row)
-    print("\n  ± is the 95% Wilson half-width in percentage points.")
-    print("  Arms are dense-only vs dense+learned-sparse (RRF). No rerank, no")
+    print("\n  Brackets are 95% Wilson score intervals. They are asymmetric near the")
+    print("  ceiling, which is why bounds are printed rather than a single ±.")
+
+    # The marginal intervals above overlap; the paired test is what settles it.
+    for k in KS:
+        b, c, p = mcnemar_exact(results[ARMS[0]], results[ARMS[1]], k)
+        verdict = "significant" if p < 0.05 else "not significant"
+        print(
+            f"  paired @{k}: sparse fixes {c}, breaks {b} "
+            f"-> McNemar exact p={p:.4f} ({verdict} at 0.05)"
+        )
+    print("\n  Arms are dense-only vs dense+learned-sparse (RRF). No rerank, no")
     print("  thread reconstruction — see the module docstring for why.\n")
 
 

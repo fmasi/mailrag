@@ -19,9 +19,10 @@ from unittest import mock
 from scripts.eval.bench_public import (
     gold_rank,
     load_fixtures,
+    mcnemar_exact,
     recall_at_k,
     to_email,
-    wilson_halfwidth,
+    wilson_interval,
 )
 from scripts.eval.gen_public_benchset import SIZES, select
 
@@ -78,19 +79,87 @@ class TestRecallAtK(unittest.TestCase):
         self.assertEqual(recall_at_k([], 5, 0), 0.0)
 
 
-class TestWilsonHalfwidth(unittest.TestCase):
-    def test_zero_n_is_zero(self):
-        self.assertEqual(wilson_halfwidth(50.0, 0), 0.0)
+class TestWilsonInterval(unittest.TestCase):
+    def test_zero_n_is_a_degenerate_interval(self):
+        self.assertEqual(wilson_interval(50.0, 0), (0.0, 0.0))
 
     def test_a_larger_sample_gives_a_tighter_interval(self):
-        self.assertLess(wilson_halfwidth(50.0, 400), wilson_halfwidth(50.0, 100))
+        wide = wilson_interval(50.0, 100)
+        tight = wilson_interval(50.0, 400)
+        self.assertLess(tight[1] - tight[0], wide[1] - wide[0])
 
-    def test_certainty_has_no_width(self):
-        self.assertAlmostEqual(wilson_halfwidth(100.0, 360), 0.0)
+    def test_the_point_estimate_lies_inside_its_own_interval(self):
+        for p in (0.0, 25.0, 76.1, 97.5, 100.0):
+            with self.subTest(p=p):
+                lo, hi = wilson_interval(p, 360)
+                self.assertLessEqual(lo, p + 1e-9)
+                self.assertGreaterEqual(hi, p - 1e-9)
 
-    def test_half_width_is_in_percentage_points(self):
-        # p=0.5, n=100 -> 1.96*sqrt(.25/100) = 9.8pp
-        self.assertAlmostEqual(wilson_halfwidth(50.0, 100), 9.8, places=1)
+    def test_a_perfect_score_still_carries_uncertainty(self):
+        """The reason this is Wilson and not Wald. Wald gives ±0.00 at p=1 and
+        would claim certainty from 360 samples; Wilson keeps a real lower bound."""
+        lo, hi = wilson_interval(100.0, 360)
+        self.assertAlmostEqual(hi, 100.0)
+        self.assertLess(lo, 99.5)
+        self.assertGreater(lo, 98.0)
+
+    def test_the_interval_is_asymmetric_near_the_ceiling(self):
+        """Why bounds are reported instead of a single ±: at the benchmark's own
+        recall values the two sides differ by about a percentage point."""
+        p = 97.5
+        lo, hi = wilson_interval(p, 360)
+        self.assertGreater((p - lo) - (hi - p), 0.5)
+
+    def test_it_is_never_wider_than_the_possible_range(self):
+        for p in (0.0, 100.0):
+            with self.subTest(p=p):
+                lo, hi = wilson_interval(p, 360)
+                self.assertGreaterEqual(lo, 0.0)
+                self.assertLessEqual(hi, 100.0)
+
+    def test_matches_the_published_wilson_value(self):
+        # p=0.5, n=100 -> [40.4, 59.6] (standard worked example)
+        lo, hi = wilson_interval(50.0, 100)
+        self.assertAlmostEqual(lo, 40.4, places=1)
+        self.assertAlmostEqual(hi, 59.6, places=1)
+
+
+class TestMcNemarExact(unittest.TestCase):
+    def test_counts_only_the_queries_the_arms_disagree_on(self):
+        # q0: both hit (concordant)  q1: only A  q2,q3: only B  q4: both miss
+        a = [0, 0, None, None, None]
+        b = [0, None, 0, 0, None]
+        b_count, c_count, _ = mcnemar_exact(a, b, 5)
+        self.assertEqual((b_count, c_count), (1, 2))
+
+    def test_no_disagreement_is_p_one_not_a_division_by_zero(self):
+        ranks = [0, 1, None]
+        self.assertEqual(mcnemar_exact(ranks, ranks, 5), (0, 0, 1.0))
+
+    def test_a_one_sided_sweep_is_significant(self):
+        """10 fixes and 0 breaks: p = 2 * 0.5^10 ≈ 0.002."""
+        a = [None] * 10
+        b = [0] * 10
+        _, _, p = mcnemar_exact(a, b, 5)
+        self.assertAlmostEqual(p, 2 * 0.5**10, places=6)
+
+    def test_an_even_split_is_not_significant(self):
+        a = [0] * 5 + [None] * 5
+        b = [None] * 5 + [0] * 5
+        _, _, p = mcnemar_exact(a, b, 5)
+        self.assertEqual(p, 1.0)
+
+    def test_the_k_cut_decides_what_counts_as_a_hit(self):
+        """A rank of 7 is a hit @10 but a miss @5, so the same ranks give
+        different discordant counts at different k."""
+        a, b = [7], [0]
+        self.assertEqual(mcnemar_exact(a, b, 5)[:2], (0, 1))
+        self.assertEqual(mcnemar_exact(a, b, 10)[:2], (0, 0))
+
+    def test_p_never_exceeds_one(self):
+        a = [0, None, 0, None]
+        b = [None, 0, None, 0]
+        self.assertLessEqual(mcnemar_exact(a, b, 5)[2], 1.0)
 
 
 class TestToEmail(unittest.TestCase):

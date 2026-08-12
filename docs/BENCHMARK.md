@@ -37,22 +37,49 @@ Standard set — 2 000 documents, 360 queries:
 
 | arm | R@1 | R@5 | R@10 |
 |---|---|---|---|
-| dense | 87.5 ±3.4 | 94.4 ±2.4 | 95.3 ±2.2 |
-| **dense + learned-sparse** | **90.0 ±3.1** | **97.5 ±1.6** | **98.6 ±1.2** |
+| dense | 87.5 [83.7, 90.5] | 94.4 [91.6, 96.4] | 95.3 [92.6, 97.0] |
+| **dense + learned-sparse** | **90.0 [86.5, 92.7]** | **97.5 [95.3, 98.7]** | **98.6 [96.8, 99.4]** |
 
 Large set — same 360 queries against a 5× bigger distractor pool (10 000 documents):
 
 | arm | R@1 | R@5 | R@10 |
 |---|---|---|---|
-| dense | 76.1 ±4.4 | 90.0 ±3.1 | 92.5 ±2.7 |
-| **dense + learned-sparse** | **80.6 ±4.1** | **94.4 ±2.4** | **96.7 ±1.9** |
+| dense | 76.1 [71.4, 80.2] | 90.0 [86.5, 92.7] | 92.5 [89.3, 94.8] |
+| **dense + learned-sparse** | **80.6 [76.2, 84.3]** | **94.4 [91.6, 96.4]** | **96.7 [94.3, 98.1]** |
 
-± is the 95% Wilson half-width in percentage points.
+Brackets are **95% Wilson score intervals**, not `mean ± z·SE`. The textbook Wald
+interval misbehaves exactly where this benchmark lives: at p̂ = 0.975, n = 360 the
+true interval is [95.3, 98.7] — a full percentage point asymmetric — and at p̂ = 1.0
+Wald collapses to ±0.00, claiming perfect certainty from 360 samples. Bounds are
+printed rather than a single ± for the same reason: near the ceiling there is no
+honest symmetric summary.
+
+### Significance
+
+The marginal intervals above **overlap**, which invites the conclusion that the
+difference is not real. That conclusion would be wrong, and the reason is worth
+stating: both arms answer the *same* 360 queries, so the comparison is **paired**.
+Overlapping marginal intervals discard the pairing and are badly conservative for
+paired data. `make bench` therefore also reports an exact **McNemar** test over the
+queries where the arms disagree:
+
+| set | k | sparse fixes | sparse breaks | McNemar exact p |
+|---|---|---|---|---|
+| standard | @1 | 11 | 2 | 0.0225 |
+| standard | @5 | 12 | 1 | **0.0034** |
+| standard | @10 | 12 | 0 | 0.0005 |
+| large | @1 | 19 | 3 | 0.0009 |
+| large | @5 | 17 | 1 | **0.0001** |
+| large | @10 | 15 | 0 | 0.0001 |
+
+The effect is one-sided at every cut: learned-sparse rescues 11–19 queries and
+breaks at most 3.
 
 **The direction is the result.** The sparse advantage at R@5 is +3.1pp at 2 000
-documents and **+4.4pp at 10 000** — it grows as the task gets harder. A retrieval
-trick that only helps on an easy corpus is not worth shipping; this one earns more
-as the distractor pool widens.
+documents and **+4.4pp at 10 000** — it grows as the task gets harder, and the
+paired p-value falls by an order of magnitude with it. A retrieval trick that only
+helps on an easy corpus is not worth shipping; this one earns more as the distractor
+pool widens.
 
 ## Why the corpus is not smaller
 
