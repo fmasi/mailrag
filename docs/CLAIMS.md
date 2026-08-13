@@ -32,15 +32,36 @@ saying so.
 | R1 | dense R@5 **94.4** [91.6, 96.4] vs dense+sparse **97.5** [95.3, 98.7]; McNemar p=0.0034 | README, landing page, `BENCHMARK.md` | `scripts/eval/bench_public.py` | public Enron-QA, 2 000 docs / 360 q | **Public** ✅ | 2026-08-12 |
 | R2 | large set: dense **90.0** vs dense+sparse **94.4**; p=0.0001 | README, `BENCHMARK.md` | `scripts/eval/bench_public.py --size large` | public Enron-QA, 10 000 docs | **Public** ✅ | 2026-08-12 |
 | R3 | plain-dense baseline **45.6%** R@5 | README, landing page | private eval ladder | private ~32k mailbox | Private | 2026-06 (pre-register) |
-| R4 | thread reconstruction **64.2 → 93.3** (+29.1) | README, landing page | `scripts/eval/bench_thread_reconstruction.py` | private, `work-rag-ctx-threadaware` | Private | 2026-06 (pre-register) |
+| R4 | thread reconstruction **64.2 → 93.3** (+29.1) | README, landing page | `scripts/eval/bench_thread_reconstruction.py` | private, `work-rag-ctx-threadaware` | Private ✅ **re-verified, exact** | 2026-08-13 |
 | R5 | contextual summaries **+12.8** | README, landing page | `scripts/eval/build_bodyonly_collections.py` (builds the no-summary control) | private | Private | 2026-06 (pre-register) |
-| R6 | cross-encoder rerank **+2.5**, and it *demotes* thread-spanning answers | README, landing page | `scripts/eval/bench_thread_reconstruction.py` (rerank arm) | private + paid NVIDIA endpoint | Private ⚠️ | 2026-06 (pre-register) |
+| R6a | cross-encoder rerank **+2.5** R@5 overall | README, landing page | `scripts/eval/bench_thread_reconstruction.py` (rerank arm) | private + paid NVIDIA endpoint | Private ✅ **re-verified, exact** (61.7 → 64.2) | 2026-08-13 |
+| R6b | rerank *demotes* the answer on **thread-spanning** queries | README, landing page | — | — | ⚠️ **NOT reproduced on recall** — see below | 2026-08-13 |
 | R7 | NVIDIA's stack wins on TREC Legal; mailrag wins on email — "opposite winners" | README, landing page | `scripts/eval/bench_trec.py`, `build_trec_collection.py` | TREC Legal + paid NVIDIA endpoint | Private ⚠️ | 2026-06 (pre-register) |
 | R8 | an early **+6pp** gain was half a quantization artifact, worth **+3pp** at matched precision | README | private eval, §-numbered in `EXPERIMENTS.md` | private | Private | 2026-06 (pre-register) |
 
-⚠️ **R6 and R7 are currently unverifiable**: both need `NVIDIA_API_KEY`, which is
-not configured. The scripts now fail with an actionable message rather than a bare
-assertion, but until a key is supplied these two numbers cannot be re-checked.
+⚠️ **R6b does not hold as written.** Re-running the rerank arm (2026-08-13, 360
+queries) shows rerank is **neutral or positive on recall in every category**:
+
+| category | n | E@5 hybrid → +rerank | E@1 |
+|---|---|---|---|
+| content | 144 | 60.4 → 67.4 (**+7.0**) | +1.4 |
+| terse | 144 | 58.3 → 57.6 (−0.7 — *one query*) | +8.3 |
+| spanning | 72 | 70.8 → **70.8** (0.0) | +6.9 |
+
+Thread-spanning is *exactly unchanged* at @5 and @10 and better at @1. So the
+demotion cannot be a recall result. It comes from the **§9 LLM-judged
+answer-quality** eval, where `EXPERIMENTS.md` records that rerank "HURT every
+category" — a different metric on a different run. The README states it directly
+beside the `+2.5 R@5` figure, which reads as though both come from the same
+measurement.
+
+`EXPERIMENTS.md:151` separately describes the demotion as affecting *contentless
+**terse*** emails, not spanning ones — which matches this data far better than the
+README does. **The README wording needs correcting**; tracked in #128.
+
+⚠️ **R7 remains unverifiable by measurement** until its collections are rebuilt
+(`trec-bge` / `trec-e5` are no longer in Qdrant). The key is now available, so it
+is unblocked — it just needs the build step first.
 
 ## Performance claims
 

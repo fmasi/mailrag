@@ -2,14 +2,13 @@
 the contextual-summary feature. bge-m3 hybrid (dense+sparse) + e5 dense, over the
 same work-rag chunk bodies. Compare bench vs the summary+body headline."""
 
-import json
 import os
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from scripts.eval._paths import bootstrap  # noqa: E402
+from scripts.eval._paths import bootstrap, jreq  # noqa: E402
 
 bootstrap()
 from src.ingest import hybrid_qdrant as hq
@@ -22,25 +21,6 @@ KEY = os.environ.get("NVIDIA_API_KEY")
 assert KEY
 H = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 EMB = "https://integrate.api.nvidia.com/v1/embeddings"
-
-
-def jreq(url, body=None, method="POST", hdr=None, timeout=120):
-    for a in range(8):
-        try:
-            r = urllib.request.Request(
-                url,
-                data=(json.dumps(body).encode() if body is not None else None),
-                headers=(hdr or {"Content-Type": "application/json"}),
-                method=method,
-            )
-            with urllib.request.urlopen(r, timeout=timeout) as z:
-                return json.load(z) if z.length != 0 else {}
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(min(2**a, 30))
-                continue
-            raise
-    raise RuntimeError("429")
 
 
 # pull bodies

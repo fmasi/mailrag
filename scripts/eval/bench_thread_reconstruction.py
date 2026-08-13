@@ -4,11 +4,8 @@ threads -> thread expansion would surface the gold), by category. Private corpus
 """
 
 import json
-import time
-import urllib.error
-import urllib.request
 
-from scripts.eval._paths import bootstrap, data_path, require_key  # noqa: E402
+from scripts.eval._paths import bootstrap, data_path, jreq, require_key  # noqa: E402
 
 bootstrap()
 KEY = require_key(what="the cross-encoder rerank arm")
@@ -20,22 +17,6 @@ QFILE = data_path(
 TOPK = 20
 
 
-def jreq(url, body, hdr, timeout=60):
-    for a in range(8):
-        try:
-            r = urllib.request.Request(
-                url, data=json.dumps(body).encode(), headers=hdr, method="POST"
-            )
-            with urllib.request.urlopen(r, timeout=timeout) as z:
-                return json.load(z)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(min(2**a, 30))
-                continue
-            raise
-    raise RuntimeError("429")
-
-
 def rerank(q, passages):
     rk = jreq(
         RR,
@@ -44,7 +25,7 @@ def rerank(q, passages):
             "query": {"text": q},
             "passages": [{"text": (t or " ")[:4000]} for t in passages],
         },
-        H,
+        hdr=H,
     )["rankings"]
     return [x["index"] for x in sorted(rk, key=lambda z: -z["logit"])]
 

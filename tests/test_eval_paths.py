@@ -7,14 +7,17 @@ missing key must say what to do, not raise from three frames deeper.
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import pathlib
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
-from scripts.eval._paths import REPO_ROOT, bootstrap, data_path, require_key
+from scripts.eval._paths import REPO_ROOT, bootstrap, data_path, jreq, require_key
 
 
 class TestRepoRoot(unittest.TestCase):
@@ -159,6 +162,90 @@ class TestRequireKey(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 require_key()
         self.assertIn("keychain:mailrag.nvidia.token", str(cm.exception))
+
+
+class TestJreqRetries(unittest.TestCase):
+    """Two live runs of the R6 benchmark died on transient connection errors —
+    a TLS handshake timeout and `[Errno 54] Connection reset by peer` — because
+    the old per-script helpers retried on HTTP 429 and nothing else. Hundreds of
+    calls and the GPU time behind them, discarded by one blip.
+    """
+
+    def _urlopen(self, *effects):
+        """A urlopen double that yields *effects* in order; a dict means success."""
+        calls = {"n": 0}
+
+        def fake(req, timeout=None):
+            i = calls["n"]
+            calls["n"] += 1
+            eff = effects[min(i, len(effects) - 1)]
+            if isinstance(eff, Exception):
+                raise eff
+            cm = mock.MagicMock()
+            cm.__enter__.return_value = io.BytesIO(json.dumps(eff).encode())
+            return cm
+
+        return fake, calls
+
+    def test_returns_the_decoded_body_on_success(self):
+        fake, _ = self._urlopen({"ok": True})
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep"):
+            self.assertEqual(jreq("https://x/y", {"a": 1}), {"ok": True})
+
+    def test_retries_a_connection_reset_then_succeeds(self):
+        fake, calls = self._urlopen(ConnectionResetError(54, "Connection reset by peer"), {"ok": 1})
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep"):
+            self.assertEqual(jreq("https://x/y", {}), {"ok": 1})
+        self.assertEqual(calls["n"], 2)
+
+    def test_retries_a_handshake_timeout_then_succeeds(self):
+        fake, calls = self._urlopen(
+            urllib.error.URLError("_ssl.c:1015: The handshake operation timed out"), {"ok": 1}
+        )
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep"):
+            self.assertEqual(jreq("https://x/y", {}), {"ok": 1})
+        self.assertEqual(calls["n"], 2)
+
+    def test_still_retries_rate_limiting(self):
+        err = urllib.error.HTTPError("https://x/y", 429, "Too Many Requests", {}, None)
+        fake, calls = self._urlopen(err, {"ok": 1})
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep"):
+            self.assertEqual(jreq("https://x/y", {}), {"ok": 1})
+        self.assertEqual(calls["n"], 2)
+
+    def test_retries_a_server_error(self):
+        err = urllib.error.HTTPError("https://x/y", 503, "Service Unavailable", {}, None)
+        fake, calls = self._urlopen(err, {"ok": 1})
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep"):
+            self.assertEqual(jreq("https://x/y", {}), {"ok": 1})
+        self.assertEqual(calls["n"], 2)
+
+    def test_does_not_retry_a_client_error(self):
+        """401/400 will fail identically however many times it is sent — retrying
+        just turns a clear auth failure into a slow one."""
+        err = urllib.error.HTTPError("https://x/y", 401, "Unauthorized", {}, None)
+        fake, calls = self._urlopen(err)
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep"):
+            with self.assertRaises(urllib.error.HTTPError):
+                jreq("https://x/y", {})
+        self.assertEqual(calls["n"], 1)
+
+    def test_gives_up_eventually_and_names_the_last_error(self):
+        fake, calls = self._urlopen(ConnectionResetError(54, "reset"))
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep"):
+            with self.assertRaises(RuntimeError) as cm:
+                jreq("https://x/y", {}, attempts=3)
+        self.assertEqual(calls["n"], 3)
+        self.assertIn("reset", str(cm.exception))
+
+    def test_backoff_is_exponential_and_capped(self):
+        fake, _ = self._urlopen(ConnectionResetError(54, "reset"))
+        with mock.patch("urllib.request.urlopen", fake), mock.patch("time.sleep") as sl:
+            with self.assertRaises(RuntimeError):
+                jreq("https://x/y", {}, attempts=8)
+        waits = [c.args[0] for c in sl.call_args_list]
+        self.assertEqual(waits[:5], [1, 2, 4, 8, 16])
+        self.assertTrue(all(w <= 30 for w in waits))
 
 
 class TestNoScriptCarriesAHardcodedHome(unittest.TestCase):

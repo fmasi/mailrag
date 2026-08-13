@@ -8,11 +8,8 @@ import json
 import math
 import os
 import re
-import time
-import urllib.error
-import urllib.request
 
-from scripts.eval._paths import bootstrap, data_path, require_key  # noqa: E402
+from scripts.eval._paths import bootstrap, data_path, jreq, require_key  # noqa: E402
 
 bootstrap()
 KEY = require_key(what="the NVIDIA dense+rerank comparison arm")
@@ -27,25 +24,6 @@ TOPN = 300
 RR_K = 50
 
 
-def jreq(url, body, hdr=None, method="POST", timeout=90):
-    for a in range(8):
-        try:
-            r = urllib.request.Request(
-                url,
-                data=json.dumps(body).encode(),
-                headers=(hdr or {"Content-Type": "application/json"}),
-                method=method,
-            )
-            with urllib.request.urlopen(r, timeout=timeout) as z:
-                return json.load(z)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(min(2**a, 30))
-                continue
-            raise
-    raise RuntimeError("429")
-
-
 def e5q(q):
     return jreq(
         EMB,
@@ -55,7 +33,7 @@ def e5q(q):
             "input_type": "query",
             "truncate": "END",
         },
-        H,
+        hdr=H,
     )["data"][0]["embedding"]
 
 
@@ -67,7 +45,7 @@ def rerank(q, passages):
             "query": {"text": q[:4000]},
             "passages": [{"text": (t or " ")[:4000]} for t in passages],
         },
-        H,
+        hdr=H,
     )["rankings"]
     return [x["index"] for x in sorted(rk, key=lambda z: -z["logit"])]
 

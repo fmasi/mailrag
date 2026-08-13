@@ -21,10 +21,10 @@ import json
 import os
 import sys
 import time
-import urllib.error
-import urllib.request
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+
+from scripts.eval._paths import jreq
 
 WT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, WT)
@@ -47,25 +47,6 @@ EMB = "https://integrate.api.nvidia.com/v1/embeddings"
 RR = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
 E5_MODEL = os.environ.get("E5_MODEL", "nvidia/nv-embedqa-e5-v5")
 RR_MODEL = os.environ.get("RR_MODEL", "nvidia/rerank-qa-mistral-4b")
-
-
-def jreq(url, body=None, method="POST", hdr=None, timeout=120):
-    for attempt in range(8):
-        try:
-            r = urllib.request.Request(
-                url,
-                data=(json.dumps(body).encode() if body is not None else None),
-                headers=(hdr or {"Content-Type": "application/json"}),
-                method=method,
-            )
-            with urllib.request.urlopen(r, timeout=timeout) as z:
-                return json.load(z) if z.length != 0 else {}
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(min(2**attempt, 30))
-                continue
-            raise
-    raise RuntimeError("429 exhausted")
 
 
 def e5_query(q):

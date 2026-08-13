@@ -18,12 +18,13 @@ Notes:
     fits the model's token cap (e5 = 512) before trusting the comparison.
 """
 
-import json
 import os
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+
+from scripts.eval._paths import jreq
 
 QD = os.environ.get("QDRANT_URL", "http://localhost:6333")
 SRC = os.environ.get("SRC", "work-rag-ctx-threadaware")
@@ -33,25 +34,6 @@ EMB = "https://integrate.api.nvidia.com/v1/embeddings"
 KEY = os.environ.get("NVIDIA_API_KEY")
 assert KEY, "set NVIDIA_API_KEY"
 H = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
-
-
-def jreq(url, body=None, method="POST", hdr=None, timeout=120):
-    for attempt in range(8):
-        try:
-            r = urllib.request.Request(
-                url,
-                data=(json.dumps(body).encode() if body is not None else None),
-                headers=(hdr or {"Content-Type": "application/json"}),
-                method=method,
-            )
-            with urllib.request.urlopen(r, timeout=timeout) as z:
-                return json.load(z) if z.length != 0 else {}
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(min(2**attempt, 30))
-                continue
-            raise
-    raise RuntimeError("429 backoff exhausted")
 
 
 def main():

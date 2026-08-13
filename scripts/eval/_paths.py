@@ -60,6 +60,49 @@ def bootstrap(*, offline: bool = True) -> pathlib.Path:
     return REPO_ROOT
 
 
+def jreq(url, body=None, *, method: str = "POST", hdr=None, timeout: int = 120, attempts: int = 8):
+    """POST *body* as JSON and return the decoded response, retrying transients.
+
+    Every eval script carried its own copy of this, and all five retried on **HTTP
+    429 only**. A connection-level failure — TLS handshake timeout, ``[Errno 54]
+    Connection reset by peer``, a dropped keep-alive — propagated and destroyed the
+    whole run. That is a poor trade for a benchmark that makes hundreds of calls
+    over several minutes and gets run months apart: a single blip at call 200 threw
+    away the other 199 and the GPU time behind them. Both failure modes were
+    observed live while re-verifying claim R6.
+
+    So the retry covers what is genuinely transient — 429, 5xx, and connection
+    errors — and *not* 4xx, which will fail identically however many times it is
+    sent. Backoff is exponential, capped at 30 s, matching the ≤3-worker guidance
+    that keeps NVIDIA's endpoints from rate-limiting in the first place.
+    """
+    import json as _json  # noqa: PLC0415
+    import time as _time  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    last = None
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(
+                url,
+                data=_json.dumps(body).encode() if body is not None else None,
+                headers=hdr or {},
+                method=method,
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return _json.load(resp)
+        except urllib.error.HTTPError as exc:
+            # 4xx other than 429 is a real error: the same request will fail again.
+            if exc.code != 429 and exc.code < 500:
+                raise
+            last = exc
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+            last = exc
+        _time.sleep(min(2**attempt, 30))
+    raise RuntimeError(f"{url} failed after {attempts} attempts; last error: {last}")
+
+
 def data_path(env_var: str, default: str, *, what: str) -> pathlib.Path:
     """Resolve a private-data location, honouring *env_var*.
 
