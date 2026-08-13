@@ -9,6 +9,23 @@ the **public** [Enron-QA](https://huggingface.co/datasets/MichaelR207/enron_qa_0
 dataset, needs no API key and no private data, and prints a real recall table in a
 few minutes.
 
+### Why the corpus is from 2001
+
+A fair question: why benchmark on Enron rather than something modern?
+
+Because there is nothing else. Nobody has ever donated their inbox. Every public
+email corpus exists because someone *lost control* of a mailbox — Enron through a
+federal investigation, the Avocado collection through a company's liquidation, the
+FOIA sets through public-records law. There is no consented, open corpus of real
+correspondence, because nobody consents to publishing one. So a dataset from 2001
+remains the field standard twenty-five years later, and the nearest alternative is
+another defunct company's mail, behind a licence.
+
+That is not a footnote about benchmarking; it is the whole reason this project is
+built to run locally. Email is the most sensitive data most people own, which is
+simultaneously why it is hard to benchmark on and why it should not be uploaded
+anywhere to be searched.
+
 ```bash
 docker compose up -d          # Qdrant
 make bench                    # 2 000 docs / 360 queries

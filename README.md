@@ -1,61 +1,11 @@
 # mailrag
 
-> Private, self-hosted **email RAG**: turn your own mail archive into a queryable knowledge
-> base that runs on your hardware, on open models, with nothing required to leave your network.
-> A faithful, private record of what you've written and received — one half of a context
-> stack you own. (The other half is [parley](https://github.com/fmasi/parley), for calls
-> and meetings.)
+> Ask questions of your own email — on your own hardware, on open models, with nothing
+> required to leave your network.
 
 [![Test Suite](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml/badge.svg)](https://github.com/fmasi/mailrag/actions/workflows/test-suite.yml)
 ![Python](https://img.shields.io/badge/python-3.11+-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
-
-It ships as a CLI, a full-screen TUI wizard, a scheduled continuous-sync agent
-(launchd/systemd), and a seven-tool [MCP server](docs/MCP_SERVER.md) that plugs the query
-path into agents like Claude Code.
-
-**What it buys you.** A generic RAG treats every email as an isolated document. On a real
-~32k-email corporate mailbox that plain-dense baseline finds the right message only **45.6%** of
-the time (recall@5). mailrag is built for how email actually works: it answers from the whole
-**thread**, not one message, and that takes recall@5 to **93.3%**. The metric shifts from
-message-level to thread-level *on purpose* — for a conversation the thread is the right unit of
-truth. Reconstructing it is the single biggest lever (**+29.1**, from a 64.2% message-level
-base), just ahead of a per-email contextual summary (**+12.8**). Neither is a fancier
-embedding model.
-As a yardstick the email-tuned hybrid is benchmarked against NVIDIA's general-purpose retrieval
-stack: it wins on email, while NVIDIA's stack wins on broad legal e-discovery (TREC) — same
-systems, opposite winners, task-dependent. **The ladder above is author-reported on a *private*
-mailbox and is not independently reproducible** — public email corpora don't carry the thread
-structure it depends on. What you *can* check yourself is the retrieval layer underneath it, on
-public Enron-QA with no key and no private data:
-
-```
-make bench                    # 2 000 docs / 360 queries
-```
-
-| arm | R@1 | R@5 | R@10 |
-|---|---|---|---|
-| dense only | 87.5 [83.7, 90.5] | 94.4 [91.6, 96.4] | 95.3 [92.6, 97.0] |
-| **dense + learned-sparse** | **90.0 [86.5, 92.7]** | **97.5 [95.3, 98.7]** | **98.6 [96.8, 99.4]** |
-
-Brackets are 95% Wilson score intervals. They overlap — so the benchmark also reports the
-**paired** test, which is the right one here because both arms answer the identical queries: at
-R@5 learned-sparse **fixes 12 queries and breaks 1**, McNemar exact **p = 0.0034**.
-
-`make bench SIZE=large` runs the same queries against a 5× bigger distractor pool (10 000 docs),
-where the task is harder and the sparse advantage *grows* — 90.0 → 94.4 R@5, **+4.4pp**, fixing
-17 and breaking 1 (**p = 0.0001**). That directional result is the point: learned-sparse earns
-more as retrieval gets harder.
-
-**Be clear about the scope of that number.** `make bench` validates the *hybrid retrieval layer*
-and nothing else — thread reconstruction (+29.1), contextual summaries (+12.8), reranking (+2.5)
-and noise cleanup are all switched off, because none of them can be reproduced on a public corpus
-without either thread headers Enron-QA lacks or an API key a reader shouldn't need. It proves the
-foundation is sound and that the project's claims are stated falsifiably; it does **not**
-reproduce the headline ladder. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md) for the full
-exclusion table. `make demo` separately reproduces the *method* end to end — it is a walkthrough,
-not a measurement. Full write-up in the
-[case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought) below.
 
 ## Why this exists
 
@@ -67,15 +17,137 @@ that's a non-starter.
 So I built the opposite. mailrag runs on your own hardware, on open models, with nothing required
 to leave your network — no mailbox upload, no vendor to trust with the whole archive.
 
+**How sensitive is email? Look at what's public.** Nobody has ever donated their inbox. Every
+public email corpus exists because someone *lost control* of a mailbox — Enron entered the record
+through a federal investigation, the Avocado collection came out of a company's liquidation, the
+FOIA sets came out of public-records law. There is no consented, open corpus of real
+correspondence, because nobody consents. That is why a dataset from **2001** is still the field
+standard twenty-five years later, and why the best available alternative is another dead company's
+mail.
+
+That scarcity *is* the argument for building it this way. If the data is too sensitive to leave
+its owner — and the entire history of this field says it is — then you don't bring the mailbox to
+the model. You bring the model to the mailbox.
+
 Then the real point clicked. These aren't just emails, they're **context**. A faithful, private
 record of what was said and written is exactly what an AI agent needs to be useful about *your*
 work — kept private and self-owned, so you get total recall without renting your memory to anyone.
-mailrag is one private context source, for **email**; [parley](https://github.com/fmasi/parley) is
-another, for **calls and meetings** — different domain, different machinery (on-device audio +
-diarization). They don't talk to each other; my agents know about both and reach for whatever fits.
-The point was never a single app — it's a private, open stack of context I own.
+mailrag is one private context source, for **email**;
+[parley](https://github.com/fmasi/parley) is another, for **calls and meetings** — different
+domain, different machinery (on-device audio + diarization). They don't talk to each other; my
+agents know about both and reach for whatever fits. The point was never a single app — it's a
+private, open stack of context I own.
 
-## What it does
+## The idea: email is conversations, not documents
+
+A generic RAG treats every email as an isolated document, and that is the mistake. Most single
+messages are unanswerable alone — *"sounds good, go ahead"* means nothing without the three
+messages above it. So the unit of truth for a mailbox is the **thread**, not the message.
+
+Three ideas carry most of the value:
+
+1. **Match small, answer big.** Retrieve one message, then answer from its *entire* reconstructed
+   conversation. It is the single biggest win in the system — and it needs no LLM at all.
+2. **Hybrid retrieval.** bge-m3 dense **+ learned-sparse**, RRF-fused in Qdrant: the concept *and*
+   the rare exact token that dense vectors lose — an invoice number, a ticket ID, an acronym.
+3. **Local by default.** Open models, your machine, your disk. Cloud is a swappable option at two
+   seams (the LLM and the embedder), never a requirement.
+
+Around that core sit the unglamorous parts that decide whether it works on a real mailbox:
+attachment extraction with OCR, reply-chain stripping, noise filtering, and continuous IMAP sync
+so the index doesn't quietly rot. Details in [what's in the box](#whats-in-the-box).
+
+## Try it
+
+Prerequisites: Python 3.11+ and Docker (for the Qdrant container).
+
+```bash
+git clone https://github.com/fmasi/mailrag.git
+cd mailrag
+pip install -r requirements.txt        # includes FlagEmbedding (bge-m3); first run pulls ~2 GB of weights
+cp .env.example .env                    # an LLM key/endpoint — only needed for the demo's answers
+make demo                               # see the pipeline work, end to end
+make bench                              # check the retrieval numbers yourself
+```
+
+**`make demo` shows you the shape of it.** It brings up Qdrant, builds a thread-aware contextual
+index over 100 public Enron emails, and answers example questions by retrieving a message and
+assembling its whole conversation. It is a **walkthrough, not a measurement** — no scoring, no
+gold answers — and it does spend a few LLM calls on summaries and answers.
+
+**`make bench` is the one that proves something.** It scores 360 committed queries against a
+fixed 2 000-document slice of public Enron-QA and prints recall@k with confidence intervals and a
+paired significance test. It spends **zero LLM calls** — no summaries, no answer generation, no
+reranker — so it needs no API key and no private data. Roughly 1.6 min on an Apple-silicon GPU,
+14.7 min CPU-only. The corpus manifest and query set are committed under
+[`eval/public/`](eval/public/), so you can read exactly what is being scored.
+
+Once a collection is indexed, query it from the CLI or hand it to an agent over the
+[Model Context Protocol](docs/MCP_SERVER.md):
+
+```bash
+./mailrag ask "who approved the Q3 budget, and when?"
+./mailrag mcp                     # stdio MCP server, read-only, multi-collection
+```
+
+The MCP server exposes seven tools — `list_collections`, `search_email`, `get_thread`,
+`grep_email`, `answer_question`, `list_attachments`, `get_attachment` — so an agent can discover
+your corpora, search them, pull a whole thread by id (an exact key lookup, not a search), grep for
+literal needles embeddings miss, and read attachment text. See
+[`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) for the reference and client setup.
+
+## What the numbers say
+
+Two different things get measured here, and it is worth keeping them apart.
+
+**On a real mailbox (author-reported).** On a ~32k-email corporate archive, a plain-dense baseline
+finds the right message **45.6%** of the time at recall@5. Answering from the whole thread instead
+of the single message takes that to **93.3%** — the metric shifts from message-level to
+thread-level *on purpose*, because for a conversation the thread is the right unit of truth.
+Thread reconstruction is the biggest lever (**+29.1**, from a 64.2% message-level base), just
+ahead of per-email contextual summaries (**+12.8**). Neither is a fancier embedding model. The
+full technique-by-technique ladder is in the
+[case study](#case-study-what-the-cleanup--retrieval-choices-actually-bought), with the reasoning
+written up in the [benchmark post](https://fmasi.eu/blog/email-rag-retrieval/).
+
+These figures come from a private mailbox, so you cannot re-run them. Treat them as
+author-reported.
+
+**What you can check yourself.** `make bench`, on public Enron-QA, no key, no private data:
+
+| arm | R@1 | R@5 | R@10 |
+|---|---|---|---|
+| dense only | 87.5 [83.7, 90.5] | 94.4 [91.6, 96.4] | 95.3 [92.6, 97.0] |
+| **dense + learned-sparse** | **90.0 [86.5, 92.7]** | **97.5 [95.3, 98.7]** | **98.6 [96.8, 99.4]** |
+
+Brackets are 95% Wilson score intervals. They overlap, so the benchmark also reports the **paired**
+test — the right one here, since both arms answer identical queries: at R@5 learned-sparse **fixes
+12 queries and breaks 1**, McNemar exact **p = 0.0034**. Run `make bench SIZE=large` and the
+distractor pool grows 5×, the task gets harder, and the sparse advantage *widens* to **+4.4pp**
+(p = 0.0001). That direction is the real result: learned-sparse earns more as retrieval gets
+harder.
+
+**What that benchmark covers.** The hybrid retrieval layer, and only that. Thread reconstruction,
+contextual summaries, reranking and noise cleanup are all switched off, because public email
+corpora do not carry the conversation structure the first two depend on, and the third needs a
+paid endpoint. So `make bench` shows the foundation is sound; it does not reproduce the ladder
+above. [`docs/BENCHMARK.md`](docs/BENCHMARK.md) lists every exclusion, and
+[`docs/CLAIMS.md`](docs/CLAIMS.md) maps every published figure to the script that produced it and
+the date it was last re-run.
+
+**Closing the gap (in progress).** Thread reconstruction can be made publicly checkable, and the
+data supports it better than expected. Measured over 19,530 real Enron messages: the corpus is an
+Outlook/Exchange export, so it carries **no `In-Reply-To` or `References` headers at all** (0%) —
+but 64% of messages are replies or forwards by subject, and deriving conversations from normalised
+subject plus shared participants puts **50.2% of messages into a multi-message thread** (largest:
+59 messages). So the conversations are there; they just have to be reconstructed rather than read
+off a header. That is [#123](https://github.com/fmasi/mailrag/issues/123). A contextual-summary
+arm is planned alongside it, opt-in via a local LLM so the default stays key-free
+([#125](https://github.com/fmasi/mailrag/issues/125)). Reranking and the TREC comparison will stay
+author-reported — one needs a paid endpoint, the other needs TREC Legal data that cannot be
+redistributed.
+
+## What's in the box
 
 `mailrag` turns a mailbox into a queryable knowledge base, built on LlamaIndex:
 
@@ -112,55 +184,9 @@ The point was never a single app — it's a private, open stack of context I own
   controls for confounds, and reports significance, overturning the intuitive choice more
   than once. It also caught its own headline overstating: an early +6pp gain was half a
   quantization artifact, worth only **+3pp** once the control re-ran at matched precision.
-  The core techniques were later confirmed against a public, human-judged benchmark.
+  Every published figure is tracked in [`docs/CLAIMS.md`](docs/CLAIMS.md) with the script
+  that produces it and the date it was last verified.
 - **Source-agnostic API** — `load_emails(source="enron"|"mail_archive_x")`.
-
-## Quickstart (thread-aware contextual RAG over the public Enron dataset)
-
-Prerequisites: Python 3.11+ and Docker (for the Qdrant container).
-
-```bash
-git clone https://github.com/fmasi/mailrag.git
-cd mailrag
-pip install -r requirements.txt        # includes FlagEmbedding (bge-m3); first run downloads ~2 GB of weights
-cp .env.example .env                    # add an LLM key/endpoint (used for summaries + answers)
-make demo                               # starts Qdrant, builds the contextual index, runs thread-aware queries
-make bench                              # scores retrieval on public Enron-QA and prints recall@k
-```
-
-`make demo` brings up Qdrant (Docker), builds a thread-aware contextual index over 100 Enron
-emails — per-email preceding-context summaries embedded with bge-m3 hybrid vectors — then
-answers example questions by retrieving and assembling whole threads. This is the
-[§13 stack](docs/EXPERIMENTS.md#13-doc-side-thread-aware-summaries--the-evolution-ladder-1113-2026-06-01);
-a small amount of LLM usage goes to the `summarize` step and the answers.
-
-`make demo` is a **walkthrough**: 100 emails, no scoring, no gold answers, and it does spend LLM
-calls. It shows the shape of the pipeline, not its accuracy.
-
-`make bench` is the *verification* path rather than the demo path: it builds a fixed 2 000-document
-slice of public Enron-QA and scores 360 committed queries, printing the recall table shown above.
-It spends **no LLM calls at all** — no summaries, no answer generation, no reranker — so it needs
-no API key and no private data, only Qdrant and the bge-m3 weights. Measured wall clock on an
-Apple M5 Pro (6P+12E, 48 GB): **1.6 min on the GPU (MPS), 14.7 min CPU-only**; see
-[`docs/BENCHMARK.md`](docs/BENCHMARK.md) for the conditions. The corpus manifest and query set
-live in [`eval/public/`](eval/public/) so you can read exactly what is being scored.
-
-Once a collection is indexed, you can query it from the CLI (`./mailrag ask "..."`) or
-expose it to any agent over the **[Model Context Protocol](docs/MCP_SERVER.md)**:
-
-```bash
-./mailrag mcp                     # stdio MCP server (multi-collection)
-```
-
-The server is multi-collection and read-only: one process exposes seven tools —
-`list_collections`, `search_email`, `get_thread`, `grep_email`, `answer_question`,
-`list_attachments` and `get_attachment` — so an agent can discover your indexed
-corpora, search and question them, pull a whole thread by id (an exact key lookup,
-not a search), grep the raw corpus for literal needles that embeddings miss, and
-read attachment text. Build/ingest/interactive steps stay on the CLI. See
-[`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) for the tool reference, collection
-discovery, client setup (Claude Code / opencode), and the full CLI↔MCP capability
-matrix.
 
 ## Architecture
 
