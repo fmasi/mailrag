@@ -56,11 +56,28 @@ Three ideas carry most of the value:
 3. **Local by default.** Open models, your machine, your disk. Cloud is a swappable option at two
    seams (the LLM and the embedder), never a requirement.
 
-### What that looks like
+### The hard part is *finding* the conversation
 
-A real example from the public Enron corpus — 1,200 messages, conversations reconstructed from
-subject and participants. Same question, same index, same embedder; the only difference is whether
-retrieval stops at the message or expands to the conversation:
+Returning a whole thread once you have a hit is not the interesting bit — that is parent-document
+retrieval, and plenty of systems do it. The problem it does not solve is that **the message you
+need is usually the one least likely to be retrieved.**
+
+*"Better or worse than ours?"* is a real Enron email. It answers a real question. Embedded on its
+own it is a bag of five common words, near nothing, and no query will ever surface it. Neither
+will the thread it belongs to, because nothing in that thread's text matches the question either
+until you already know what "ours" refers to.
+
+So the work happens at **index** time, not retrieval time. Each email is embedded together with a
+short summary of *what came before it in its conversation*, so the terse reply's vector carries
+the context the message itself omits. Reconstructing the thread is what makes that summary
+possible; embedding it is what makes the message findable. Only then is expanding to the full
+conversation useful — you have to locate it first.
+
+That is what the ladder measures: a plain dense baseline finds the right message **45.6%** of the
+time; the full stack puts the right *conversation* in the top five **93.3%** of the time.
+
+Below is the expansion half, on public Enron mail — the easy half, shown because it is the half
+that needs no LLM and no fixtures. The findability half is the one the numbers are about:
 
 ```
 Q: how does Sher's alternative Edison bailout plan compare to ours?
@@ -91,15 +108,20 @@ Q: how does Sher's alternative Edison bailout plan compare to ours?
   refers to arrived three messages earlier.
 ```
 
-That is the whole thesis in one screen. *"Better or worse than ours?"* is a perfect retrieval
-hit and a useless answer — until it is read in sequence. Roughly **40%** of the questions in this
-project's evaluation are that shape.
+Roughly **40%** of the questions in this project's evaluation depend on a message that terse.
+
+To be precise about what this example does and does not show: it was built **without** contextual
+summaries, so it demonstrates thread *expansion* only — the parent-document half. Dense retrieval
+happened to surface this thread because the surrounding messages quote enough news copy to match
+on. Strip that away and it would not have, which is the whole reason the summaries exist. A
+version that demonstrates *findability* — the same question against an index built with and
+without context-aware embedding — needs the summary fixture described in
+[#125](https://github.com/fmasi/mailrag/issues/125), and is not something `make demo` prints
+today.
 
 Real retrieval output over public Enron mail, trimmed for width, quote chains stripped. The `From`
 line is the same person throughout because the Enron dump is organised by custodian, so a mailbox
-export shows its owner on every message; the correspondents appear inline. A packaged one-command
-version of this comparison is [#125](https://github.com/fmasi/mailrag/issues/125) — today it is a
-worked example, not something `make demo` prints.
+export shows its owner on every message; the correspondents appear inline.
 
 Around that core sit the unglamorous parts that decide whether it works on a real mailbox:
 attachment extraction with OCR, reply-chain stripping, noise filtering, and continuous IMAP sync
