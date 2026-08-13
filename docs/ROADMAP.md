@@ -41,8 +41,8 @@ The open issues cluster into six streams, which the milestones below draw from:
    ([#20](https://github.com/fmasi/mailrag/issues/20)).
 5. **Code health and test depth** — the verb rename
    ([#42](https://github.com/fmasi/mailrag/issues/42)), prompt
-   dedup ([#46](https://github.com/fmasi/mailrag/issues/46)), root-script
-   removal ([#43](https://github.com/fmasi/mailrag/issues/43)), small tidy-ups
+   dedup ([#46](https://github.com/fmasi/mailrag/issues/46)), clearing the repo
+   root ([#43](https://github.com/fmasi/mailrag/issues/43)), small tidy-ups
    ([#51](https://github.com/fmasi/mailrag/issues/51)), and a cold new-user
    run of the whole product
    ([#118](https://github.com/fmasi/mailrag/issues/118)).
@@ -90,7 +90,6 @@ patch releases as they land; none of them blocks 1.0 individually.
 | Issue | What | Why now |
 |---|---|---|
 | [#4](https://github.com/fmasi/mailrag/issues/4) | Fall through to HTML extraction when the `text/plain` part is degenerate link-soup | Ingest correctness bug; ~1% of emails index as junk |
-| [#43](https://github.com/fmasi/mailrag/issues/43) | Remove the stale root demo scripts `main.py` / `examples_advanced.py` | Visitor-facing confusion, five-minute fix |
 | [#46](https://github.com/fmasi/mailrag/issues/46) | Extract the shared prompt-formatting helper (`summary.py` ↔ `rubrics.py`) | Removes a comment-enforced lockstep coupling in a known burn area |
 | [#106](https://github.com/fmasi/mailrag/issues/106) | Lift the `qdrant-client <1.19` cap once `llama-index-vector-stores-qdrant` fixes its import | Dependency health; the single-minor band blocks 1.19.x security fixes. Lands the release after upstream ships |
 | [#51](https://github.com/fmasi/mailrag/issues/51) | Small code-health batch | Folded into adjacent work, not a standalone task |
@@ -119,6 +118,7 @@ neither shown nor checked. [#123](https://github.com/fmasi/mailrag/issues/123) a
 | ~~[#97](https://github.com/fmasi/mailrag/issues/97)~~ **done** | One reproducible public recall@5 number — turnkey `make bench` on Enron-QA | Shipped in [#122](https://github.com/fmasi/mailrag/pull/122). Delivered less than the bar needs, though — see #123 below |
 | [#123](https://github.com/fmasi/mailrag/issues/123) | Make **thread reconstruction** publicly measurable, by joining Enron-QA's questions to the full Enron maildir | `make bench` validates the hybrid layer only (+3.1/+4.4pp). Every lever behind the headline ladder — thread reconstruction (+29.1), summaries (+12.8), rerank (+2.5) — is switched off, so **45.6 → 93.3 remains author-reported**. The 1.0 bar says a stranger can verify the headline claim; today they verify the foundation under it |
 | [#125](https://github.com/fmasi/mailrag/issues/125) | Make `make demo` showcase the value proposition — thread-aware vs naive RAG, side by side | The most-run command in the project currently proves the pipeline *runs*, not what it is *for*. Nothing is compared to anything, so the flagship claim is invisible. A stranger should learn "why this instead of a generic RAG?" in one screen |
+| [#43](https://github.com/fmasi/mailrag/issues/43) | Clear the repo root: delete the orphaned `examples_advanced.py`, and relocate `main.py` out of the root as part of #125 | The first thing a visitor sees after `git clone` is a root `main.py` beside a polished CLI, which contradicts the documented entry point. Note `main.py` is **not** dead code — `scripts/quickstart.sh` runs it, so it must move rather than go; sequencing it with #125 avoids rewriting the same file twice |
 | [#42](https://github.com/fmasi/mailrag/issues/42) | Finish the verb rename in code identifiers (pass1/pass2/explore/build → tag/summarize/scan/index) | Mass renames are exactly what a 1.0 boundary is for; doing it afterwards churns a supposedly stable codebase |
 | [#117](https://github.com/fmasi/mailrag/issues/117) | Make the source story coherent — one front door over the loader (`.eml`, Enron) and sync (`IMAP`, Maildir) seams | 1.0 must actually be ready to take mail from more than one place, even shipping only two. Today "pluggable loaders" is advertised while all nine pipeline call sites hardcode one loader, and a user has to learn two vocabularies to answer "where can this get my mail from?" |
 | [#118](https://github.com/fmasi/mailrag/issues/118) | Walk the whole product as a brand-new user on a clean machine, both sources, docs as written | Ready-for-users is a claim that has to be tested by someone starting from zero. The quickstart currently ends at the Enron demo and never mentions IMAP |
