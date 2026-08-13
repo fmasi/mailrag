@@ -75,7 +75,8 @@ is unblocked — it just needs the build step first.
 | # | Claim | Verified by |
 |---|---|---|
 | S1 | `make bench` excludes thread reconstruction, summaries, rerank and noise cleanup | `BENCHMARK.md` exclusion table; `bench_public.py` flags |
-| S2 | Enron-QA carries no conversation linkage, so thread reconstruction cannot be scored on it | dataset schema: `email / questions / path / user / …` |
+| S2 | Enron-QA carries no conversation linkage, so thread reconstruction cannot be scored on it *as shipped* | dataset schema: `email / questions / path / user / …`; 400-row sample shows `Message-ID` in 1, `In-Reply-To` in 0 |
+| S3 | The **CMU Enron maildir** has no threading headers either — but conversations are derivable | 8 000 real messages: `In-Reply-To` 0.0%, `References` 0.0%, yet `Re:`/`Fw:` subjects 64.3%. Deriving by normalised subject + shared participant puts **50.2%** of 19 530 messages in a multi-message thread (largest 59). Measured 2026-08-14 |
 
 ## Re-verification policy
 
