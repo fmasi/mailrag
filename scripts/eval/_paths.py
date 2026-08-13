@@ -85,12 +85,28 @@ def require_key(
     The scripts used to `assert KEY`, which fails with a bare AssertionError and
     no hint about which key, why, or what it costs.
     """
-    key = os.environ.get(env_var, "").strip()
-    if not key:
+    raw = os.environ.get(env_var, "").strip()
+    if not raw:
         raise SystemExit(
             f"{env_var} is not set — required for {what}.\n"
-            f"  This arm calls a PAID endpoint. Export the key for this run only:\n"
-            f"      {env_var}=... python -m scripts.eval.<script>\n"
+            f"  This arm calls a PAID endpoint. Either export the key for this run:\n"
+            f"      {env_var}=nvapi-... python -m scripts.eval.<script>\n"
+            f"  or point it at a stored secret, which is the project convention:\n"
+            f"      {env_var}=keychain:mailrag.nvidia.token python -m scripts.eval.<script>\n"
             f"  The public benchmark (`make bench`) needs no key and no private data."
         )
-    return key
+    # A reference (keychain:/env:/file:) is dereferenced through the same resolver
+    # the sync passwords and RAG_LLM_API_KEY use, so the token never has to sit in
+    # a shell history or a dotfile. A literal is still accepted — exporting a key
+    # for one manual run is normal, and this variable is not read from config.
+    if raw.split(":", 1)[0] in ("keychain", "env", "file"):
+        bootstrap()  # the resolver lives in src/, which may not be importable yet
+        from src.config.secrets import SecretError, resolve_secret  # noqa: PLC0415
+
+        try:
+            return resolve_secret(raw)
+        except SecretError as exc:
+            raise SystemExit(
+                f"{env_var} is a {raw.split(':', 1)[0]}: reference that could not be resolved: {exc}"
+            ) from exc
+    return raw

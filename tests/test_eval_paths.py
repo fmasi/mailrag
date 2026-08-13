@@ -131,6 +131,35 @@ class TestRequireKey(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 require_key()
 
+    def test_a_keychain_reference_is_dereferenced(self):
+        """The token should never need to sit in a dotfile or a shell history —
+        same rule the sync passwords and RAG_LLM_API_KEY already follow."""
+        with mock.patch.dict(os.environ, {"NVIDIA_API_KEY": "keychain:some.service"}):
+            with mock.patch("src.config.secrets.resolve_secret", return_value="nvapi-xyz") as rs:
+                self.assertEqual(require_key(), "nvapi-xyz")
+            rs.assert_called_once_with("keychain:some.service")
+
+    def test_an_unresolvable_reference_says_so(self):
+        from src.config.secrets import SecretError
+
+        with mock.patch.dict(os.environ, {"NVIDIA_API_KEY": "keychain:missing.service"}):
+            with mock.patch("src.config.secrets.resolve_secret", side_effect=SecretError("nope")):
+                with self.assertRaises(SystemExit) as cm:
+                    require_key()
+        self.assertIn("keychain", str(cm.exception))
+
+    def test_a_literal_key_still_works(self):
+        """Exporting a key for one manual run is normal; this variable is not
+        read from a config file, so a literal is not the hazard it is there."""
+        with mock.patch.dict(os.environ, {"NVIDIA_API_KEY": "nvapi-literal"}):
+            self.assertEqual(require_key(), "nvapi-literal")
+
+    def test_the_message_offers_the_keychain_form(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(SystemExit) as cm:
+                require_key()
+        self.assertIn("keychain:mailrag.nvidia.token", str(cm.exception))
+
 
 class TestNoScriptCarriesAHardcodedHome(unittest.TestCase):
     """The whole point of this module: a machine-specific absolute path in an
