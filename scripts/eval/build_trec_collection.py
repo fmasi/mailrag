@@ -1,18 +1,18 @@
 import mailbox
 import os
-import sys
 
-WT = "/Users/fmasi/Git/mailrag/.claude/worktrees/p2-backend-agnostic"
-sys.path.insert(0, WT)
-os.chdir(WT)
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
+from scripts.eval._paths import bootstrap, data_path  # noqa: E402
+
+bootstrap()
 from src.data.models import NormalizedEmail
 from src.indexing.contextual_index import build_contextual_index
 from src.ingest.embedder import BgeM3Embedder
 
-MBOX = "/Users/fmasi/msgvault-eval-proof/trec/enron_trec.mbox"
+MBOX = data_path(
+    "MAILRAG_EVAL_TREC_MBOX",
+    "~/msgvault-eval-proof/trec/enron_trec.mbox",
+    what="the TREC Legal mbox",
+)
 emails = []
 mb = mailbox.mbox(MBOX)
 for msg in mb:

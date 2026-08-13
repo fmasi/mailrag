@@ -8,45 +8,20 @@ import json
 import math
 import os
 import re
-import sys
-import time
-import urllib.error
-import urllib.request
 
-WT = "/Users/fmasi/Git/mailrag/.claude/worktrees/p2-backend-agnostic"
-sys.path.insert(0, WT)
-os.chdir(WT)
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-KEY = os.environ.get("NVIDIA_API_KEY")
-assert KEY
+from scripts.eval._paths import bootstrap, data_path, jreq, require_key  # noqa: E402
+
+bootstrap()
+KEY = require_key(what="the NVIDIA dense+rerank comparison arm")
 H = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 QD = os.environ["QDRANT_URL"]
-TREC = "/Users/fmasi/msgvault-eval-proof/trec"
+TREC = data_path(
+    "MAILRAG_EVAL_TREC", "~/msgvault-eval-proof/trec", what="the TREC Legal benchmark directory"
+)
 EMB = "https://integrate.api.nvidia.com/v1/embeddings"
 RR = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
 TOPN = 300
 RR_K = 50
-
-
-def jreq(url, body, hdr=None, method="POST", timeout=90):
-    for a in range(8):
-        try:
-            r = urllib.request.Request(
-                url,
-                data=json.dumps(body).encode(),
-                headers=(hdr or {"Content-Type": "application/json"}),
-                method=method,
-            )
-            with urllib.request.urlopen(r, timeout=timeout) as z:
-                return json.load(z)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(min(2**a, 30))
-                continue
-            raise
-    raise RuntimeError("429")
 
 
 def e5q(q):
@@ -58,7 +33,7 @@ def e5q(q):
             "input_type": "query",
             "truncate": "END",
         },
-        H,
+        hdr=H,
     )["data"][0]["embedding"]
 
 
@@ -70,7 +45,7 @@ def rerank(q, passages):
             "query": {"text": q[:4000]},
             "passages": [{"text": (t or " ")[:4000]} for t in passages],
         },
-        H,
+        hdr=H,
     )["rankings"]
     return [x["index"] for x in sorted(rk, key=lambda z: -z["logit"])]
 

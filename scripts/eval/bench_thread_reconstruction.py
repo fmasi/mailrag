@@ -4,40 +4,17 @@ threads -> thread expansion would surface the gold), by category. Private corpus
 """
 
 import json
-import os
-import sys
-import time
-import urllib.error
-import urllib.request
 
-WT = "/Users/fmasi/Git/mailrag/.claude/worktrees/p2-backend-agnostic"
-sys.path.insert(0, WT)
-os.chdir(WT)
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-KEY = os.environ.get("NVIDIA_API_KEY")
-assert KEY
+from scripts.eval._paths import bootstrap, data_path, jreq, require_key  # noqa: E402
+
+bootstrap()
+KEY = require_key(what="the cross-encoder rerank arm")
 H = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 RR = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
-QFILE = "/Users/fmasi/Git/mailrag/eval/out/queries_360.jsonl"
+QFILE = data_path(
+    "MAILRAG_EVAL_QUERIES", "eval/out/queries_360.jsonl", what="the private 360-query labelled set"
+)
 TOPK = 20
-
-
-def jreq(url, body, hdr, timeout=60):
-    for a in range(8):
-        try:
-            r = urllib.request.Request(
-                url, data=json.dumps(body).encode(), headers=hdr, method="POST"
-            )
-            with urllib.request.urlopen(r, timeout=timeout) as z:
-                return json.load(z)
-        except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(min(2**a, 30))
-                continue
-            raise
-    raise RuntimeError("429")
 
 
 def rerank(q, passages):
@@ -48,7 +25,7 @@ def rerank(q, passages):
             "query": {"text": q},
             "passages": [{"text": (t or " ")[:4000]} for t in passages],
         },
-        H,
+        hdr=H,
     )["rankings"]
     return [x["index"] for x in sorted(rk, key=lambda z: -z["logit"])]
 
