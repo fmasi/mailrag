@@ -59,6 +59,35 @@ so the index doesn't quietly rot. Details in [what's in the box](#whats-in-the-b
 
 ## Try it
 
+You do not have to commit to anything up front. Each step costs a little more than the last, and
+you can stop at any of them:
+
+```mermaid
+flowchart LR
+    A["<b>1. Read</b><br/>the numbers below<br/><br/>0 setup · 0 cost"]
+    B["<b>2. make bench</b><br/>verify them yourself<br/><br/>Docker · no key"]
+    C["<b>3. make demo</b><br/>watch it work<br/><br/>Docker · no key"]
+    D["<b>4. Your mail</b><br/>+ your agent<br/><br/>IMAP · cloud LLM"]
+    E["<b>5. Your mail</b><br/>+ local model<br/><br/>airgapped"]
+    A --> B --> C --> D --> E
+    style A fill:#e8f4ea,stroke:#4a7,color:#000
+    style B fill:#e8f4ea,stroke:#4a7,color:#000
+    style C fill:#e8f4ea,stroke:#4a7,color:#000
+    style D fill:#fff4e0,stroke:#d90,color:#000
+    style E fill:#e6f0fb,stroke:#37a,color:#000
+```
+
+| | what you need | what you get | your mail leaves? | cost |
+|---|---|---|---|---|
+| **1. Read** | nothing | the measured numbers, below | — | none |
+| **2. `make bench`** | Docker, ~2 GB weights | re-run those numbers yourself | — | none |
+| **3. `make demo`** | same | see retrieval work end to end | — | none |
+| **4. Your mail + your agent** | IMAP or `.eml`, an MCP client | your archive, answerable by Claude/ChatGPT | **yes** — to that provider | your LLM's usage |
+| **5. Your mail + local model** | ~8 GB RAM/VRAM | the same, fully airgapped | **no** | electricity |
+
+Steps 2 and 3 need **no API key and no private data**. Most evaluations should stop at 3 — that
+is enough to judge whether the retrieval is any good.
+
 Prerequisites: Python 3.11+ and Docker (for the Qdrant container).
 
 ```bash
@@ -95,6 +124,27 @@ The MCP server exposes seven tools — `list_collections`, `search_email`, `get_
 your corpora, search them, pull a whole thread by id (an exact key lookup, not a search), grep for
 literal needles embeddings miss, and read attachment text. See
 [`docs/MCP_SERVER.md`](docs/MCP_SERVER.md) for the reference and client setup.
+
+### Who writes the answer is your choice
+
+mailrag is a **retrieval** system. Six of its seven MCP tools return email and call no model at
+all — whatever agent you point at it does the writing. That leaves one decision, and it is the
+only one that determines whether anything leaves your machine:
+
+| | your agent | your mail leaves the machine? | you need |
+|---|---|---|---|
+| **Bring your own agent** | Claude, ChatGPT, anything speaking MCP | **yes** — retrieved text goes to that provider | nothing extra; you already have it |
+| **Fully local** | a local model via CLI *or* MCP | **no** | ~8 GB of RAM/VRAM for a local LLM |
+
+The second row is the point of the project, and it works both ways round — `./mailrag ask` from
+the terminal, **or** the same MCP server driven by a local-model client (opencode, LM Studio).
+MCP is not the cloud path and the CLI is not the local path; the model you choose is what decides.
+Pull the network cable and the local configuration still answers.
+
+Being blunt about the trade: pointing Claude at your mailbox is the lowest-friction way to try
+this, and it is genuinely useful — but the emails it retrieves are sent to Anthropic like any
+other prompt. If that is not acceptable for your correspondence, run the local configuration; it
+is the same index and the same retrieval, and only the last step differs.
 
 ## What the numbers say
 
