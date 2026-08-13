@@ -24,7 +24,7 @@ make demo                         # starts Qdrant, builds the contextual index, 
 Qdrant (Docker) and runs `python main.py`, which builds a **thread-aware contextual
 index** over 100 Enron emails and answers example questions by retrieving and
 assembling whole threads. This is the §13 stack from the
-[case study](../README.md#case-study-what-the-cleanup--retrieval-choices-actually-bought).
+[case study](CASE_STUDY.md).
 
 > **What the demo is and isn't.** It is a **walkthrough**, not a measurement: 100
 > emails, no scoring, no gold answers. It shows you the shape of the pipeline —
