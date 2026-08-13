@@ -17,13 +17,16 @@ that's a non-starter.
 So I built the opposite. mailrag runs on your own hardware, on open models, with nothing required
 to leave your network — no mailbox upload, no vendor to trust with the whole archive.
 
-**How sensitive is email? Look at what's public.** Nobody has ever donated their inbox. Every
-public email corpus exists because someone *lost control* of a mailbox — Enron entered the record
-through a federal investigation, the Avocado collection came out of a company's liquidation, the
-FOIA sets came out of public-records law. There is no consented, open corpus of real
-correspondence, because nobody consents. That is why a dataset from **2001** is still the field
-standard twenty-five years later, and why the best available alternative is another dead company's
-mail.
+**How sensitive is email? Look at what's public.** As far as I've been able to establish, nobody
+has ever published their own private mailbox. The public corpora exist because someone *lost
+control* of one — Enron through a federal investigation, the Avocado collection through a
+company's liquidation, the FOIA sets through public-records law, assorted political archives
+through leaks. The consented exceptions are **mailing lists** (Apache, LKML, W3C): public by
+design, and nothing like private correspondence — no terse replies, no context you had to be there
+for. That is why a dataset from **2001** is still the field standard twenty-five years later, and
+why the nearest alternative is another defunct company's mail, behind a licence. *If you know of a
+corpus I've missed, please [open an issue](https://github.com/fmasi/mailrag/issues) — I would
+genuinely like to be wrong about this.*
 
 That scarcity *is* the argument for building it this way. If the data is too sensitive to leave
 its owner — and the entire history of this field says it is — then you don't bring the mailbox to
@@ -53,6 +56,51 @@ Three ideas carry most of the value:
 3. **Local by default.** Open models, your machine, your disk. Cloud is a swappable option at two
    seams (the LLM and the embedder), never a requirement.
 
+### What that looks like
+
+A real example from the public Enron corpus — 1,200 messages, conversations reconstructed from
+subject and participants. Same question, same index, same embedder; the only difference is whether
+retrieval stops at the message or expands to the conversation:
+
+```
+Q: how does Sher's alternative Edison bailout plan compare to ours?
+
+── A generic RAG returns the top-scoring chunks ──────────────────────
+  · "The state began buying power in mid-January when Pacific Gas &
+     Electric Co. and Southern California Edison…"
+  · "and Southern California Edison Co. were on the ropes financially.
+     PG&E later went into bankruptcy. On Monday,…"
+  · "better or worse than ours?"            ← the answer-bearing message
+  · "Compromise plan  On Monday, state Sen. Byron Sher, D-Redwood City,
+     unveiled the latest compromise proposal…"
+
+  4 disconnected fragments. The one that matters is unreadable alone.
+
+── mailrag matches the same message, then returns its thread ─────────
+  Sher Shops Alternative Edison Bailout Plan — 6 messages, in order
+
+  1. "Compromise plan  On Monday, state Sen. Byron Sher unveiled the
+      latest compromise proposal…"                    ← what Sher proposed
+  2. "Scott: Could you make sure that Bev gets this? Thanks. Best, Jeff"
+  3. "Thanks. 415.782.7854. Better or worse than ours?"
+  4. "better or worse than ours?"                      ← now it has a referent
+  5. "send your fax number (and $10 for shipping and handling…just kidding)"
+  6. "sshhhhhh……let's keep it between us."
+
+  1 conversation. The terse reply is answerable because the proposal it
+  refers to arrived three messages earlier.
+```
+
+That is the whole thesis in one screen. *"Better or worse than ours?"* is a perfect retrieval
+hit and a useless answer — until it is read in sequence. Roughly **40%** of the questions in this
+project's evaluation are that shape.
+
+Real retrieval output over public Enron mail, trimmed for width, quote chains stripped. The `From`
+line is the same person throughout because the Enron dump is organised by custodian, so a mailbox
+export shows its owner on every message; the correspondents appear inline. A packaged one-command
+version of this comparison is [#125](https://github.com/fmasi/mailrag/issues/125) — today it is a
+worked example, not something `make demo` prints.
+
 Around that core sit the unglamorous parts that decide whether it works on a real mailbox:
 attachment extraction with OCR, reply-chain stripping, noise filtering, and continuous IMAP sync
 so the index doesn't quietly rot. Details in [what's in the box](#whats-in-the-box).
@@ -62,20 +110,6 @@ so the index doesn't quietly rot. Details in [what's in the box](#whats-in-the-b
 You do not have to commit to anything up front. Each step costs a little more than the last, and
 you can stop at any of them:
 
-```mermaid
-flowchart LR
-    A["<b>1. Read</b><br/>the numbers below<br/><br/>0 setup · 0 cost"]
-    B["<b>2. make bench</b><br/>verify them yourself<br/><br/>Docker · no key"]
-    C["<b>3. make demo</b><br/>watch it work<br/><br/>Docker · no key"]
-    D["<b>4. Your mail</b><br/>+ your agent<br/><br/>IMAP · cloud LLM"]
-    E["<b>5. Your mail</b><br/>+ local model<br/><br/>airgapped"]
-    A --> B --> C --> D --> E
-    style A fill:#e8f4ea,stroke:#4a7,color:#000
-    style B fill:#e8f4ea,stroke:#4a7,color:#000
-    style C fill:#e8f4ea,stroke:#4a7,color:#000
-    style D fill:#fff4e0,stroke:#d90,color:#000
-    style E fill:#e6f0fb,stroke:#37a,color:#000
-```
 
 | | what you need | what you get | your mail leaves? | cost |
 |---|---|---|---|---|
