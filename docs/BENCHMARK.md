@@ -13,13 +13,25 @@ few minutes.
 
 A fair question: why benchmark on Enron rather than something modern?
 
-Because there is nothing else. Nobody has ever donated their inbox. Every public
-email corpus exists because someone *lost control* of a mailbox — Enron through a
-federal investigation, the Avocado collection through a company's liquidation, the
-FOIA sets through public-records law. There is no consented, open corpus of real
-correspondence, because nobody consents to publishing one. So a dataset from 2001
-remains the field standard twenty-five years later, and the nearest alternative is
-another defunct company's mail, behind a licence.
+Because, as far as I've been able to establish, there is nothing else. Nobody has
+published their own private mailbox. The public corpora exist because someone *lost
+control* of one — Enron through a federal investigation, the Avocado collection
+through a company's liquidation, the FOIA sets through public-records law, assorted
+political archives through leaks.
+
+The consented exceptions are **mailing lists** — Apache, LKML, the W3C collection
+behind TREC Enterprise. Those are public by design, and they are the wrong shape for
+this problem: list traffic is well-written, self-contained and context-carrying,
+whereas the hard case in a real mailbox is the terse reply (*"sounds good, go
+ahead"*) that means nothing without the messages above it. Benchmarking thread
+reconstruction on a mailing list would test the mechanism on precisely the case that
+needs it least.
+
+So a dataset from 2001 remains the field standard twenty-five years later, and the
+nearest alternative is another defunct company's mail, behind a licence.
+
+*If you know of a corpus that fits better — real mailbox correspondence, openly
+licensed — please [open an issue](https://github.com/fmasi/mailrag/issues).*
 
 That is not a footnote about benchmarking; it is the whole reason this project is
 built to run locally. Email is the most sensitive data most people own, which is
