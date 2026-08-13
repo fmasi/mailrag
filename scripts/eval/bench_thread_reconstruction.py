@@ -4,23 +4,19 @@ threads -> thread expansion would surface the gold), by category. Private corpus
 """
 
 import json
-import os
-import sys
 import time
 import urllib.error
 import urllib.request
 
-WT = "/Users/fmasi/Git/mailrag/.claude/worktrees/p2-backend-agnostic"
-sys.path.insert(0, WT)
-os.chdir(WT)
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-KEY = os.environ.get("NVIDIA_API_KEY")
-assert KEY
+from scripts.eval._paths import bootstrap, data_path, require_key  # noqa: E402
+
+bootstrap()
+KEY = require_key(what="the cross-encoder rerank arm")
 H = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 RR = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
-QFILE = "/Users/fmasi/Git/mailrag/eval/out/queries_360.jsonl"
+QFILE = data_path(
+    "MAILRAG_EVAL_QUERIES", "eval/out/queries_360.jsonl", what="the private 360-query labelled set"
+)
 TOPK = 20
 
 

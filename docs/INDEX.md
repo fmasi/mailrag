@@ -40,6 +40,10 @@ map — this is the canonical reading order.
      and the negative results. Its
      **[terminology box](EXPERIMENTS.md#terminology-read-this-first)** defines the `C`/`C′`
      collection labels and the two senses of "thread-aware".
+   - **[`CLAIMS.md`](CLAIMS.md)** — the claims register: every published number, the script that
+     produces it, the corpus it came from, and when it was last verified. Start here if you want
+     to know whether a figure is publicly reproducible or author-reported — and which two are
+     currently unverifiable for want of an API key.
    - **[`BENCHMARK.md`](BENCHMARK.md)** — `make bench`: the *public* retrieval number you can
      regenerate yourself on Enron-QA, with no key and no private data. Covers what it measures,
      what it deliberately omits (thread reconstruction, rerank — neither reproducible on public

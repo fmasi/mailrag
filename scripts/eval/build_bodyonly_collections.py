@@ -4,18 +4,14 @@ same work-rag chunk bodies. Compare bench vs the summary+body headline."""
 
 import json
 import os
-import sys
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-WT = "/Users/fmasi/Git/mailrag/.claude/worktrees/p2-backend-agnostic"
-sys.path.insert(0, WT)
-os.chdir(WT)
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
+from scripts.eval._paths import bootstrap  # noqa: E402
+
+bootstrap()
 from src.ingest import hybrid_qdrant as hq
 from src.ingest.embedder import BgeM3Embedder
 from src.ingest.sparse import lexical_weights_to_sparse

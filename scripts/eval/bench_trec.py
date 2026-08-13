@@ -8,22 +8,19 @@ import json
 import math
 import os
 import re
-import sys
 import time
 import urllib.error
 import urllib.request
 
-WT = "/Users/fmasi/Git/mailrag/.claude/worktrees/p2-backend-agnostic"
-sys.path.insert(0, WT)
-os.chdir(WT)
-os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-KEY = os.environ.get("NVIDIA_API_KEY")
-assert KEY
+from scripts.eval._paths import bootstrap, data_path, require_key  # noqa: E402
+
+bootstrap()
+KEY = require_key(what="the NVIDIA dense+rerank comparison arm")
 H = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 QD = os.environ["QDRANT_URL"]
-TREC = "/Users/fmasi/msgvault-eval-proof/trec"
+TREC = data_path(
+    "MAILRAG_EVAL_TREC", "~/msgvault-eval-proof/trec", what="the TREC Legal benchmark directory"
+)
 EMB = "https://integrate.api.nvidia.com/v1/embeddings"
 RR = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
 TOPN = 300
