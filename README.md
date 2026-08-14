@@ -103,10 +103,22 @@ vetted by a separate validator:
 Paired, on identical queries: context **fixes 16 questions and breaks 3** at R@5 — McNemar exact
 **p = 0.0044**. `make demo` prints all of this live, in about four minutes.
 
-<sub>Public Enron mail, conversations derived from subject + participants. Measures the
-contextual-summary lever only — thread reconstruction is not isolated here. Absolute figures move
-~3pp between runs because Qdrant rebuilds its HNSW graph each time; the direction and significance
-are stable.</sub>
+**These are not the headline figures, and they are not meant to be.** The demo isolates *one*
+lever on a *public* corpus and asks whether the right **message** is found. The full stack on a
+real ~32k-email mailbox, scored at **thread** level, reaches **93.3%** — from a 45.6% plain-dense
+baseline. That ladder is [further down](#what-the-numbers-say), and it is author-reported: you
+cannot re-run it, which is exactly why this demo exists. Its job is to let you verify that the
+mechanism is real, not to reproduce the headline.
+
+| | this demo | the headline ladder |
+|---|---|---|
+| corpus | 1,200 public Enron emails | ~32,000 private, real |
+| unit | the **message** | the **thread** |
+| measures | contextual embedding alone | the whole stack |
+| you can run it | **yes** † | no |
+
+<sub>† Conversations derived from subject + participants. Absolute figures move ~3pp between runs
+because Qdrant rebuilds its HNSW graph each time; the direction and significance are stable.</sub>
 
 Around that core sit the unglamorous parts that decide whether it works on a real mailbox:
 attachment extraction with OCR, reply-chain stripping, noise filtering, and continuous IMAP sync
