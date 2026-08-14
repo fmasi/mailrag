@@ -105,6 +105,8 @@
 <span class="p">$</span> make demo                <span class="c"># two indexes, same questions — what context buys</span>
   <span class="c">→ plain          R@5  60.6%</span>
   <span class="c">  with context   R@5  73.7%   (McNemar p=0.0044, public Enron)</span>
+  <span class="c">→ spanning questions: right conversation found 97.3% @5;</span>
+  <span class="c">  top-5 messages give you 52.6% of it, thread expansion 100%</span>
 <span class="p">$</span> ./mailrag ask <span class="o">"who approved the Q3 budget, and when?"</span>
   <span class="c">→ retrieves the matching message, expands to its full thread,</span>
   <span class="c">  and answers from the whole conversation — with citations.</span>
