@@ -1,0 +1,7 @@
+# Committed evaluation fixtures: data, not source. Marking them generated
+# collapses them by default in GitHub diffs and keeps them out of language
+# stats — a 2.8 MB JSONL corpus otherwise buries the actual change in a PR
+# (and exhausted the automated reviewer's turn budget on #144).
+eval/demo/*.jsonl   linguist-generated=true
+eval/public/*.jsonl linguist-generated=true
+eval/public/*.txt   linguist-generated=true
