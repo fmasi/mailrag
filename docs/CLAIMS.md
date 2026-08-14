@@ -31,9 +31,10 @@ saying so.
 |---|---|---|---|---|---|---|
 | R1 | dense R@5 **94.4** [91.6, 96.4] vs dense+sparse **97.5** [95.3, 98.7]; McNemar p=0.0034 | README, landing page, `BENCHMARK.md` | `scripts/eval/bench_public.py` | public Enron-QA, 2 000 docs / 360 q | **Public** ✅ | 2026-08-12 |
 | R2 | large set: dense **90.0** vs dense+sparse **94.4**; p=0.0001 | README, `BENCHMARK.md` | `scripts/eval/bench_public.py --size large` | public Enron-QA, 10 000 docs | **Public** ✅ | 2026-08-12 |
+| R2b | contextual summaries: plain R@5 **60.6** vs with-context **73.7**; McNemar p=0.0044 | README, `make demo` | `scripts/demo.py` | public Enron, 1 200 docs / 99 validated questions | **Public** ✅ | 2026-08-14 |
 | R3 | plain-dense baseline **45.6%** R@5 | README, landing page | private eval ladder | private ~32k mailbox | Private | 2026-06 (pre-register) |
 | R4 | thread reconstruction **64.2 → 93.3** (+29.1) | README, landing page | `scripts/eval/bench_thread_reconstruction.py` | private, `work-rag-ctx-threadaware` | Private ✅ **re-verified, exact** | 2026-08-13 |
-| R5 | contextual summaries **+12.8** | README, landing page | `scripts/eval/build_bodyonly_collections.py` (builds the no-summary control) | private | Private | 2026-06 (pre-register) |
+| R5 | contextual summaries **+12.8** | README, landing page | `scripts/eval/build_bodyonly_collections.py` (builds the no-summary control) | private | Private — **corroborated publicly by R2b** (+13.1pp R@5 on a different corpus) | 2026-06 (pre-register) |
 | R6a | cross-encoder rerank **+2.5** R@5 overall | README, landing page | `scripts/eval/bench_thread_reconstruction.py` (rerank arm) | private + paid NVIDIA endpoint | Private ✅ **re-verified, exact** (61.7 → 64.2) | 2026-08-13 |
 | R6b | rerank *demotes* the answer on **thread-spanning** queries | README, landing page | — | — | ⚠️ **NOT reproduced on recall** — see below | 2026-08-13 |
 | R7 | NVIDIA's stack wins on TREC Legal; mailrag wins on email — "opposite winners" | README, landing page | `scripts/eval/bench_trec.py`, `build_trec_collection.py` | TREC Legal + paid NVIDIA endpoint | Private ⚠️ | 2026-06 (pre-register) |

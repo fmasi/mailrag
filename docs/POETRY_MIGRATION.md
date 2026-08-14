@@ -23,7 +23,7 @@ We are following **Compat Mode** for backwards compatibility:
 ### For new developers:
 1. Install Poetry: `pip install poetry`
 2. Install dependencies: `poetry install`
-3. Run scripts: `poetry run python main.py`
+3. Run scripts: `poetry run python -m scripts.demo`
 
 ### For CI/CD:
 - Install Poetry in the workflow

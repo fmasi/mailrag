@@ -1,6 +1,6 @@
 """Reusable contextual-retrieval build pipeline: NormalizedEmails -> hybrid Qdrant.
 
-Shared by scripts/build_local_eml_rag.py and the main.py demo. Mirrors the original
+Shared by scripts/build_local_eml_rag.py and scripts/demo.py. Mirrors the original
 build-mode of build_local_eml_rag.py but takes already-loaded emails + an embedder +
 an optional {message_id: summary} map (so callers choose live vs cached summaries).
 """

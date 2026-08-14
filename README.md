@@ -73,46 +73,40 @@ the context the message itself omits. Reconstructing the thread is what makes th
 possible; embedding it is what makes the message findable. Only then is expanding to the full
 conversation useful — you have to locate it first.
 
-That is what the ladder measures: a plain dense baseline finds the right message **45.6%** of the
-time; the full stack puts the right *conversation* in the top five **93.3%** of the time.
-
-Below is the expansion half, on public Enron mail — the easy half, shown because it is the half
-that needs no LLM and no fixtures. The findability half is the one the numbers are about:
-
-```
-Q: how does Sher's alternative Edison bailout plan compare to ours?
-
-── A generic RAG returns the top-scoring chunks ──────────────────────
-  · "The state began buying power in mid-January when Pacific Gas &
-     Electric Co. and Southern California Edison…"
-  · "and Southern California Edison Co. were on the ropes financially.
-     PG&E later went into bankruptcy. On Monday,…"
-  · "better or worse than ours?"            ← the answer-bearing message
-  · "Compromise plan  On Monday, state Sen. Byron Sher, D-Redwood City,
-     unveiled the latest compromise proposal…"
-
-  4 disconnected fragments. The one that matters is unreadable alone.
-
-── mailrag matches the same message, then returns its thread ─────────
-  Sher Shops Alternative Edison Bailout Plan — 6 messages, in order
-
-  1. "Compromise plan  On Monday, state Sen. Byron Sher unveiled the
-      latest compromise proposal…"                    ← what Sher proposed
-  2. "Scott: Could you make sure that Bev gets this? Thanks. Best, Jeff"
-  3. "Thanks. 415.782.7854. Better or worse than ours?"
-  4. "better or worse than ours?"                      ← now it has a referent
-  5. "send your fax number (and $10 for shipping and handling…just kidding)"
-  6. "sshhhhhh……let's keep it between us."
-
-  1 conversation. The terse reply is answerable because the proposal it
-  refers to arrived three messages earlier.
-```
-
 Roughly **40%** of the questions in this project's evaluation depend on a message that terse.
 
-<sub>Real retrieval output over public Enron mail, trimmed for width. Shows thread expansion
-only — the findability half needs the summary fixture in
-[#125](https://github.com/fmasi/mailrag/issues/125).</sub>
+### You can watch this happen — `make demo`
+
+Two indexes over the same 1,200 public Enron emails. One embeds each message as-is; the other
+embeds it together with a summary of what preceded it in its conversation. Same embedder, same
+questions, no API key, nothing but the corpus committed in this repo:
+
+```
+Q: "who was left off the first distribution list?"
+
+The message that answers it:  "Sandi: Apologies. Inadvertently didn't
+                               include you on first…"
+
+  plain index    → not in top 20
+  with context   → rank 1
+```
+
+That message is a handful of common words. On its own it is unfindable; carrying its context it is
+the top hit. Across **99 questions**, each generated to be answerable from a specific message and
+vetted by a separate validator:
+
+| index | R@1 | R@5 | R@10 |
+|---|---|---|---|
+| plain | 37.4% | 60.6% | 74.7% |
+| **with thread context** | **50.5%** | **73.7%** | **80.8%** |
+
+Paired, on identical queries: context **fixes 16 questions and breaks 3** at R@5 — McNemar exact
+**p = 0.0044**. `make demo` prints all of this live, in about four minutes.
+
+<sub>Public Enron mail, conversations derived from subject + participants. Measures the
+contextual-summary lever only — thread reconstruction is not isolated here. Absolute figures move
+~3pp between runs because Qdrant rebuilds its HNSW graph each time; the direction and significance
+are stable.</sub>
 
 Around that core sit the unglamorous parts that decide whether it works on a real mailbox:
 attachment extraction with OCR, reply-chain stripping, noise filtering, and continuous IMAP sync
@@ -128,7 +122,7 @@ you can stop at any of them:
 |---|---|---|---|---|
 | **1. Read** | nothing | the measured numbers, below | — | none |
 | **2. `make bench`** | Docker, ~2 GB weights | re-run those numbers yourself | — | none |
-| **3. `make demo`** | same | see retrieval work end to end | — | none |
+| **3. `make demo`** | same | watch context make an unfindable message findable | — | none |
 | **4. Your mail + your agent** | IMAP or `.eml`, an MCP client | your archive, answerable by Claude/ChatGPT | **yes** — to that provider | your LLM's usage |
 | **5. Your mail + local model** | ~8 GB RAM/VRAM | the same, fully airgapped | **no** | electricity |
 
@@ -141,22 +135,29 @@ Prerequisites: Python 3.11+ and Docker (for the Qdrant container).
 git clone https://github.com/fmasi/mailrag.git
 cd mailrag
 pip install -r requirements.txt        # includes FlagEmbedding (bge-m3); first run pulls ~2 GB of weights
-cp .env.example .env                    # an LLM key/endpoint — only needed for the demo's answers
-make demo                               # see the pipeline work, end to end
-make bench                              # check the retrieval numbers yourself
+make demo                               # two indexes, same questions — see what context buys
+make bench                              # the full retrieval benchmark
 ```
 
-**`make demo` shows you the shape of it.** It brings up Qdrant, builds a thread-aware contextual
-index over 100 public Enron emails, and answers example questions by retrieving a message and
-assembling its whole conversation. It is a **walkthrough, not a measurement** — no scoring, no
-gold answers — and it does spend a few LLM calls on summaries and answers.
+Neither needs an API key, an LLM endpoint, or a `.env` file. Both run on data committed in this
+repo.
 
-**`make bench` is the one that proves something.** It scores 360 committed queries against a
+**`make demo` shows the mechanism.** It builds two indexes over the same 1,200 public Enron emails
+— one plain, one with each message embedded alongside its conversation's preceding context — and
+asks both the same 99 validated questions. It prints the worked example above plus the full recall
+table and a paired significance test. About four minutes; fixtures live in
+[`eval/demo/`](eval/demo/).
+
+**`make bench` measures the retrieval layer.** It scores 360 committed queries against a
 fixed 2 000-document slice of public Enron-QA and prints recall@k with confidence intervals and a
 paired significance test. It spends **zero LLM calls** — no summaries, no answer generation, no
-reranker — so it needs no API key and no private data. Roughly 1.6 min on an Apple-silicon GPU,
-14.7 min CPU-only. The corpus manifest and query set are committed under
-[`eval/public/`](eval/public/), so you can read exactly what is being scored.
+reranker. Roughly 1.6 min on an Apple-silicon GPU, 14.7 min CPU-only. The corpus manifest and
+query set are committed under [`eval/public/`](eval/public/), so you can read exactly what is
+being scored.
+
+The two answer different questions: the demo asks *does the technique work*, the benchmark asks
+*how good is the retrieval*. An LLM endpoint is needed only for `./mailrag ask` and for indexing
+your own mail with summaries.
 
 Once a collection is indexed, query it from the CLI or hand it to an agent over the
 [Model Context Protocol](docs/MCP_SERVER.md):
@@ -248,15 +249,14 @@ Every published figure is tracked in **[`docs/CLAIMS.md`](docs/CLAIMS.md)** with
 produced it, the corpus, and the date it last ran — including the ones that are currently
 unverifiable, and the one above that failed.
 
-**Closing the gap (in progress).** Thread reconstruction can be made publicly checkable, and the
-data supports it better than expected. Measured over 19,530 real Enron messages: the corpus is an
-Outlook/Exchange export, so it carries **no `In-Reply-To` or `References` headers at all** (0%) —
-but 64% of messages are replies or forwards by subject, and deriving conversations from normalised
-subject plus shared participants puts **50.2% of messages into a multi-message thread** (largest:
-59 messages). So the conversations are there; they just have to be reconstructed rather than read
-off a header. That is [#123](https://github.com/fmasi/mailrag/issues/123). A contextual-summary
-arm is planned alongside it, opt-in via a local LLM so the default stays key-free
-([#125](https://github.com/fmasi/mailrag/issues/125)). Reranking and the TREC comparison will stay
+**Closing the gap (in progress).** The contextual-summary lever is now publicly demonstrated —
+that is what `make demo` measures, and it is the first of the private ladder's levers to be
+reproducible by a stranger. **Thread reconstruction is not yet isolated.** Enron carries no
+`In-Reply-To` headers at all (0.0% of 19,530 messages), so conversations are derived from
+normalised subject plus shared participants — which recovers 50.2% of messages into multi-message
+threads, with a measured false-merge rate in [`docs/CLAIMS.md`](docs/CLAIMS.md). Isolating that
+lever the way `make demo` isolates summaries is
+[#123](https://github.com/fmasi/mailrag/issues/123). Reranking and the TREC comparison will stay
 author-reported — one needs a paid endpoint, the other needs TREC Legal data that cannot be
 redistributed.
 
