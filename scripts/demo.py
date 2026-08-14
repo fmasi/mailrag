@@ -102,6 +102,27 @@ def build(emails, summaries, embedder, *, collection, with_summaries):
     print(f"    {collection:24} {res.chunks:5d} chunks  ({label})", flush=True)
 
 
+def norm_thread(t):
+    """Thread ids lose their angle brackets on the way into the payload
+    (`normalize_message_id`), so both sides must be normalised before comparison.
+    Comparing one normalised side against one raw side silently yields T@k = 0.0%
+    — which happened once during development and is easy to miss because the
+    number is merely wrong, not an error."""
+    return (t or "").strip().lstrip("<").rstrip(">")
+
+
+def thread_coverage(retrieved_msgs, gold_msgs, k):
+    """Fraction of the answering conversation present in the top-*k* messages.
+
+    An empty gold set means the fixture references a thread absent from the
+    corpus — a broken fixture, not a score of zero. Returns None so the caller
+    can drop it rather than divide by zero or silently record 0%.
+    """
+    if not gold_msgs:
+        return None
+    return len(set(retrieved_msgs[:k]) & set(gold_msgs)) / len(gold_msgs)
+
+
 def gold_rank(nodes, gold):
     """Position of the gold message among hits, collapsed to distinct messages."""
     seen = []
@@ -176,6 +197,73 @@ def worked_example(queries, ranks_plain, ranks_ctx, corpus, embedder):
     print("  the second index embedded each message with what preceded it.")
 
 
+def thread_section(embedder):
+    """The second lever: once you find a message, is the CONVERSATION the answer?
+
+    Scored on questions whose answer genuinely spans several messages — the case
+    thread reconstruction exists for, and the one a per-message question set
+    cannot show.
+    """
+    import collections  # noqa: PLC0415
+
+    path = FIXTURES / "questions_spanning.jsonl"
+    if not path.exists():
+        return
+    qs = [json.loads(x) for x in path.read_text().splitlines() if x]
+    corpus = [json.loads(x) for x in (FIXTURES / "corpus.jsonl").read_text().splitlines() if x]
+
+    members = collections.defaultdict(set)
+    for r in corpus:
+        members[norm_thread(r["thread"])].add(r["message_id"])
+
+    from src.query.hybrid import build_hybrid_searcher  # noqa: PLC0415
+
+    s = build_hybrid_searcher(
+        CONTEXT,
+        embedder=embedder,
+        mode="hybrid",
+        dense_top_k=20,
+        sparse_top_k=20,
+        qdrant_url=_qdrant(),
+    )
+    tranks, coverage, skipped = [], {5: [], 10: []}, 0
+    for q in qs:
+        gold = norm_thread(q["thread"])
+        gold_msgs = members.get(gold, set())
+        if not gold_msgs:
+            skipped += 1
+            continue
+        msgs, threads = [], []
+        for node in s.search(q["query"]):
+            mid = node.metadata.get("message_id")
+            tid = norm_thread(node.metadata.get("thread_id"))
+            if mid not in msgs:
+                msgs.append(mid)
+            if tid not in threads:
+                threads.append(tid)
+        tranks.append(threads.index(gold) if gold in threads else None)
+        for k in coverage:
+            coverage[k].append(thread_coverage(msgs, gold_msgs, k))
+
+    if skipped:
+        print(f"\n  ! {skipped} spanning question(s) reference a thread absent from the corpus")
+    if not tranks:
+        return
+    scored = len(tranks)
+    print(f"\n  ── and when the answer spans several messages ({scored} questions) " + "─" * 12)
+    print(
+        f"\n    the right conversation is found:  T@1 {recall(tranks, 1):.1f}%"
+        f"   T@5 {recall(tranks, 5):.1f}%"
+    )
+    print("\n    how much of that conversation you actually get:")
+    for k in (5, 10):
+        pct = 100 * sum(coverage[k]) / scored
+        print(f"      top-{k:<2} messages   → {pct:5.1f}% of it")
+    print("      thread expansion → 100.0% of it, whenever the thread is found")
+    print("\n    A generic RAG hands you half the conversation. That is the half")
+    print("    the answer is usually missing from.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--skip-build", action="store_true", help="reuse existing collections")
@@ -213,10 +301,12 @@ def main() -> int:
         )
 
     worked_example(queries, rp, rc, corpus, embedder)
+    thread_section(embedder)
 
-    print("\n  This measures the contextual-summary lever only, on a public corpus with")
-    print("  conversations derived from subject + participants. `make bench` is the")
-    print("  reproducible retrieval benchmark; docs/CLAIMS.md tracks every figure.\n")
+    print("\n  Two levers, on a public corpus with conversations derived from subject +")
+    print("  participants: contextual embedding (findability) and thread expansion")
+    print("  (completeness). Reranking and noise cleanup are not measured here.")
+    print("  `make bench` is the retrieval benchmark; docs/CLAIMS.md tracks every figure.\n")
     return 0
 
 

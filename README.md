@@ -103,22 +103,31 @@ vetted by a separate validator:
 Paired, on identical queries: context **fixes 16 questions and breaks 3** at R@5 — McNemar exact
 **p = 0.0044**. `make demo` prints all of this live, in about four minutes.
 
-**These are not the headline figures, and they are not meant to be.** The demo isolates *one*
-lever on a *public* corpus and asks whether the right **message** is found. The full stack on a
-real ~32k-email mailbox, scored at **thread** level, reaches **93.3%** — from a 45.6% plain-dense
-baseline. That ladder is [further down](#what-the-numbers-say), and it is author-reported: you
-cannot re-run it, which is exactly why this demo exists. Its job is to let you verify that the
-mechanism is real, not to reproduce the headline.
+That is findability. The second half is **completeness** — and it needs a different question. The
+demo also asks 73 questions whose answer genuinely spans several messages, the case a
+single-message benchmark cannot see:
 
-| | this demo | the headline ladder |
-|---|---|---|
-| corpus | 1,200 public Enron emails | ~32,000 private, real |
-| unit | the **message** | the **thread** |
-| measures | contextual embedding alone | the whole stack |
-| you can run it | **yes** † | no |
+| | |
+|---|---|
+| the right **conversation** is found | **T@1 91.8%** · **T@5 97.3%** |
+| how much of it top-5 *messages* give you | **52.6%** |
+| how much thread expansion gives you | **100%**, whenever the thread is found |
 
-<sub>† Conversations derived from subject + participants. Absolute figures move ~3pp between runs
-because Qdrant rebuilds its HNSW graph each time; the direction and significance are stable.</sub>
+**A generic RAG hands you half the conversation** — and it is the half the answer is usually
+missing from. That is the whole argument for treating the thread as the unit of truth, measured on
+public data.
+
+For orientation against the figures quoted elsewhere: the private ~32k-email mailbox reaches
+**93.3%** thread-level recall@5 from a 45.6% plain-dense baseline. That ladder is
+[further down](#what-the-numbers-say) and remains author-reported — you cannot re-run it. The
+demo's job is to let you confirm that both mechanisms behind it are real, on a corpus you can
+download. †
+
+<sub>† 1,200 public Enron emails, conversations derived from subject + participants (Enron carries
+no `In-Reply-To` headers; the derivation's measured false-merge rate is in
+[`docs/CLAIMS.md`](docs/CLAIMS.md)). Reranking and noise cleanup are not measured here. Absolute
+figures move ~3pp between runs because Qdrant rebuilds its HNSW graph each time; direction and
+significance are stable.</sub>
 
 Around that core sit the unglamorous parts that decide whether it works on a real mailbox:
 attachment extraction with OCR, reply-chain stripping, noise filtering, and continuous IMAP sync
@@ -134,7 +143,7 @@ you can stop at any of them:
 |---|---|---|---|---|
 | **1. Read** | nothing | the measured numbers, below | — | none |
 | **2. `make bench`** | Docker, ~2 GB weights | re-run those numbers yourself | — | none |
-| **3. `make demo`** | same | watch context make an unfindable message findable | — | none |
+| **3. `make demo`** | same | both levers measured: findability and completeness | — | none |
 | **4. Your mail + your agent** | IMAP or `.eml`, an MCP client | your archive, answerable by Claude/ChatGPT | **yes** — to that provider | your LLM's usage |
 | **5. Your mail + local model** | ~8 GB RAM/VRAM | the same, fully airgapped | **no** | electricity |
 
@@ -154,10 +163,10 @@ make bench                              # the full retrieval benchmark
 Neither needs an API key, an LLM endpoint, or a `.env` file. Both run on data committed in this
 repo.
 
-**`make demo` shows the mechanism.** It builds two indexes over the same 1,200 public Enron emails
-— one plain, one with each message embedded alongside its conversation's preceding context — and
-asks both the same 99 validated questions. It prints the worked example above plus the full recall
-table and a paired significance test. About four minutes; fixtures live in
+**`make demo` shows both mechanisms.** It builds two indexes over the same 1,200 public Enron
+emails — one plain, one with each message embedded alongside its conversation's preceding context
+— then asks 99 single-message questions (findability, with a paired significance test) and 73
+spanning questions (completeness, at thread level). About five minutes; fixtures live in
 [`eval/demo/`](eval/demo/).
 
 **`make bench` measures the retrieval layer.** It scores 360 committed queries against a
@@ -261,16 +270,11 @@ Every published figure is tracked in **[`docs/CLAIMS.md`](docs/CLAIMS.md)** with
 produced it, the corpus, and the date it last ran — including the ones that are currently
 unverifiable, and the one above that failed.
 
-**Closing the gap (in progress).** The contextual-summary lever is now publicly demonstrated —
-that is what `make demo` measures, and it is the first of the private ladder's levers to be
-reproducible by a stranger. **Thread reconstruction is not yet isolated.** Enron carries no
-`In-Reply-To` headers at all (0.0% of 19,530 messages), so conversations are derived from
-normalised subject plus shared participants — which recovers 50.2% of messages into multi-message
-threads, with a measured false-merge rate in [`docs/CLAIMS.md`](docs/CLAIMS.md). Isolating that
-lever the way `make demo` isolates summaries is
-[#123](https://github.com/fmasi/mailrag/issues/123). Reranking and the TREC comparison will stay
-author-reported — one needs a paid endpoint, the other needs TREC Legal data that cannot be
-redistributed.
+**Closing the gap.** Both of the ladder's biggest levers are now publicly demonstrated —
+contextual embedding and thread reconstruction, both in `make demo`, both on a corpus you can
+download. What remains author-reported is the **magnitude on a real mailbox** (a 32k-email archive
+is a harder target than 1,200 emails) and two levers that cannot be made public: reranking needs a
+paid endpoint, and the TREC comparison needs data that cannot be redistributed.
 
 ## Known limitations
 
