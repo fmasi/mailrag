@@ -115,9 +115,9 @@ mechanism is real, not to reproduce the headline.
 | corpus | 1,200 public Enron emails | ~32,000 private, real |
 | unit | the **message** | the **thread** |
 | measures | contextual embedding alone | the whole stack |
-| you can run it | **yes** | no |
+| you can run it | **yes** † | no |
 
-<sub>Conversations derived from subject + participants. Absolute figures move ~3pp between runs
+<sub>† Conversations derived from subject + participants. Absolute figures move ~3pp between runs
 because Qdrant rebuilds its HNSW graph each time; the direction and significance are stable.</sub>
 
 Around that core sit the unglamorous parts that decide whether it works on a real mailbox:

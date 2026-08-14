@@ -219,7 +219,7 @@
        on legal e-discovery (the TREC Legal benchmark) and the order flips: a general-purpose dense+rerank
        stack (NVIDIA's retrieval NIMs) wins there instead — same systems, opposite result, because the
        task is different. All
-       references anonymized. <code>make demo</code> isolates the contextual-embedding lever on public data — the first of the ladder's levers a stranger can reproduce (60.6% → 73.7% R@5, p=0.0044), though it measures one lever at message level, not the full thread-level stack; <b><code>make bench</code>
+       references anonymized. <code>make demo</code> isolates the contextual-embedding lever on public data: 60.6% → 73.7% R@5, p=0.0044. It is the first of the ladder's levers a stranger can reproduce, though it measures one lever at message level rather than the full thread-level stack. <b><code>make bench</code>
        reproduces a real number</b> — on public Enron-QA, no key and no private data, it scores 360
        committed queries against 2 000 documents in a couple of minutes and prints
        <b>R@5 94.4% dense vs 97.5% dense+learned-sparse</b> (95% Wilson [91.6, 96.4] vs [95.3, 98.7]).
