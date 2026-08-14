@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 
 from src.data.models import NormalizedEmail
-from src.llm.thread_summaries import generate_thread_summaries
+from src.llm.thread_summaries import SummaryGenerationError, generate_thread_summaries
 
 
 def _e(body, mid, subject="Re: plan", date="2026-01-01", in_reply_to=""):
@@ -47,7 +47,7 @@ class TestGenerateThreadSummaries(unittest.TestCase):
             mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
             mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
         ):
-            out = generate_thread_summaries(thread, model="m")
+            out = generate_thread_summaries(thread, model="m", preflight=False)
 
         # Both message_ids must be present in the result.
         self.assertEqual(set(out), {"<1>", "<2>"})
@@ -67,25 +67,83 @@ class TestGenerateThreadSummaries(unittest.TestCase):
             mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
             mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
         ):
-            out = generate_thread_summaries(emails, model="m")
+            out = generate_thread_summaries(emails, model="m", preflight=False)
 
         self.assertEqual(out["<3>"], "")
 
-    def test_llm_error_does_not_raise(self):
-        """An LLM exception must be swallowed; the email maps to ''."""
-        emails = [_e("Hello world", "<4>")]
+    def test_a_failed_call_is_absent_rather_than_empty(self):
+        """A failure must be distinguishable from a noise verdict.
 
-        def fake_chat(client, model, prompt):
-            raise RuntimeError("network error")
+        Both used to map to "" — so a dead endpoint produced a corpus in which
+        every email looked like the model had judged it noise, with no error
+        (#135). Present-and-empty now means noise; ABSENT means failed.
+        """
+        emails = [_e("body one", "<1>"), _e("body two", "<2>")]
+        with mock.patch("src.llm.thread_summaries.make_client"):
+            with mock.patch("src.llm.thread_summaries.chat", side_effect=RuntimeError("boom")):
+                out = generate_thread_summaries(
+                    emails, model="m", preflight=False, max_failure_rate=1.0
+                )
+        self.assertEqual(out, {}, "failures must not be reported as noise verdicts")
 
-        with (
-            mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
-            mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
-        ):
-            out = generate_thread_summaries(emails, model="m")
+    def test_noise_and_failure_are_distinguishable_in_one_run(self):
+        seen = {"n": 0}
 
-        self.assertIn("<4>", out)
-        self.assertEqual(out["<4>"], "")
+        def flaky(_c, _m, _p):
+            seen["n"] += 1
+            if seen["n"] == 1:
+                return '{"is_noise": true, "summary": ""}'
+            raise RuntimeError("endpoint died")
+
+        emails = [_e("body one", "<1>"), _e("body two", "<2>")]
+        with mock.patch("src.llm.thread_summaries.make_client"):
+            with mock.patch("src.llm.thread_summaries.chat", side_effect=flaky):
+                out = generate_thread_summaries(
+                    emails, model="m", preflight=False, max_failure_rate=1.0
+                )
+        self.assertEqual(out.get("<1>"), "", "noise verdict should be present and empty")
+        self.assertNotIn("<2>", out, "failure should be absent, not empty")
+
+    def test_a_total_outage_raises_instead_of_returning_a_blank_corpus(self):
+        """1200 failures out of 1200 is a misconfiguration; continuing silently
+        is worse than stopping."""
+        emails = [_e(f"body {i}", f"<{i}>") for i in range(10)]
+        with mock.patch("src.llm.thread_summaries.make_client"):
+            with mock.patch("src.llm.thread_summaries.chat", side_effect=RuntimeError("down")):
+                with self.assertRaises(SummaryGenerationError) as cm:
+                    generate_thread_summaries(emails, model="m", preflight=False)
+        msg = str(cm.exception)
+        self.assertIn("10", msg)
+        self.assertIn("down", msg, "the underlying error must reach the operator")
+
+    def test_a_few_transient_failures_do_not_abort_the_run(self):
+        calls = {"n": 0}
+
+        def mostly_ok(_c, _m, _p):
+            calls["n"] += 1
+            if calls["n"] == 3:
+                raise RuntimeError("blip")
+            return '{"is_noise": false, "summary": "ok"}'
+
+        emails = [_e(f"body {i}", f"<{i}>") for i in range(10)]
+        with mock.patch("src.llm.thread_summaries.make_client"):
+            with mock.patch("src.llm.thread_summaries.chat", side_effect=mostly_ok):
+                out = generate_thread_summaries(emails, model="m", preflight=False)
+        self.assertEqual(len(out), 9)
+        self.assertNotIn("<2>", out)
+
+    def test_preflight_failure_aborts_before_spending_the_corpus(self):
+        """A misconfigured endpoint should cost one call, not one per email."""
+        emails = [_e(f"body {i}", f"<{i}>") for i in range(50)]
+        with mock.patch("src.llm.thread_summaries.make_client"):
+            with mock.patch(
+                "src.llm.thread_summaries.healthcheck", side_effect=RuntimeError("401")
+            ) as hc:
+                with mock.patch("src.llm.thread_summaries.chat") as chat_mock:
+                    with self.assertRaises(SummaryGenerationError):
+                        generate_thread_summaries(emails, model="m")
+        hc.assert_called_once()
+        chat_mock.assert_not_called()
 
     def test_independent_threads_are_separated(self):
         """Two emails with no reply-to relationship stay in different threads."""
@@ -102,7 +160,7 @@ class TestGenerateThreadSummaries(unittest.TestCase):
             mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
             mock.patch("src.llm.thread_summaries.make_client", return_value=object()),
         ):
-            out = generate_thread_summaries([e1, e2], model="m")
+            out = generate_thread_summaries([e1, e2], model="m", preflight=False)
 
         self.assertIn("<5>", out)
         self.assertIn("<6>", out)
@@ -127,7 +185,7 @@ class TestGenerateThreadSummaries(unittest.TestCase):
             mock.patch("src.llm.thread_summaries.chat", side_effect=fake_chat),
             mock.patch("src.llm.thread_summaries.make_client") as mk,
         ):
-            out = generate_thread_summaries(emails, model="m", client=sentinel)
+            out = generate_thread_summaries(emails, model="m", client=sentinel, preflight=False)
 
         mk.assert_not_called()
         self.assertIs(seen_clients[0], sentinel)
