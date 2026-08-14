@@ -21,9 +21,10 @@ make demo                         # starts Qdrant, builds the contextual index, 
 > `requirements.txt` is the supported install path.
 
 `make demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh): it brings up
-Qdrant (Docker) and runs `python main.py`, which builds a **thread-aware contextual
-index** over 100 Enron emails and answers example questions by retrieving and
-assembling whole threads. This is the §13 stack from the
+Qdrant (Docker) and runs `python -m scripts.demo`, which builds **two** indexes over
+1,200 public Enron emails — one plain, one with each message embedded alongside its
+conversation's preceding context — and asks both the same 99 validated questions.
+It prints the recall table and a paired significance test. Background in the
 [case study](CASE_STUDY.md).
 
 > **What the demo is and isn't.** It is a **walkthrough**, not a measurement: 100
@@ -103,7 +104,7 @@ reference retired classes — they no longer exist.)
 
 ## Next steps
 
-1. Run `make demo`, then modify the example queries in `main.py::run_demo`.
+1. Run `make demo`, then edit the questions in [`eval/demo/questions.jsonl`](../eval/demo/questions.jsonl).
 2. Read the root [`README.md`](../README.md) for the overview and case study.
 3. Read [`SETUP.md`](SETUP.md) to run the full local `.eml` pipeline over your own mailbox.
 4. Read [`GUIDE.md`](GUIDE.md) and [`VERBS.md`](VERBS.md) for the persona flow and the CLI.

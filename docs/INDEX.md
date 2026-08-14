@@ -65,7 +65,7 @@ map — this is the canonical reading order.
 
 | You want to… | Use |
 |--------------|-----|
-| Run the public demo | `make demo` → [`scripts/quickstart.sh`](../scripts/quickstart.sh) → `main.py::run_demo` |
+| Run the public demo | `make demo` → [`scripts/quickstart.sh`](../scripts/quickstart.sh) → [`scripts/demo.py`](../scripts/demo.py) |
 | Ask a question from the CLI | `./mailrag ask "…" --collection <name>` |
 | Serve a collection to an agent | `./mailrag mcp` (see [`MCP_SERVER.md`](MCP_SERVER.md)) |
 | Keep a collection fresh | `./mailrag sync` (see [`SYNC.md`](SYNC.md)) |

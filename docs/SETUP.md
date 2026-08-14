@@ -87,7 +87,7 @@ make demo        # starts Qdrant, then builds an index over 100 Enron emails and
 ```
 
 `make demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh) (bring up Qdrant →
-`python main.py`). See [`QUICKSTART.md`](QUICKSTART.md) for the trimmed walkthrough.
+`python -m scripts.demo`). See [`QUICKSTART.md`](QUICKSTART.md) for the trimmed walkthrough.
 
 ---
 
