@@ -58,6 +58,9 @@ map — this is the canonical reading order.
 - **[`ARCHITECTURE_DIAGRAMS.py`](ARCHITECTURE_DIAGRAMS.py)** — runnable script that prints the
   data-lifecycle and query-flow diagrams as terminal ASCII, annotated with the module
   behind each stage.
+- **[`ROADMAP.md`](ROADMAP.md)** — what ships in v1.0.0 and why each item gates it, plus what is
+  deliberately deferred. Mirrored by the `v1.0.0` GitHub milestone.
+- **[`RELEASE_NOTES.md`](RELEASE_NOTES.md)** — what changed between tagged releases.
 - **[`POETRY_MIGRATION.md`](POETRY_MIGRATION.md)** — Poetry dependency-management notes (the
   conda + `requirements.txt` install path in [`SETUP.md`](SETUP.md) is the supported one).
 

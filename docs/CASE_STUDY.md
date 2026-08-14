@@ -51,7 +51,7 @@ statements, and correspondence — while a rubric calibrated for the personal co
 **61.5%**. A cheap ~200-email calibration caught the gap before the ~6 h run, and a
 spot-check of the dropped pile confirmed it, all on a local model with no cloud spend. Full
 write-up:
-[EXPERIMENTS §14](docs/EXPERIMENTS.md#14-a-second-corpus--the-llm-rubric-is-not-portable-30-2026-06-05).
+[EXPERIMENTS §14](EXPERIMENTS.md#14-a-second-corpus--the-llm-rubric-is-not-portable-30-2026-06-05).
 
 ### Retrieval methodology — what each technique adds (and its trade-off)
 
@@ -75,7 +75,7 @@ answer-quality lens does use a local LLM judge, calibrated against a stronger re
 model on 514 pooled pairs (Cohen's κ = **0.52** on the 0–3 scale, Spearman 0.74 — and,
 the decisive check, both pre-registered decisions came out identical under both judges).
 Significance tests and confound controls are in
-[`EXPERIMENTS.md` §9–§13](docs/EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29):
+[`EXPERIMENTS.md` §9–§13](EXPERIMENTS.md#9-labeled-eval--retrieval-metrics-coverage-and-end-to-end-answer-quality-2026-05-29):
 
 - **Thread reconstruction is the biggest single win — and needs no LLM.** Matching a small unit
   and returning its whole conversation lifts **recall@5 from 64.2% (message-level) → 93.3%
@@ -85,7 +85,7 @@ Significance tests and confound controls are in
 - **Thread-aware *summaries* help where they're designed to — terse replies.** *(Note:
   "thread-aware" names two things — the retrieval expansion above, and this
   summary-conditioning step; see the
-  [terminology box](docs/EXPERIMENTS.md#terminology-read-this-first).)* Conditioning each
+  [terminology box](EXPERIMENTS.md#terminology-read-this-first).)* Conditioning each
   email's embedded summary on its *preceding* thread context lifts terse-reply retrieval
   from covered@3 75% → 81% (p = 0.035). The corpus-wide effect is real but modest (+3pp),
   and we report it as such.

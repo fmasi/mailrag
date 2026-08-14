@@ -101,7 +101,7 @@ vetted by a separate validator:
 | **with thread context** | **50.5%** | **73.7%** | **80.8%** |
 
 Paired, on identical queries: context **fixes 16 questions and breaks 3** at R@5 — McNemar exact
-**p = 0.0044**. `make demo` prints all of this live, in about four minutes.
+**p = 0.0044**. `make demo` prints all of this live.
 
 That is findability. The second half is **completeness** — and it needs a different question. The
 demo also asks 73 questions whose answer genuinely spans several messages, the case a
@@ -166,7 +166,8 @@ repo.
 **`make demo` shows both mechanisms.** It builds two indexes over the same 1,200 public Enron
 emails — one plain, one with each message embedded alongside its conversation's preceding context
 — then asks 99 single-message questions (findability, with a paired significance test) and 73
-spanning questions (completeness, at thread level). About five minutes; fixtures live in
+spanning questions (completeness, at thread level). Under two minutes on an Apple-silicon
+GPU — expect roughly 15 on CPU, at the 9× penalty measured for `make bench`. Fixtures live in
 [`eval/demo/`](eval/demo/).
 
 **`make bench` measures the retrieval layer.** It scores 360 committed queries against a
