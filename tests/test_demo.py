@@ -9,7 +9,16 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.demo import FIXTURES, _hit, gold_rank, load_fixtures, mcnemar, recall
+from scripts.demo import (
+    FIXTURES,
+    _hit,
+    gold_rank,
+    load_fixtures,
+    mcnemar,
+    norm_thread,
+    recall,
+    thread_coverage,
+)
 
 
 class _Node:
@@ -73,12 +82,52 @@ class TestHit(unittest.TestCase):
         self.assertFalse(_hit(1, 1))
 
 
+class TestNormThread(unittest.TestCase):
+    """Thread ids lose their angle brackets on the way into the payload. Comparing
+    a normalised id against a raw one yields T@k = 0.0% — wrong, not an error,
+    and it happened once for real during development."""
+
+    def test_strips_angle_brackets(self):
+        self.assertEqual(norm_thread("<thread-1@x>"), "thread-1@x")
+
+    def test_is_idempotent(self):
+        self.assertEqual(norm_thread(norm_thread("<t@x>")), "t@x")
+
+    def test_handles_none_and_blank(self):
+        self.assertEqual(norm_thread(None), "")
+        self.assertEqual(norm_thread("  "), "")
+
+    def test_both_sides_of_a_comparison_agree(self):
+        self.assertEqual(norm_thread("<t@x>"), norm_thread("t@x"))
+
+
+class TestThreadCoverage(unittest.TestCase):
+    def test_fraction_of_the_conversation_in_top_k(self):
+        self.assertEqual(thread_coverage(["a", "b", "c"], {"a", "b", "d", "e"}, 5), 0.5)
+
+    def test_only_the_top_k_count(self):
+        self.assertEqual(thread_coverage(["x", "y", "a"], {"a", "b"}, 2), 0.0)
+
+    def test_full_coverage_is_one(self):
+        self.assertEqual(thread_coverage(["a", "b"], {"a", "b"}, 5), 1.0)
+
+    def test_an_empty_gold_set_is_none_not_a_crash(self):
+        """A fixture referencing a thread absent from the corpus is broken input,
+        not a score of zero — and dividing by it would crash the demo."""
+        self.assertIsNone(thread_coverage(["a"], set(), 5))
+
+
 class TestFixtures(unittest.TestCase):
     """The fixtures are committed, so drift between them is possible and would
     silently change what the demo prints."""
 
-    def test_all_three_fixtures_exist(self):
-        for name in ("corpus.jsonl", "summaries.jsonl", "questions.jsonl"):
+    def test_all_fixtures_exist(self):
+        for name in (
+            "corpus.jsonl",
+            "summaries.jsonl",
+            "questions.jsonl",
+            "questions_spanning.jsonl",
+        ):
             with self.subTest(name=name):
                 self.assertTrue((FIXTURES / name).exists(), f"missing {name}")
 
@@ -114,6 +163,38 @@ class TestFixtures(unittest.TestCase):
             and body in q["query"].lower()
         ]
         self.assertEqual(leaked, [], f"{len(leaked)} question(s) quote their answer")
+
+
+    def test_every_spanning_question_maps_to_a_real_thread(self):
+        """Guards the ZeroDivisionError path: a spanning question whose thread is
+        absent from the corpus has no conversation to score against."""
+        import json as _json
+
+        corpus, _, _ = load_fixtures()
+        threads = {norm_thread(r["thread"]) for r in corpus}
+        rows = [
+            _json.loads(x)
+            for x in (FIXTURES / "questions_spanning.jsonl").read_text().splitlines()
+            if x
+        ]
+        self.assertGreater(len(rows), 0)
+        orphans = [r["thread"] for r in rows if norm_thread(r["thread"]) not in threads]
+        self.assertEqual(orphans, [], f"{len(orphans)} spanning question(s) reference no thread")
+
+    def test_spanning_questions_target_multi_message_threads(self):
+        """A spanning question over a single-message thread is not spanning."""
+        import collections as _c
+        import json as _json
+
+        corpus, _, _ = load_fixtures()
+        size = _c.Counter(norm_thread(r["thread"]) for r in corpus)
+        rows = [
+            _json.loads(x)
+            for x in (FIXTURES / "questions_spanning.jsonl").read_text().splitlines()
+            if x
+        ]
+        singles = [r["thread"] for r in rows if size[norm_thread(r["thread"])] < 2]
+        self.assertEqual(singles, [], f"{len(singles)} spanning question(s) on a lone message")
 
 
 if __name__ == "__main__":
