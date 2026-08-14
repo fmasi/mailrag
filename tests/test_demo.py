@@ -164,7 +164,6 @@ class TestFixtures(unittest.TestCase):
         ]
         self.assertEqual(leaked, [], f"{len(leaked)} question(s) quote their answer")
 
-
     def test_every_spanning_question_maps_to_a_real_thread(self):
         """Guards the ZeroDivisionError path: a spanning question whose thread is
         absent from the corpus has no conversation to score against."""
