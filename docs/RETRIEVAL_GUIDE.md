@@ -503,6 +503,30 @@ fusion is relative-score only, so RRF is supplied as a small callback.
 
 ---
 
+## The hard part is *finding* the conversation
+
+Returning a whole thread once you have a hit is the easy half, and plenty of systems do
+it under the name parent-document retrieval. The problem it leaves untouched is that
+**the message you need is usually the one least likely to be retrieved.**
+
+*"Better or worse than ours?"* is a real Enron email. It answers a real question.
+Embedded on its own it is a bag of five common words sitting near nothing in the vector
+space, and no query will ever surface it. Neither will the thread it belongs to, because
+nothing in that thread's text matches the question either, until you already know what
+"ours" refers to.
+
+So the work has to happen at **index** time. Each email is embedded together with a short
+summary of what came before it in its conversation, so the terse reply's vector carries
+the context that the message itself leaves out. Reconstructing the thread is what makes
+that summary possible. Embedding the summary is what makes the message findable. Only
+then does expanding to the full conversation buy you anything, because you have to locate
+it first.
+
+About 40% of the questions in this project's evaluation depend on a message that terse.
+The two senses of "thread-aware" are therefore sequential rather than alternative: the
+summary sense gets you to the conversation, and the retrieval sense below gets you the
+rest of it.
+
 ## Thread-aware retrieval (small→big expansion)
 
 > This is the **retrieval** sense of "thread-aware" — match a unit, return its whole thread.
