@@ -91,7 +91,9 @@ The message that answers it:  "Sandi: Apologies. Inadvertently didn't
 | **with thread context** | **50.5%** | **73.7%** | **80.8%** |
 
 Both arms answer identical queries, so the paired test is the one that counts: context fixes 16
-questions and breaks 3 at R@5, McNemar exact **p = 0.0044**. On the 73 spanning questions the
+questions and breaks 3 at R@5, McNemar exact **p = 0.0044**. That is findability.
+
+The second half is completeness, and it needs a different question. On the 73 spanning questions the
 right conversation is found **97.3%** of the time at top-5, where top-5 *messages* give you only
 **52.6%** of it and thread expansion gives you all of it. A generic RAG hands you half the
 conversation, and it tends to be the half the answer is missing from.
@@ -121,9 +123,9 @@ the only one that determines whether anything leaves your machine.
 | **Bring your own agent** | Claude, ChatGPT, anything speaking MCP | **yes**, retrieved text goes to that provider | nothing extra |
 | **Fully local** | a local model via CLI *or* MCP | **no** | ~8 GB of RAM/VRAM |
 
-Both rows work over either surface. The CLI and the MCP server run the same retrieval, and the
-model you point them at is what decides. Pull the network cable and the local configuration
-still answers.
+The second row is the point of the project, and it works both ways round. MCP is not the cloud
+path and the CLI is not the local path — the model you choose is what decides. Pull the network
+cable and the local configuration still answers.
 
 Being blunt about the trade: pointing Claude at your mailbox is the lowest-friction way to try
 this and it is genuinely useful, but the emails it retrieves get sent to Anthropic like any
