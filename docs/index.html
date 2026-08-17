@@ -122,45 +122,46 @@
     <h2>Why it exists</h2>
     <p class="lead">Making your mailbox searchable by an AI usually means handing your entire
        email history to someone else's servers. For your real correspondence, that's a non-starter.</p>
-    <p class="muted">So I built the opposite: an email RAG you run yourself — on your hardware, on
-       open models, with nothing required to leave your network. And the result isn't just search —
-       these emails are <b>private context</b> my own AI agents can draw on for total recall, without
-       renting my memory to anyone. mailrag covers email;
+    <p class="muted">So I built the opposite: an email RAG you run yourself, on your hardware, on
+       open models, with nothing required to leave your network. What comes out goes past search.
+       These emails are <b>private context</b> my own AI agents can draw on for total recall,
+       without renting my memory to anyone. mailrag covers email.
        <a href="https://github.com/fmasi/parley">parley</a> covers calls and meetings. Independent
-       tools; my agents know about both and reach for whatever fits.</p>
+       tools, and my agents know about both and reach for whatever fits.</p>
   </section>
 
   <section>
     <h2>What it does</h2>
     <div class="grid">
-      <div class="card"><h3>Thread-aware answers</h3><p>The flagship: match a single message, then answer from its <em>entire</em> conversation. Lifts recall@5 from <b>64.2% (message-level) → 93.3% (thread-level)</b> — the single biggest lever, and it needs no LLM.</p></div>
-      <div class="card"><h3>Hybrid retrieval</h3><p>bge-m3 dense + learned sparse vectors, RRF-fused in Qdrant. Gets both the concept <em>and</em> the rare exact token — acronyms, IDs, reference numbers.</p></div>
+      <div class="card"><h3>Thread-aware answers</h3><p>The flagship: match a single message, then answer from its <em>entire</em> conversation. Lifts recall@5 from <b>64.2% (message-level) → 93.3% (thread-level)</b>. Biggest single lever in the system, and it needs no LLM.</p></div>
+      <div class="card"><h3>Hybrid retrieval</h3><p>bge-m3 dense + learned sparse vectors, RRF-fused in Qdrant. Gets both the concept <em>and</em> the rare exact token: acronyms, IDs, reference numbers.</p></div>
       <div class="card"><h3>Email-aware preprocessing</h3><p>Reply-chain stripping, calendar-invite collapsing, noise/newsletter filtering, and exact-text chunk dedup.</p></div>
-      <div class="card"><h3>Attachments, searchable</h3><p>Text pulled from PDFs, Office files, HTML and images — with OCR for scans (local Tesseract or a local vision model). Each attachment is chunked by its own structure: spreadsheet rows with a repeated header, PDF pages, deck slides — so a number buried in a 500-row sheet stays findable. Chunks trace back to their email and thread.</p></div>
-      <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Local by default — but point it at <em>any</em> OpenAI-compatible server (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI) with one env var.</p></div>
-      <div class="card"><h3>Stays current</h3><p>A collection built from a backup is a snapshot that quietly rots. <code>./mailrag sync</code> pulls new mail from a live account and indexes only the delta, so the index runs 1–2 days fresh instead of frozen at its export date. Deterministic point ids mean re-indexing <em>replaces</em> rather than duplicates; the content-addressed cache means only new mail costs an LLM call.</p></div>
-      <div class="card"><h3>Pluggable loaders &amp; sources</h3><p>The public Enron corpus and local <code>.eml</code> archives sit behind one <code>EmailLoader</code>; IMAP and Maildir sit behind a <code>MessageSource</code> seam with opaque cursors, so Gmail, JMAP or Graph slot in without a schema change.</p></div>
-      <div class="card"><h3>Measured methodology</h3><p>A 360-query eval that prices every technique, controls for confounds, reports significance — and in several cases overturned the intuitive choice.</p></div>
-      <div class="card"><h3>Agents connect over MCP</h3><p>A multi-collection, read-only <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server (<code>./mailrag mcp</code>, MCP SDK v2): any agent can discover your indexed corpora, search and fetch whole threads, regex-grep the raw <code>.eml</code> corpus where embeddings are blind, ask grounded questions, and read attachment text — seven tools, no internals exposed.</p></div>
+      <div class="card"><h3>Attachments, searchable</h3><p>Text pulled from PDFs, Office files, HTML and images, with OCR for scans (local Tesseract or a local vision model). Each attachment is chunked by its own structure: spreadsheet rows with a repeated header, PDF pages, deck slides. A number buried in a 500-row sheet stays findable, and every chunk traces back to its email and thread.</p></div>
+      <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Local by default, and it points at <em>any</em> OpenAI-compatible server (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI) with one env var.</p></div>
+      <div class="card"><h3>Stays current</h3><p>A collection built from a backup is a snapshot that quietly rots. <code>./mailrag sync</code> pulls new mail from a live account and indexes only the delta, so the index runs 1–2 days fresh instead of frozen at its export date. Deterministic point ids mean re-indexing <em>replaces</em> rather than duplicates, and the content-addressed cache means only new mail costs an LLM call.</p></div>
+      <div class="card"><h3>Pluggable loaders &amp; sources</h3><p>The public Enron corpus and local <code>.eml</code> archives sit behind one <code>EmailLoader</code>. IMAP and Maildir sit behind a <code>MessageSource</code> seam with opaque cursors, so Gmail, JMAP or Graph slot in without a schema change.</p></div>
+      <div class="card"><h3>Measured methodology</h3><p>A 360-query eval that prices every technique, controls for confounds and reports significance. In several cases it overturned the intuitive choice.</p></div>
+      <div class="card"><h3>Agents connect over MCP</h3><p>A multi-collection, read-only <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server (<code>./mailrag mcp</code>, MCP SDK v2): any agent can discover your indexed corpora, search and fetch whole threads, regex-grep the raw <code>.eml</code> corpus where embeddings are blind, ask grounded questions, and read attachment text. Seven tools, no internals exposed.</p></div>
     </div>
   </section>
 
   <section>
     <h2>How it works — the hard parts</h2>
     <ul class="hard">
-      <li><b>Thread-aware reconstruction is the biggest single win — and needs no LLM.</b> Matching a single
+      <li><b>Thread-aware reconstruction is the biggest single win, and it needs no LLM.</b> Matching a single
          message and returning its whole conversation lifts <b>recall@5 from 64.2% (message-level) → 93.3%
-         (thread-level)</b> (+29.1 points) — bigger than the embedder and reranker choices combined. The
-         target shifts from one message to its thread by design: for a conversation, the thread is the
-         right unit of truth. Most of the headline gain comes from here, not the model.</li>
-      <li><b>Cheap regex for the obvious bulk; the LLM only where it earns its keep.</b> Corpus-derived
+         (thread-level)</b>, a gain of 29.1 points. That is bigger than the embedder and reranker choices
+         combined. The target shifts from one message to its thread by design: for a conversation, the
+         thread is the right unit of truth. Most of the headline gain comes from here rather than from
+         the model.</li>
+      <li><b>Cheap regex for the obvious bulk, the LLM only where it earns its keep.</b> Corpus-derived
          sender/subject rules catch ~65% of the noise at high precision. The other ~35% is interleaved
-         mixed-domain noise you can't write a rule for — that's the local LLM's unique contribution,
-         plus the per-email summaries that power contextual retrieval.</li>
+         mixed-domain noise you cannot write a rule for. That is the local LLM's unique contribution,
+         along with the per-email summaries that power contextual retrieval.</li>
       <li><b>The noise rubric does not port across corpora.</b> The <i>corporate</i> rubric flagged
-         <b>87.6%</b> of a personal archive as noise — it would have deleted real receipts and bank
-         statements — versus <b>61.5%</b> from a rubric calibrated for that corpus. A ~200-email
-         calibration caught the gap before a multi-hour run, all on a local model with no cloud spend.</li>
+         <b>87.6%</b> of a personal archive as noise, against <b>61.5%</b> from a rubric calibrated for
+         that corpus. It would have deleted real receipts and bank statements. A ~200-email calibration
+         caught the gap before a multi-hour run, all on a local model with no cloud spend.</li>
       <li><b>Reranking earns far less than its reputation — and one claim about it had to be withdrawn.</b>
          A cross-encoder reranker adds <b>+2.5 recall@5</b> overall, a fraction of what thread reconstruction
          buys, in exchange for a per-query call to a paid endpoint. These pages used to say it demoted the
@@ -171,9 +172,9 @@
          default. (Query-side HyDE never beat the raw query on this entity-rich corpus either.) Both stay
          in-tree. Every published figure, including this correction, is tracked in the
          <a href="https://github.com/fmasi/mailrag/blob/main/docs/CLAIMS.md">claims register</a>.</li>
-      <li><b>The ceiling is retrieval, not the model.</b> With the answer in context, even a 4 B model
-         answered ~88% correctly; the lost points are queries where retrieval never surfaced the
-         thread. Model size was second-order.</li>
+      <li><b>Retrieval is the ceiling, well before the model is.</b> With the answer in context, even a
+         4 B model answered ~88% correctly. The lost points are queries where retrieval never surfaced
+         the thread at all. Model size came out second-order.</li>
     </ul>
   </section>
 
@@ -216,30 +217,46 @@
       <tr><td>+ thread reconstruction ★</td><td class="n"><span class="up">93.3%</span></td><td class="n"><span class="up">+29.1</span></td></tr>
     </table>
     <p class="muted" style="margin:10px 0 0;font-size:13px">★ The final step switches the goal from
-       “find the exact email” to “find its thread” — a legitimately easier, and more useful, target. The
-       two biggest levers (thread reconstruction +29.1, contextual summary +12.8) are both about understanding
-       the conversation — not a fancier embedding model. <a href="https://fmasi.eu/blog/email-rag-retrieval/">Read the full benchmark →</a></p>
-    <p class="muted" style="margin-top:14px">Measured on a real work mailbox — 360 questions, each with a
-       known correct answer (a hard label, no subjective judging) — then cross-checked on 360 public
-       Enron-QA questions (same ordering, so it isn't a quirk of one inbox). The figures are
-       author-reported on a private corpus. Run the <i>identical</i> comparison
-       on legal e-discovery (the TREC Legal benchmark) and the order flips: a general-purpose dense+rerank
-       stack (NVIDIA's retrieval NIMs) wins there instead — same systems, opposite result, because the
-       task is different. All
-       references anonymized. <code>make demo</code> isolates the contextual-embedding lever on public data: 60.6% → 73.7% R@5, p=0.0044. It is the first of the ladder's levers a stranger can reproduce, though it measures one lever at message level rather than the full thread-level stack. <b><code>make bench</code>
-       reproduces a real number</b> — on public Enron-QA, no key and no private data, it scores 360
-       committed queries against 2 000 documents in a couple of minutes and prints
+       "find the exact email" to "find its thread", a legitimately easier and more useful target. Both
+       of the big levers (thread reconstruction +29.1, contextual summary +12.8) come from understanding
+       the conversation rather than from a fancier embedding model.
+       <a href="https://fmasi.eu/blog/email-rag-retrieval/">Read the full benchmark →</a></p>
+
+    <p class="muted" style="margin-top:14px"><b>Where the ladder comes from.</b> A real work mailbox,
+       360 questions, each with a known correct answer, so the scoring uses hard labels and no subjective
+       judging. Cross-checked on 360 public Enron-QA questions, which put the arms in the same order and
+       rule out a quirk of one inbox. All references anonymized. These figures come from a private corpus,
+       so treat them as author-reported.</p>
+
+    <p class="muted" style="margin-top:14px"><b>The winner flips with the task.</b> Run the identical
+       comparison on legal e-discovery (three TREC Legal topics, real human judgments) and the order
+       reverses: a general-purpose dense+rerank stack, NVIDIA's retrieval NIMs, wins there. The obvious
+       objection is the right one. Their stack is built and tuned for general retrieval, not for email,
+       and it is very good at that. The finding is that specialising for a task beats general-purpose
+       on that task, and email is a task worth specialising for. Three topics is low statistical power,
+       so read it as a direction rather than a score.</p>
+
+    <p class="muted" style="margin-top:14px"><b>What a stranger can reproduce.</b>
+       <code>make demo</code> now covers both of the big levers on 1,200 public Enron emails. Contextual
+       embedding takes R@5 from 60.6% to 73.7% (McNemar p=0.0044), and on 73 questions whose answers
+       span several messages it finds the right conversation 97.3% of the time at top-5, where the top-5
+       <i>messages</i> give you only 52.6% of that conversation and thread expansion gives you all of it.
+       <code>make bench</code> then scores the retrieval layer: 360 committed queries against 2 000
+       public Enron-QA documents in a couple of minutes, no key and no private data, printing
        <b>R@5 94.4% dense vs 97.5% dense+learned-sparse</b> (95% Wilson [91.6, 96.4] vs [95.3, 98.7]).
-       Those intervals overlap, so the benchmark reports the <i>paired</i> test too — both arms answer
-       the same queries — and learned-sparse fixes 12 while breaking 1, <b>McNemar exact p=0.0034</b>.
-       It spends no LLM calls at all (1.6 min on an M5 Pro GPU, 14.7 min CPU-only).
-       Widen the distractor pool 5× with <code>make bench SIZE=large</code> and the advantage grows
-       rather than shrinks (+4.4pp, p=0.0001), which is the directional claim that matters.
-       <b>Scope, stated plainly:</b> <code>make bench</code> checks the hybrid <i>retrieval layer</i> only —
-       thread reconstruction (+29.1), contextual summaries (+12.8) and reranking (+2.5) are all switched
-       off, because public Enron-QA carries no thread structure and the rest would need an API key.
-       It shows the foundation is sound and the claims are falsifiable; it does <i>not</i> reproduce the
-       45.6→93.3 ladder, which stays author-reported. Full write-up in the
+       Those intervals overlap, so it reports the <i>paired</i> test too, since both arms answer the same
+       queries: learned-sparse fixes 12 and breaks 1, <b>McNemar exact p=0.0034</b>. Zero LLM calls,
+       1.6 min on an M5 Pro GPU and 14.7 min CPU-only. Widen the distractor pool 5× with
+       <code>make bench SIZE=large</code> and the advantage grows instead of shrinking (+4.4pp,
+       p=0.0001), which is the directional claim that matters.</p>
+
+    <p class="muted" style="margin-top:14px"><b>Scope, stated plainly.</b> <code>make bench</code>
+       checks the hybrid <i>retrieval layer</i> alone, with reranking switched off because it needs a
+       paid endpoint. Between them the two commands reproduce the mechanisms but not the magnitude: the
+       45.6→93.3 ladder was measured on a 32,000-email archive and stays author-reported. Every figure
+       on this page is tracked in the
+       <a href="https://github.com/fmasi/mailrag/blob/main/docs/CLAIMS.md">claims register</a> with the
+       script that produced it and the date it last ran. Full write-up in the
        <a href="https://fmasi.eu/blog/email-rag-retrieval/">benchmark post</a> and the
        <a href="https://github.com/fmasi/mailrag/blob/main/docs/CASE_STUDY.md">case study</a>.</p>
   </section>
@@ -247,8 +264,8 @@
   <section>
     <h2>How it's kept honest</h2>
     <div class="grid">
-      <div class="card"><h3>1500 tests</h3><p>A <code>unittest</code>-style suite covering the pipeline, the retrieval seams, the MCP tools and the sync machinery — a green <code>pytest</code> is a required check before anything reaches <code>main</code>.</p></div>
-      <div class="card"><h3>Independent CI gates</h3><p><code>ruff</code> (lint + format), <code>mypy</code>, <code>pytest</code>, <code>pip-audit</code> and CodeQL each run as a separately named status. The <code>pip-audit</code> ignore list is deliberately empty — advisories get fixed or pinned around, not waved through.</p></div>
+      <div class="card"><h3>1500 tests</h3><p>A <code>unittest</code>-style suite covering the pipeline, the retrieval seams, the MCP tools and the sync machinery. A green <code>pytest</code> is a required check before anything reaches <code>main</code>.</p></div>
+      <div class="card"><h3>Independent CI gates</h3><p><code>ruff</code> (lint + format), <code>mypy</code>, <code>pytest</code>, <code>pip-audit</code> and CodeQL each run as a separately named status. The <code>pip-audit</code> ignore list is deliberately empty. Advisories get fixed or pinned around, never waved through.</p></div>
       <div class="card"><h3>Supply chain, pinned on purpose</h3><p>The Qdrant server image is pinned by digest; the client is capped below a release that silently removed a symbol. Every pin carries an in-tree comment saying why it exists and when to lift it. Zero open Dependabot alerts.</p></div>
     </div>
   </section>
@@ -261,9 +278,9 @@
        follows once the gaps named in the
        <a href="https://github.com/fmasi/mailrag/blob/main/docs/ROADMAP.md">roadmap</a> close.</p>
     <div class="grid">
-      <div class="card"><h3>MCP server — shipped ✓</h3><p>A multi-collection stdio server exposes seven tools — <code>list_collections</code>, <code>search_email</code>, <code>get_thread</code> (an exact key lookup, not a second retrieval pass), <code>grep_email</code>, <code>answer_question</code>, and attachment list/fetch — so any agent, yours or a teammate's, can query your mail without touching the internals.</p></div>
-      <div class="card"><h3>Live ingestion — shipped ✓</h3><p><code>./mailrag sync</code> moves mailrag from one-time imports to incremental ingest: a <em>living</em> context source, not a static snapshot. New mail is spooled as <code>.eml</code> and run through the <em>same</em> pipeline, so the cleaning rubric never drifts. Each stage degrades independently — mail is still fetched when the LLM is down, still judged when the vector store is down — and picks up where it left off next run. On macOS a launchd agent keeps it running unattended.</p></div>
-      <div class="card"><h3>Guided TUI — shipped ✓</h3><p><code>./mailrag wizard</code> is now a full-screen terminal app (Textual): pick a persona, scope folders on a tree, review the plan, and watch the run live — with the calibrate and confirm-before-spend gates as dialogs.</p></div>
+      <div class="card"><h3>MCP server — shipped ✓</h3><p>A multi-collection stdio server exposes seven tools: <code>list_collections</code>, <code>search_email</code>, <code>get_thread</code> (an exact key lookup rather than a second retrieval pass), <code>grep_email</code>, <code>answer_question</code>, and attachment list/fetch. Any agent, yours or a teammate's, can query your mail without touching the internals.</p></div>
+      <div class="card"><h3>Live ingestion — shipped ✓</h3><p><code>./mailrag sync</code> moves mailrag from one-time imports to incremental ingest: a <em>living</em> context source, not a static snapshot. New mail is spooled as <code>.eml</code> and run through the <em>same</em> pipeline, so the cleaning rubric never drifts. Each stage degrades independently. Mail is still fetched when the LLM is down and still judged when the vector store is down, and the run picks up where it left off next time. On macOS a launchd agent keeps it running unattended.</p></div>
+      <div class="card"><h3>Guided TUI — shipped ✓</h3><p><code>./mailrag wizard</code> is now a full-screen terminal app (Textual): pick a persona, scope folders on a tree, review the plan, and watch the run live, with the calibrate and confirm-before-spend gates as dialogs.</p></div>
     </div>
   </section>
 
