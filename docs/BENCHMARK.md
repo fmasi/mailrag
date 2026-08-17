@@ -1,4 +1,4 @@
-# `make bench` — the number you can check yourself
+# `make bench`: the number you can check yourself
 
 Most of this project's retrieval figures are measured on a **private** mailbox. That
 is the corpus the system is actually for, and it is not something a reader can be
@@ -11,32 +11,23 @@ few minutes.
 
 ### Why the corpus is from 2001
 
-A fair question: why benchmark on Enron rather than something modern?
+Why benchmark on Enron rather than something modern? Because, as far as I have been
+able to establish, there is nothing else. Every public email corpus exists because
+someone lost control of one, which [`WHY_LOCAL.md`](WHY_LOCAL.md) sets out in full.
 
-Because, as far as I've been able to establish, there is nothing else. Nobody has
-published their own private mailbox. The public corpora exist because someone *lost
-control* of one — Enron through a federal investigation, the Avocado collection
-through a company's liquidation, the FOIA sets through public-records law, assorted
-political archives through leaks.
-
-The consented exceptions are **mailing lists** — Apache, LKML, the W3C collection
-behind TREC Enterprise. Those are public by design, and they are the wrong shape for
-this problem: list traffic is well-written, self-contained and context-carrying,
-whereas the hard case in a real mailbox is the terse reply (*"sounds good, go
-ahead"*) that means nothing without the messages above it. Benchmarking thread
-reconstruction on a mailing list would test the mechanism on precisely the case that
-needs it least.
+There is a second reason specific to *this* benchmark, and it rules out the one
+consented alternative. The corpora anyone published on purpose are **mailing lists**:
+Apache, LKML, the W3C collection behind TREC Enterprise. They are the wrong shape for
+this problem. List traffic is well written, self-contained and carries its own context,
+whereas the hard case in a real mailbox is the terse reply, *"sounds good, go ahead"*,
+which means nothing without the messages above it. Benchmarking thread reconstruction
+on a mailing list would test the mechanism on precisely the case that needs it least.
 
 So a dataset from 2001 remains the field standard twenty-five years later, and the
-nearest alternative is another defunct company's mail, behind a licence.
+nearest alternative is another defunct company's mail behind a licence.
 
-*If you know of a corpus that fits better — real mailbox correspondence, openly
-licensed — please [open an issue](https://github.com/fmasi/mailrag/issues).*
-
-That is not a footnote about benchmarking; it is the whole reason this project is
-built to run locally. Email is the most sensitive data most people own, which is
-simultaneously why it is hard to benchmark on and why it should not be uploaded
-anywhere to be searched.
+*If you know of a corpus that fits better, meaning real mailbox correspondence under an
+open licence, please [open an issue](https://github.com/fmasi/mailrag/issues).*
 
 ```bash
 docker compose up -d          # Qdrant
@@ -48,7 +39,8 @@ First run downloads bge-m3 (~2 GB) and the Enron-QA test split.
 
 ### How long it takes
 
-Measured, not estimated — `make bench` at the default size, build **and** scoring:
+Measured rather than estimated, on `make bench` at the default size, covering build
+**and** scoring:
 
 | device | wall clock |
 |---|---|
@@ -57,13 +49,13 @@ Measured, not estimated — `make bench` at the default size, build **and** scor
 
 Hardware: Apple M5 Pro (6 performance + 12 efficiency cores, 48 GB), macOS 26.5.2,
 torch 2.13, Python 3.13. Measured on a working laptop with an editor and Docker
-running — not a dedicated benchmark host — with runs gated on a 1-minute load
+running, rather than a dedicated benchmark host, with runs gated on a 1-minute load
 average below 2.5 and no other GPU work in flight. Two MPS repetitions agreed to
-within 2.3%. Treat these as indicative of the shape, not a spec sheet.
+within 2.3%. Treat these as indicative of the shape rather than a spec sheet.
 
-**The 9× gap is the number to plan around.** PyTorch defaults to 6 threads here
-(the performance cores; the efficiency cores go unused) and the scoring half is
-latency-bound anyway — 720 sequential single-query searches, which no amount of
+**The 9× gap is the number to plan around.** PyTorch defaults to 6 threads here, using
+the performance cores and leaving the efficiency cores idle, and the scoring half is
+latency-bound regardless: 720 sequential single-query searches, which no amount of
 parallelism shortens. Set `RAG_EMBED_DEVICE=cpu|mps|cuda` to force a device;
 otherwise it picks cuda > mps > cpu.
 
@@ -71,13 +63,13 @@ otherwise it picks cuda > mps > cpu.
 
 The benchmark spends **zero** LLM tokens. It builds with `embed_summary=False` and
 `apply_noise_filter=False`, passes no corpus profile (so the Pass-2 cache path never
-runs), and scores with retrieval only — no answer generation, no cross-encoder. The
-times above are embedding plus Qdrant, nothing else.
+runs), and scores with retrieval only, so no answer generation and no cross-encoder. The
+times above are embedding plus Qdrant and nothing else.
 
-That is also the scope boundary: recall@k measures the **retrieval layer**, not the
-product. `make demo` and `./mailrag ask` do spend LLM calls for summaries and
-answers; `make bench` does not, which is exactly why it needs no API key and why
-anyone can reproduce it.
+That is also the scope boundary. Recall@k measures the **retrieval layer** rather than
+the product. `make demo` spends no LLM calls either, because its summaries are committed
+as fixtures. `./mailrag ask` is the one that does, since it generates an answer. Needing
+no key is exactly why anyone can reproduce these two commands.
 
 ## What it measures
 
@@ -85,13 +77,13 @@ Two arms, both fully local:
 
 | arm | what it is |
 |---|---|
-| `dense` | bge-m3 dense vectors only — the plain-RAG baseline |
-| `dense+sparse` | bge-m3 dense **+ learned-sparse**, fused with RRF — the default path |
+| `dense` | bge-m3 dense vectors only, the plain-RAG baseline |
+| `dense+sparse` | bge-m3 dense **plus learned-sparse**, fused with RRF, the default path |
 
 Recall@k is **document** recall: how often the email the question was written from
-appears in the top *k* distinct emails returned. Chunks are collapsed to their
-message first, so an email that contributes three chunks counts once — otherwise
-every arm's recall would be inflated by chunk duplication.
+appears in the top *k* distinct emails returned. Chunks are collapsed to their message
+first, so an email contributing three chunks counts once. Without that collapse every
+arm's recall would be inflated by chunk duplication.
 
 ## Results
 
@@ -110,11 +102,11 @@ Large set — same 360 queries against a 5× bigger distractor pool (10 000 docu
 | **dense + learned-sparse** | **80.6 [76.2, 84.3]** | **94.4 [91.6, 96.4]** | **96.7 [94.3, 98.1]** |
 
 Brackets are **95% Wilson score intervals**, not `mean ± z·SE`. The textbook Wald
-interval misbehaves exactly where this benchmark lives: at p̂ = 0.975, n = 360 the
-true interval is [95.3, 98.7] — a full percentage point asymmetric — and at p̂ = 1.0
-Wald collapses to ±0.00, claiming perfect certainty from 360 samples. Bounds are
-printed rather than a single ± for the same reason: near the ceiling there is no
-honest symmetric summary.
+interval misbehaves exactly where this benchmark lives. At p̂ = 0.975, n = 360 the true
+interval is [95.3, 98.7], asymmetric by a full percentage point, and at p̂ = 1.0 Wald
+collapses to ±0.00 and claims perfect certainty from 360 samples. Bounds are printed
+rather than a single ± for the same reason. Near the ceiling there is no honest
+symmetric summary.
 
 ### Significance
 
@@ -138,21 +130,20 @@ The effect is one-sided at every cut: learned-sparse rescues 11–19 queries and
 breaks at most 3.
 
 **The direction is the result.** The sparse advantage at R@5 is +3.1pp at 2 000
-documents and **+4.4pp at 10 000** — it grows as the task gets harder, and the
-paired p-value falls by an order of magnitude with it. A retrieval trick that only
-helps on an easy corpus is not worth shipping; this one earns more as the distractor
-pool widens.
+documents and **+4.4pp at 10 000**. It grows as the task gets harder, and the paired
+p-value falls by an order of magnitude with it. A retrieval trick that only helps on an
+easy corpus is not worth shipping. This one earns more as the distractor pool widens.
 
 ## Why the corpus is not smaller
 
 An earlier draft used 500 documents so the benchmark would finish in about a minute.
-At that size both arms sat at the ceiling — 96.7% vs 95.3% at R@1, with dense
-*ahead*, which is noise rather than a finding. Retrieval difficulty is set by the
-size of the distractor pool, so a corpus small enough to be trivially fast is also
-small enough to measure nothing.
+At that size both arms sat at the ceiling, 96.7% against 95.3% at R@1 with dense
+*ahead*, which is noise rather than a finding. Retrieval difficulty is set by the size
+of the distractor pool, so a corpus small enough to be trivially fast is also small
+enough to measure nothing.
 
-Query count, by contrast, is nearly free: scoring 360 queries across both arms costs
-about 75 seconds against roughly 100 seconds to build the 2 000-document index. So
+Query count is nearly free by comparison. Scoring 360 queries across both arms costs
+about 75 seconds, against roughly 100 seconds to build the 2 000-document index. So
 queries are spent generously to tighten the interval rather than rationed for speed.
 
 ## What this proves — and what it does not
@@ -165,22 +156,22 @@ a whole. Every other lever is switched off:
 
 | lever | private-eval value | in `make bench`? | why not |
 |---|---|---|---|
-| Thread reconstruction | **+29.1** recall@5 — the flagship | ❌ | Enron-QA rows carry no conversation linkage. The schema is `email / questions / path / user / …`; `path` is a per-user mailbox path. **There are no threads to reconstruct.** |
-| Contextual summaries | **+12.8** recall@5 | ❌ | Built with `embed_summary=False`. Generating per-email summaries needs an LLM, which would forfeit the no-key property. |
+| Thread reconstruction | **+29.1** recall@5, the flagship | ❌ | Enron-QA rows carry no conversation linkage. The schema is `email / questions / path / user / …`, where `path` is a per-user mailbox path. **There are no threads to reconstruct.** Measured by `make demo` instead. |
+| Contextual summaries | **+12.8** recall@5 | ❌ | Built with `embed_summary=False`. Generating summaries live would need an LLM and forfeit the no-key property. Measured by `make demo` instead, from committed fixtures. |
 | Cross-encoder rerank | +2.5 recall@5 | ❌ | Needs a paid NVIDIA endpoint. A benchmark whose headline requires the reader to hold an API key is not a public benchmark. |
-| Noise cleanup | precision, not recall | ❌ | Built with `apply_noise_filter=False` — the corpus *is* the benchmark, and dropping documents would change what is being scored. |
+| Noise cleanup | precision rather than recall | ❌ | Built with `apply_noise_filter=False`. The corpus *is* the benchmark, so dropping documents would change what is being scored. |
 | **Hybrid dense + learned-sparse** | — | ✅ | **+3.1 / +4.4 pp, the number above** |
 
 So the honest summary is:
 
-- **What it proves.** The retrieval floor is soundly built — the learned-sparse leg
-  is worth having, the advantage is statistically real under a paired test, and it
-  *grows* as the corpus gets harder. It also demonstrates that the project's numbers
-  are stated in a falsifiable form: committed fixtures, interval estimates, a paired
-  significance test, declared omissions, measured timings on named hardware.
-- **What it does not prove.** That mailrag beats a generic RAG on email. The
-  headline ladder — 45.6% → 93.3% — rests on the **private** corpus and is not
-  reproducible here. A reader should treat it as author-reported.
+- **What it proves.** The retrieval floor is soundly built. The learned-sparse leg is
+  worth having, the advantage is statistically real under a paired test, and it *grows*
+  as the corpus gets harder. It also shows the project's numbers are stated in a
+  falsifiable form: committed fixtures, interval estimates, a paired significance test,
+  declared omissions, and measured timings on named hardware.
+- **What it does not prove.** That mailrag beats a generic RAG on email. The headline
+  45.6% → 93.3% ladder rests on the **private** corpus and cannot be reproduced here, so
+  a reader should treat it as author-reported.
 
 The excluded levers are measured in the private harness and reported in
 [`EXPERIMENTS.md`](EXPERIMENTS.md). Two of them are no longer excluded everywhere:
