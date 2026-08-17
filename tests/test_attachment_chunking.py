@@ -391,7 +391,7 @@ class TestBuildAttachmentDocumentsChunking(unittest.TestCase):
 
         path = _write_eml(
             os.path.join(self.d, "small.eml"),
-            "<mbo@windriver.com>",
+            "<mb01@northwind.example>",
             "Team\nHere are MBO targets\nLMK",
             [
                 (
