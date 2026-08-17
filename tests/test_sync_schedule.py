@@ -73,9 +73,30 @@ class TestLaunchdPlist(unittest.TestCase):
         self.assertEqual(parsed["StandardOutPath"], "/tmp/sync.log")
         self.assertEqual(parsed["StandardErrorPath"], "/tmp/sync.log")
 
-    def test_does_not_run_at_load(self):
-        """Loading the agent should not kick off an unexpected sync mid-install."""
-        self.assertFalse(plistlib.loads(self._plist().encode("utf-8"))["RunAtLoad"])
+    def test_runs_at_load_so_a_boot_does_not_lose_the_window(self):
+        """A LaunchAgent loads at login, so RunAtLoad is the boot catch-up.
+
+        With this false, the first sync after every restart is one whole interval
+        away — a measured 4 h blind window on 2026-08-17, when a reboot at 11:09
+        left `launchctl print` reporting zero runs at 11:35. The systemd sibling
+        never had this gap (``OnBootSec=5min``), so macOS was the one platform
+        that lost a window on boot.
+
+        The cost is a sync at install time, which is harmless: ``sync`` is
+        one-shot and idempotent over a resumable queue, so the worst case is an
+        idle tick that indexes nothing.
+        """
+        self.assertTrue(plistlib.loads(self._plist().encode("utf-8"))["RunAtLoad"])
+
+    def test_the_unit_always_gates_on_per_account_cadence(self):
+        """Without --due-only the unit ticks every account at the SHORTEST cadence.
+
+        The interval is the minimum across accounts, so a unit missing this flag
+        would sync a 24 h account every 4 h and make `cadence:` in accounts.yaml
+        decorative — the exact class of silent drift this replaced.
+        """
+        parsed = plistlib.loads(self._plist().encode("utf-8"))
+        self.assertIn("--due-only", parsed["ProgramArguments"])
 
     def test_escapes_xml_metacharacters_in_paths(self):
         parsed = plistlib.loads(self._plist(log_path="/tmp/a&b<c>.log").encode("utf-8"))
@@ -107,6 +128,10 @@ class TestSystemdUnits(unittest.TestCase):
     def test_service_waits_for_the_network(self):
         service, _timer = self._units()
         self.assertIn("network-online.target", service)
+
+    def test_the_service_also_gates_on_per_account_cadence(self):
+        service, _timer = self._units()
+        self.assertIn("--due-only", service)
 
 
 class TestInstallHint(unittest.TestCase):

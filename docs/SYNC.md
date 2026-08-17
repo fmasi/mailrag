@@ -190,7 +190,8 @@ holds.
 
 `--status` measures staleness from the last **successful** run, not the last
 attempt, and warns separately when the last run never finished — which on a
-laptop is the normal way a run ends.
+laptop is the normal way a run ends. The full set of warnings lives in
+`src/sync/health.py`; see [What `--status` can and cannot detect](#what---status-can-and-cannot-detect).
 
 ### Judge failures: outage vs poison
 
@@ -238,11 +239,68 @@ advances past it**. One poison message must never wedge a folder forever.
 `mailrag sync` is the portable unit. `--install-agent` writes the platform's
 scheduler unit:
 
-- **macOS** — a launchd LaunchAgent with `StartInterval`. Not cron: cron silently
-  skips a window that passes while the machine is asleep; launchd runs the job on
-  wake. For a laptop that spends nights closed, that's the difference between a
-  fresh index and a stale one.
-- **Linux** — a systemd user timer with `Persistent=true`, which behaves the same way.
+- **macOS** — a launchd LaunchAgent with `StartInterval` **and `RunAtLoad`**. Not
+  cron: cron silently skips a window that passes while the machine is asleep;
+  launchd coalesces it into a single run on wake. `RunAtLoad` covers the gap
+  coalescing does not — a **restart**. A LaunchAgent loads at login, so without it
+  the first sync after every boot is one whole interval away (measured: a reboot
+  at 11:09 left the agent with zero runs at 11:35, next tick due 15:09). The cost
+  is one idle tick at install time, which is nothing.
+- **Linux** — a systemd user timer with `Persistent=true` and `OnBootSec=5min`,
+  which behaves the same way on both counts.
+
+### Per-account cadence
+
+Accounts do not all deserve the same rate. A live mailbox wants a few hours; an
+archive-only mailbox that receives a few dozen messages a month does not. So
+`cadence:` is a **per-account** setting in `accounts.yaml`:
+
+```yaml
+  - id: personal-icloud
+    cadence: 4h      # the live mailbox — sets the pace for the whole schedule
+  - id: personal-gmail
+    cadence: 24h     # archive-only and nearly dormant
+```
+
+One unit serves every account, so it ticks at the **shortest** cadence
+(`unit_interval_seconds` = the minimum), and each account is then gated on its own
+cadence inside the tick by `--due-only`, which every generated unit passes. With
+the pair above the unit fires every 4 h and Gmail sits out five ticks in six.
+
+A not-due account is skipped before any connection or model load, and the skip is
+printed to the log — a skip that left no trace would be indistinguishable from a
+scheduler that had stopped firing.
+
+Three details that matter:
+
+- **`--due-only` is opt-in and only the unit passes it.** A human running
+  `mailrag sync` means *now*; silently skipping an account they asked for would be
+  astonishing.
+- **Due is measured from the last SUCCESS**, matching `--status`. A run of failures
+  must not hold an account off, or a broken account would go quiet rather than
+  retry.
+- **A tick arriving slightly early still counts as due**, within
+  `DUE_GRACE_FRACTION` (10%) of the cadence. launchd fires a 4 h `StartInterval` at
+  4.0–4.3 h, but jitter the other way can measure 3.98 h elapsed; skipping there
+  defers the account a whole tick and silently turns a 4 h cadence into 8 h.
+
+One unit *per* account was the alternative, and is worse here: two processes would
+each load bge-m3 (~2 GB of GPU) and write the same SQLite ledger concurrently.
+
+Before this, `cadence:` was read **only when a single account was targeted** — a
+multi-account install fell back to a hardcoded `43200`, while the unit actually
+running had been hand-edited to `14400`. Config and reality had drifted apart with
+nothing able to reconcile them, so an empty cadence set is now an error rather
+than a silent default.
+
+### What the scheduler deliberately does not do
+
+**A machine asleep with the lid closed and unplugged will not sync, and that is
+intended.** macOS parks launchd timers once the machine enters standby, so no tick
+fires until it genuinely wakes — and waking a laptop on battery to load a model
+onto the GPU is not worth a few hours of index freshness. Expect gaps the length
+of a closed night; they are not a fault, and `--status` is tuned not to cry wolf
+about them.
 
 The most common way this feature fails is a scheduler running mailrag outside its
 conda environment, dying on the first import, silently, for weeks. So pass
@@ -254,14 +312,35 @@ written for the **devcontainer**, where `host.docker.internal` resolves — on t
 host it does not, so a unit relying on it would fail every tick forever while
 reporting the LLM and vector store as unavailable. Override with
 `environment={...}` if your endpoints live elsewhere. The backstop is
-`sync --status`, which warns when the last successful sync was over 48 hours ago.
+`sync --status`.
+
+### What `--status` can and cannot detect
+
+Because a closed, unplugged laptop legitimately produces no runs, **age alone can
+never mean "broken"** — only "stale". A threshold tight enough to catch a broken
+schedule would fire every ordinary night and be trained into noise. So the checks
+in `src/sync/health.py` split by what the evidence actually supports:
+
+| Warning | Trigger | Why it is unambiguous |
+|---|---|---|
+| the last run ended in `'<status>'` | newest run is not `ok` | The schedule is firing and failing. Invisible to an age check, whose newest attempt is always recent. |
+| the last run never finished | newest run still `running` | A tick killed by sleep or shutdown leaves `completed_at` NULL. |
+| no run has EVER completed successfully | no `ok` run on record | The install has never worked at all. |
+| index is stale — last SUCCESSFUL sync was *N*h ago | over **24 h** since the last `ok` | Informational. Longer than a closed night, shorter than a lost day. |
+
+The staleness bound was **48 h** when the interval was 12 h. Against the 4 h
+interval actually installed, that let twelve consecutive missed ticks pass without
+a word — which is how a 20 h outage went unnoticed until someone thought to ask.
+Keep the bound proportionate if you change the interval.
 
 **An idle tick is cheap, so a short interval is affordable.** The embedder is
 passed down as a factory rather than an instance, and is called only once the
 delta is known to be non-empty — so a tick that finds no new mail never loads
 bge-m3 (~2 GB onto the GPU). The factory is also memoised across accounts, so a
-multi-account tick loads the model once, not once per account. Pick the interval
-from how fresh you want the index, not from what a wasted model load costs.
+multi-account tick loads the model once, not once per account. Pick each account's
+`cadence:` from how fresh you want that mailbox, not from what a wasted model load
+costs — and note a not-due account is cheaper still, skipped before it even opens a
+connection.
 
 ## Deletes
 
