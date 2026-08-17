@@ -48,9 +48,7 @@ class TestUnitInterval(unittest.TestCase):
 
 class TestIsDue(unittest.TestCase):
     def test_an_account_that_has_never_succeeded_is_due(self):
-        self.assertTrue(
-            is_due(cadence_seconds=ONE_DAY, last_success_completed_at=None, now=NOW)
-        )
+        self.assertTrue(is_due(cadence_seconds=ONE_DAY, last_success_completed_at=None, now=NOW))
 
     def test_a_long_overdue_account_is_due(self):
         self.assertTrue(

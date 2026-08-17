@@ -777,8 +777,6 @@ def _install_sync_agent(args, accounts):
     return 0
 
 
-
-
 def _configure_sync(p):
     p.add_argument(
         "--accounts", default=None, help="accounts.yaml (default ~/.mailrag/accounts.yaml)"
