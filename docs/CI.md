@@ -1,14 +1,14 @@
 # CI and quality gates
 
-Every pull request runs the checks below. Two of them block a merge; the rest report
-and let you decide. Actions in our workflow files are pinned to commit SHAs. CodeQL is
-the exception, because it runs through GitHub's managed default setup and has no
-workflow file to pin.
+Every pull request runs the checks below. Three of them block a merge; the rest report
+and let you decide. Every action in every workflow is pinned to a commit SHA, with no
+exceptions.
 
 | Gate | Required? | What it enforces | Run locally |
 |------|-----------|------------------|-------------|
 | `pytest` | ✅ required | Full test suite (~1,500 tests) plus a coverage floor of **85%** (currently ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
-| `CodeQL` | ✅ required | Static security analysis, GitHub **default setup** (managed, no workflow file) | (runs on GitHub) |
+| `CodeQL (python)` | ✅ required | Static security analysis of `src/`, `scripts/` and `tests/`, `default` query suite | (runs on GitHub) |
+| `CodeQL (actions)` | ✅ required | Static analysis of the workflow files themselves | (runs on GitHub) |
 | `ruff (lint + format)` | advisory | Import order plus pyflakes/pycodestyle (`E,F,I,W`), and formatting | `ruff check .` and `ruff format --check .` |
 | `mypy (type check)` | advisory | Type-checks all of `src/`, including the bodies of unannotated functions (`check_untyped_defs`), with no per-module opt-outs. Lenient only about third-party imports (`ignore_missing_imports`), and CI runs deps-free so they resolve to `Any` and results stay deterministic | `poetry run mypy src/` |
 | `pip-audit` | advisory | Known CVEs in the locked deps (OSV), with **zero** `--ignore-vuln` entries | `poetry run pip-audit --vulnerability-service osv` |
@@ -21,10 +21,22 @@ most common way to get a red build here.
 ## Where the configuration lives
 
 Lint and type settings sit in `pyproject.toml` under `[tool.ruff]` and `[tool.mypy]`.
-The workflows are in `.github/workflows/`: `ci.yml`, `test-suite.yml`,
-`dependency-review.yml`, `claude.yml` and `claude-code-review.yml`. CodeQL has no file,
-because GitHub's default setup owns it. Most lint and format findings clear with
-`ruff check --fix .` followed by `ruff format .`.
+The workflows are in `.github/workflows/`: `ci.yml`, `test-suite.yml`, `codeql.yml`,
+`dependency-review.yml`, `claude.yml` and `claude-code-review.yml`. Most lint and format
+findings clear with `ruff check --fix .` followed by `ruff format .`.
+
+### Why CodeQL has a workflow file
+
+It used to run through GitHub's managed **default setup**, which had two costs. Its
+actions could not be pinned like everything else here, and it only analysed pull
+requests targeting `main`. That second one quietly breaks **stacked pull requests**: a PR
+based on another branch never receives the required CodeQL status, and nothing you can do
+to that PR will trigger it, so it stays blocked until it is retargeted *and* given a new
+commit.
+
+`codeql.yml` uses an unfiltered `pull_request:` trigger, so every PR is analysed whatever
+it is based on. It runs the same `default` query suite the managed setup ran, so the swap
+changed how CodeQL is invoked rather than which alerts it raises.
 
 ## Supply chain
 
