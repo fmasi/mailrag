@@ -405,7 +405,7 @@ class TestBulkHeaderFiltering(unittest.TestCase):
     def test_bulk_email_from_freemail_domain_is_kept(self):
         # Human mailing-list traffic (Google Groups injects List-Unsubscribe).
         email = _make_email(
-            sender="Augusto <augusto.cezar@gmail.com>",
+            sender="Dana Reyes <d.reyes@gmail.com>",
             subject="Re: [Ubuntu-PE] Gutsy Release",
             is_bulk=True,
         )
@@ -437,10 +437,10 @@ class TestBulkHeaderFiltering(unittest.TestCase):
         self.assertFalse(self.nf.is_noise(email))
 
     def test_bulk_email_with_multilingual_invoice_subject_is_kept(self):
-        # A real utility bill in Portuguese — "Fatura" must be recognised too.
+        # A utility bill in Portuguese: "Fatura" must be recognised too.
         email = _make_email(
-            sender="Iberdrola <clientes@clientesiberdrola.pt>",
-            subject="Iberdrola: Fatura Eletrónica",
+            sender="Energia <clientes@energia.example>",
+            subject="Energia: Fatura Eletrónica",
             is_bulk=True,
         )
         self.assertFalse(self.nf.is_noise(email))
@@ -448,8 +448,8 @@ class TestBulkHeaderFiltering(unittest.TestCase):
     def test_bulk_email_with_marketing_booking_subject_is_still_noise(self):
         # "Finish booking" is an abandoned-cart nudge, not a real booking notice.
         email = _make_email(
-            sender="Tripadvisor <updates@mp1.tripadvisor.com>",
-            subject="Finish booking: Porto Mare Hotel",
+            sender="Travelsite <updates@mp1.travelsite.example>",
+            subject="Finish booking: Seaview Hotel",
             is_bulk=True,
         )
         self.assertTrue(self.nf.is_noise(email))

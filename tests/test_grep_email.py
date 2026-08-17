@@ -72,7 +72,7 @@ def _html_eml(html_body):
 def _attach_eml():
     b64 = base64.b64encode(b"Team Target FY2025 210,000,000").decode("ascii")
     return (
-        "From: eric@windriver.com\r\n"
+        "From: dana@northwind.example\r\n"
         "Subject: Q3 MBO targets partner team.xlsx\r\n"
         "Message-ID: <mbo1>\r\n"
         'Content-Type: multipart/mixed; boundary="BND"\r\n'

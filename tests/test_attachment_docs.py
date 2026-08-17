@@ -33,8 +33,8 @@ def _xlsx_bytes(cells) -> bytes:
 
 def _write_eml(path: str, message_id: str, body: str, attachments) -> str:
     m = EmailMessage()
-    m["From"] = "eric.levander@windriver.com"
-    m["To"] = "fred@windriver.com"
+    m["From"] = "dana.reyes@northwind.example"
+    m["To"] = "sam.okafor@northwind.example"
     m["Subject"] = "Q3 MBO targets partner team.xlsx"
     m["Message-ID"] = message_id
     m.set_content(body)
@@ -70,7 +70,7 @@ class TestBuildAttachmentDocuments(unittest.TestCase):
         )
         path = _write_eml(
             os.path.join(self.d, "mbo.eml"),
-            "<mbo@windriver.com>",
+            "<mb01@northwind.example>",
             "Team\nHere are MBO targets for Q3\nLMK if anything is wrong",
             [
                 (
@@ -89,7 +89,7 @@ class TestBuildAttachmentDocuments(unittest.TestCase):
         # Lineage payload traces the hit back to its email.
         self.assertEqual(doc.metadata["content_kind"], "attachment")
         self.assertEqual(doc.metadata["attachment_name"], "Q3 MBO targets partner team.xlsx")
-        self.assertEqual(doc.metadata["parent_message_id"], "<mbo@windriver.com>")
+        self.assertEqual(doc.metadata["parent_message_id"], "<mb01@northwind.example>")
         self.assertTrue(doc.metadata.get("thread_id"))
 
     def test_csv_attachment_yields_document(self):
@@ -149,7 +149,7 @@ class TestAttachmentMessageKey(unittest.TestCase):
 
         return build_attachment_documents([path], extractor_name="tesseract")
 
-    def _eml(self, message_id="<mbo@windriver.com>"):
+    def _eml(self, message_id="<mb01@northwind.example>"):
         return _write_eml(
             os.path.join(self.d, "a.eml"),
             message_id,

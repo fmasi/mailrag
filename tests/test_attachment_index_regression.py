@@ -70,10 +70,10 @@ def _xlsx_bytes(cells) -> bytes:
 
 def _write_mbo_eml(path: str) -> str:
     m = EmailMessage()
-    m["From"] = "eric.levander@windriver.com"
-    m["To"] = "fred@windriver.com"
+    m["From"] = "dana.reyes@northwind.example"
+    m["To"] = "sam.okafor@northwind.example"
     m["Subject"] = "Q3 MBO targets partner team.xlsx"
-    m["Message-ID"] = "<mbo@windriver.com>"
+    m["Message-ID"] = "<mb01@northwind.example>"
     # Body carries NO number — the whole informational payload is the attachment.
     m.set_content("Team\nHere are MBO targets for Q3\nLMK if anything is wrong")
     m.add_attachment(
@@ -151,7 +151,7 @@ class TestAttachmentIndexingCanary(unittest.TestCase):
         self.assertTrue(attach_payloads, "an attachment-kind point must exist")
         p = attach_payloads[0]
         self.assertEqual(p["attachment_name"], "Q3 MBO targets partner team.xlsx")
-        self.assertEqual(p["parent_message_id"], "<mbo@windriver.com>")
+        self.assertEqual(p["parent_message_id"], "<mb01@northwind.example>")
         self.assertTrue(p.get("thread_id"))
         # The stored text payload keeps the human-readable surface form.
         self.assertIn("210,000,000", p["text"])
