@@ -249,6 +249,50 @@ scheduler unit:
 - **Linux** — a systemd user timer with `Persistent=true` and `OnBootSec=5min`,
   which behaves the same way on both counts.
 
+### Per-account cadence
+
+Accounts do not all deserve the same rate. A live mailbox wants a few hours; an
+archive-only mailbox that receives a few dozen messages a month does not. So
+`cadence:` is a **per-account** setting in `accounts.yaml`:
+
+```yaml
+  - id: personal-icloud
+    cadence: 4h      # the live mailbox — sets the pace for the whole schedule
+  - id: personal-gmail
+    cadence: 24h     # archive-only and nearly dormant
+```
+
+One unit serves every account, so it ticks at the **shortest** cadence
+(`unit_interval_seconds` = the minimum), and each account is then gated on its own
+cadence inside the tick by `--due-only`, which every generated unit passes. With
+the pair above the unit fires every 4 h and Gmail sits out five ticks in six.
+
+A not-due account is skipped before any connection or model load, and the skip is
+printed to the log — a skip that left no trace would be indistinguishable from a
+scheduler that had stopped firing.
+
+Three details that matter:
+
+- **`--due-only` is opt-in and only the unit passes it.** A human running
+  `mailrag sync` means *now*; silently skipping an account they asked for would be
+  astonishing.
+- **Due is measured from the last SUCCESS**, matching `--status`. A run of failures
+  must not hold an account off, or a broken account would go quiet rather than
+  retry.
+- **A tick arriving slightly early still counts as due**, within
+  `DUE_GRACE_FRACTION` (10%) of the cadence. launchd fires a 4 h `StartInterval` at
+  4.0–4.3 h, but jitter the other way can measure 3.98 h elapsed; skipping there
+  defers the account a whole tick and silently turns a 4 h cadence into 8 h.
+
+One unit *per* account was the alternative, and is worse here: two processes would
+each load bge-m3 (~2 GB of GPU) and write the same SQLite ledger concurrently.
+
+Before this, `cadence:` was read **only when a single account was targeted** — a
+multi-account install fell back to a hardcoded `43200`, while the unit actually
+running had been hand-edited to `14400`. Config and reality had drifted apart with
+nothing able to reconcile them, so an empty cadence set is now an error rather
+than a silent default.
+
 ### What the scheduler deliberately does not do
 
 **A machine asleep with the lid closed and unplugged will not sync, and that is
@@ -293,8 +337,10 @@ Keep the bound proportionate if you change the interval.
 passed down as a factory rather than an instance, and is called only once the
 delta is known to be non-empty — so a tick that finds no new mail never loads
 bge-m3 (~2 GB onto the GPU). The factory is also memoised across accounts, so a
-multi-account tick loads the model once, not once per account. Pick the interval
-from how fresh you want the index, not from what a wasted model load costs.
+multi-account tick loads the model once, not once per account. Pick each account's
+`cadence:` from how fresh you want that mailbox, not from what a wasted model load
+costs — and note a not-due account is cheaper still, skipped before it even opens a
+connection.
 
 ## Deletes
 

@@ -22,10 +22,63 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from typing import List, Optional
+from datetime import datetime
+from typing import Iterable, List, Optional
 
 LAUNCHD_LABEL = "eu.fmasi.mailrag.sync"
 SYSTEMD_UNIT = "mailrag-sync"
+
+# How early a tick may arrive and still count as due, as a fraction of the
+# account's cadence. Without it, a strict comparison loses a whole period to
+# jitter: launchd fires a 4 h StartInterval at 4.0–4.3 h, but measured elapsed
+# can land at 3.98 h, and skipping there pushes the account to the NEXT tick —
+# silently turning a 4 h cadence into 8 h. Proportional rather than fixed,
+# because a grace useful at 4 h is meaningless at 24 h.
+DUE_GRACE_FRACTION = 0.1
+
+
+def unit_interval_seconds(cadences: Iterable[int]) -> int:
+    """The tick a single unit must run at to satisfy the SHORTEST cadence.
+
+    One unit serves every account, so it has to tick as often as the keenest one
+    wants; the per-account gate (:func:`is_due`) then holds back the others. One
+    unit *per* account would instead run concurrent processes that each load
+    bge-m3 (~2 GB of GPU) and write the same SQLite ledger.
+
+    Raises on an empty set rather than defaulting. A silent fallback here is what
+    let the installed unit drift away from ``accounts.yaml`` unnoticed.
+    """
+    values = [int(c) for c in cadences if int(c) > 0]
+    if not values:
+        raise ValueError("no account cadences given — cannot choose a scheduler interval")
+    return min(values)
+
+
+def is_due(
+    *,
+    cadence_seconds: int,
+    last_success_completed_at: Optional[str],
+    now: datetime,
+    grace_fraction: float = DUE_GRACE_FRACTION,
+) -> bool:
+    """Has *cadence_seconds* elapsed since this account last succeeded?
+
+    Measured from the last SUCCESS, matching ``--status``: a string of failed
+    attempts must not hold an account off, or a broken account would go quiet
+    instead of retrying.
+
+    **Fails open.** A missing or unparseable timestamp returns True, because the
+    two errors are not symmetric — syncing needlessly costs one idle tick (and an
+    idle tick does not even load the model), while wrongly skipping costs the
+    freshness the schedule exists to provide.
+    """
+    from src.sync.health import staleness_hours  # noqa: PLC0415
+
+    elapsed_hours = staleness_hours(last_success_completed_at, now)
+    if elapsed_hours is None:
+        return True
+    threshold = cadence_seconds * (1 - grace_fraction)
+    return elapsed_hours * 3600.0 >= threshold
 
 
 def _xml_escape(text: str) -> str:
@@ -119,7 +172,17 @@ def render_launchd_plist(
     macOS parks timers in standby, and waking a laptop on battery to do GPU work
     is not worth a few hours of freshness.
     """
-    args = sync_command(repo_root=repo_root, conda_env=conda_env, account=account, model=model)
+    # ``--due-only`` is not optional for a generated unit. The unit ticks at the
+    # SHORTEST cadence across accounts (see unit_interval_seconds), so without the
+    # gate every account would sync at that rate and the per-account ``cadence:``
+    # in accounts.yaml would be silently meaningless.
+    args = sync_command(
+        repo_root=repo_root,
+        conda_env=conda_env,
+        account=account,
+        model=model,
+        extra_args=["--due-only"],
+    )
     program_args = "\n".join(f"        <string>{_xml_escape(a)}</string>" for a in args)
     env = scheduler_environment(environment)
     env_block = "\n".join(
@@ -174,7 +237,17 @@ def render_systemd_units(
     ``Persistent=true`` is the systemd equivalent of launchd's coalescing: a timer
     whose window passed while the machine was off fires once on boot.
     """
-    args = sync_command(repo_root=repo_root, conda_env=conda_env, account=account, model=model)
+    # ``--due-only`` is not optional for a generated unit. The unit ticks at the
+    # SHORTEST cadence across accounts (see unit_interval_seconds), so without the
+    # gate every account would sync at that rate and the per-account ``cadence:``
+    # in accounts.yaml would be silently meaningless.
+    args = sync_command(
+        repo_root=repo_root,
+        conda_env=conda_env,
+        account=account,
+        model=model,
+        extra_args=["--due-only"],
+    )
     exec_start = " ".join(args)
     env_lines = "\n".join(
         f"Environment={k}={v}" for k, v in sorted(scheduler_environment(environment).items())

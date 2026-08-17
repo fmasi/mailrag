@@ -658,6 +658,32 @@ def _cmd_sync(args):
         # no new mail on any account — never loads it at all.
         embedder_factory = functools.cache(lambda: BgeM3Embedder(device="mps", use_fp16=True))
 
+        if args.due_only:
+            # Opt-in, and only the generated scheduler unit passes it: a human
+            # running `mailrag sync` means "now", and silently skipping an account
+            # they asked for would be astonishing. The scheduler is the only
+            # caller that ticks at the SHORTEST cadence and so needs to hold the
+            # slower accounts back.
+            from src.sync.schedule import is_due  # noqa: PLC0415
+
+            now = datetime.now(timezone.utc)
+            due = []
+            for account in accounts:
+                success = state.last_successful_run(account.id)
+                if is_due(
+                    cadence_seconds=account.cadence_seconds(),
+                    last_success_completed_at=success["completed_at"] if success else None,
+                    now=now,
+                ):
+                    due.append(account)
+                else:
+                    # Said out loud, in the log: a skip that leaves no trace is
+                    # indistinguishable from a scheduler that has stopped firing.
+                    print(f"{account.id}: not due (cadence {account.cadence}) — skipping")
+            accounts = due
+            if not accounts:
+                return 0
+
         rc = 0
         for account in accounts:
             profile, factory = None, None
@@ -705,7 +731,12 @@ def _install_sync_agent(args, accounts):
     from src.sync import schedule  # noqa: PLC0415
 
     account = accounts[0] if len(accounts) == 1 else None
-    interval = account.cadence_seconds() if account else 43200
+    # Derived from accounts.yaml, never defaulted. The old `else 43200` applied to
+    # every multi-account install and was invisible: the unit actually running had
+    # been hand-edited to 14400, so config and reality had drifted with nothing to
+    # reconcile them. The unit ticks at the shortest cadence and `--due-only`
+    # holds the slower accounts back.
+    interval = schedule.unit_interval_seconds(a.cadence_seconds() for a in accounts)
     repo_root = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     log_path = os.path.expanduser(args.log or "~/.mailrag/sync.log")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -764,6 +795,12 @@ def _configure_sync(p):
         "--fetch-only",
         action="store_true",
         help="spool new mail but skip judging and indexing (no LLM, no Qdrant)",
+    )
+    p.add_argument(
+        "--due-only",
+        action="store_true",
+        help="skip accounts whose 'cadence:' has not elapsed since their last successful "
+        "run (what the generated scheduler unit passes; a manual run means 'now')",
     )
     p.add_argument("--model", default=None, help="LLM model for the summarize/judge pass")
     p.add_argument("--workers", type=int, default=1)

@@ -88,6 +88,16 @@ class TestLaunchdPlist(unittest.TestCase):
         """
         self.assertTrue(plistlib.loads(self._plist().encode("utf-8"))["RunAtLoad"])
 
+    def test_the_unit_always_gates_on_per_account_cadence(self):
+        """Without --due-only the unit ticks every account at the SHORTEST cadence.
+
+        The interval is the minimum across accounts, so a unit missing this flag
+        would sync a 24 h account every 4 h and make `cadence:` in accounts.yaml
+        decorative — the exact class of silent drift this replaced.
+        """
+        parsed = plistlib.loads(self._plist().encode("utf-8"))
+        self.assertIn("--due-only", parsed["ProgramArguments"])
+
     def test_escapes_xml_metacharacters_in_paths(self):
         parsed = plistlib.loads(self._plist(log_path="/tmp/a&b<c>.log").encode("utf-8"))
         self.assertEqual(parsed["StandardOutPath"], "/tmp/a&b<c>.log")
@@ -118,6 +128,10 @@ class TestSystemdUnits(unittest.TestCase):
     def test_service_waits_for_the_network(self):
         service, _timer = self._units()
         self.assertIn("network-online.target", service)
+
+    def test_the_service_also_gates_on_per_account_cadence(self):
+        service, _timer = self._units()
+        self.assertIn("--due-only", service)
 
 
 class TestInstallHint(unittest.TestCase):
