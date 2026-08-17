@@ -183,10 +183,61 @@ So the honest summary is:
   reproducible here. A reader should treat it as author-reported.
 
 The excluded levers are measured in the private harness and reported in
-[`EXPERIMENTS.md`](EXPERIMENTS.md). Closing this gap is tracked as a follow-up:
-joining Enron-QA's questions to the **full public Enron maildir** (whose messages do
-carry `Message-ID` / `In-Reply-To` / `References` headers) would make thread
-reconstruction publicly measurable for the first time.
+[`EXPERIMENTS.md`](EXPERIMENTS.md). Two of them are no longer excluded everywhere:
+`make demo` now measures both contextual summaries and thread reconstruction on public
+data, which is the subject of the next section.
+
+## The other public number: `make demo`
+
+`make bench` scores the retrieval layer. `make demo` answers a different question, on a
+different corpus, and the two are easy to confuse.
+
+The demo builds **two** indexes over the same 1,200 public Enron emails. One embeds each
+message as it stands. The other embeds it together with a short summary of what came
+before it in its conversation. Same embedder, same questions, no API key, and everything
+it needs is committed under [`eval/demo/`](../eval/demo/).
+
+Then it asks two question sets, because findability and completeness are not the same
+property.
+
+**99 single-message questions**, each generated to be answerable from one specific
+message and vetted by a separate validator:
+
+| index | R@1 | R@5 | R@10 |
+|---|---|---|---|
+| plain | 37.4% | 60.6% | 74.7% |
+| with thread context | **50.5%** | **73.7%** | **80.8%** |
+
+Both arms answer identical queries, so the paired test is the one that matters. At R@5
+context fixes 16 questions and breaks 3, McNemar exact **p = 0.0044**.
+
+**73 spanning questions**, whose answers genuinely need several messages. This is the
+case a single-message benchmark cannot see at all:
+
+| measurement | result |
+|---|---|
+| the right conversation is found | **T@1 91.8%** · **T@5 97.3%** |
+| how much of it the top-5 *messages* give you | **52.6%** |
+| how much thread expansion gives you | **100%**, whenever the thread is found |
+
+That 52.6% is the number worth sitting with. A generic RAG hands you half the
+conversation, and it tends to be the half the answer is missing from.
+
+**Caveats, since they matter here.** Enron carries no `In-Reply-To` headers at all, so
+conversations are derived from normalised subject plus shared participants, and the
+measured false-merge rate for that derivation is row S4 in [`CLAIMS.md`](CLAIMS.md).
+Reranking and noise cleanup are not measured by the demo either. Absolute figures move
+about 3pp between runs because Qdrant rebuilds its HNSW graph each time, so read the
+direction and the significance rather than the third digit.
+
+Runtime is under two minutes on an Apple-silicon GPU. Expect roughly 15 on CPU, at the
+same 9x penalty measured for `make bench` below.
+
+**What remains private.** Thread reconstruction and contextual summaries are now both
+publicly demonstrated, on a corpus anyone can download. What is still author-reported is
+their **magnitude on a real mailbox**, where 32,000 emails is a harder target than 1,200,
+plus two levers that cannot be made public: reranking needs a paid endpoint, and the TREC
+comparison needs data that cannot be redistributed.
 
 ## How reproducibility is pinned
 

@@ -807,6 +807,60 @@ mail left the machine.
 
 ---
 
+## 15. Three things the measurement turned up (2026-08)
+
+Grouped here because they came out of the same push to make the private results checkable
+by a stranger, and because none of them is what we went looking for.
+
+### 15.1 Public Enron has no threading headers, and it barely matters
+
+Across 19,530 real messages from the CMU maildir, `In-Reply-To` and `References` appear on
+**0.0%** of them. Not "rarely". Zero.
+
+The corpus is still threadable. 64.3% of those messages are replies or forwards by subject,
+and deriving conversations from a normalised subject plus shared participants recovers
+**50.2% of messages into multi-message threads**, the largest running to 59 messages. So a
+header-less corpus is not an unthreadable corpus; you reconstruct instead of reading.
+
+The derivation buys that recall at a measured price, and row S4 in [`CLAIMS.md`](CLAIMS.md)
+carries the breakdown: 2.2% of same-thread pairs share no participant at all, 11.1% of
+threads span more than 30 days, and 1.4% span over a year. Generic subjects are where it
+goes wrong. A "happy hour" thread of 36 messages across 391 days and 16 people is a
+recurring invitation rather than a conversation. Mail with real threading headers, meaning
+any live IMAP account, avoids the whole problem.
+
+### 15.2 One published claim did not survive re-running
+
+Re-measuring the reranker on 2026-08-13 found it **neutral or positive on recall in every
+category**, which contradicted a line these docs had been carrying about it demoting
+thread-spanning answers.
+
+| category | n | E@5 hybrid → +rerank | E@1 |
+|---|---|---|---|
+| content | 144 | 60.4 → 67.4 (**+7.0**) | +1.4 |
+| terse | 144 | 58.3 → 57.6 (−0.7, one query) | +8.3 |
+| spanning | 72 | 70.8 → **70.8** (0.0) | +6.9 |
+
+The cause was a conflation. The demotion is a real finding from the §9 **LLM-judged
+answer-quality** eval, where rerank hurt every category, and it had been restated next to a
+**recall** figure until the two read as one measurement. Different metric, different run.
+Rerank stays off by default on the answer-quality result, which still stands.
+
+Marked ⚠️ as row R6b in the register, corrected across all four surfaces that published it
+on 2026-08-17, tracked in [#128](https://github.com/fmasi/mailrag/issues/128).
+
+### 15.3 Fetching a thread by its own ID used to work a quarter of the time
+
+Resolving a known `thread_id` was going through vector search, and vector search finds its
+own document about 25% of the time. It is now an exact key lookup, which is what it should
+always have been ([#109](https://github.com/fmasi/mailrag/issues/109)).
+
+Worth recording as an eval-design lesson rather than a bug report: every retrieval number in
+this file was measured through the search path, so nothing here was wrong. The defect lived
+in an API the eval never exercised, which is exactly where defects survive.
+
+---
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research

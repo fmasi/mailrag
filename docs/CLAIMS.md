@@ -86,6 +86,23 @@ is unblocked — it just needs the build step first.
 | S3 | The **CMU Enron maildir** has no threading headers either — but conversations are derivable | 8 000 real messages: `In-Reply-To` 0.0%, `References` 0.0%, yet `Re:`/`Fw:` subjects 64.3%. Deriving by normalised subject + shared participant puts **50.2%** of 19 530 messages in a multi-message thread (largest 59). Measured 2026-08-14 |
 | S4 | Derived threads carry a **measured false-merge rate**, concentrated in generic subjects and long spans | 19 530 Enron messages: 2.2% of same-thread pairs share **no** participant (transitive chaining, 1.0% of threads); 11.1% of threads span >30d and **1.4% span >1 year**; generic subjects ("hey", "lunch", "meeting") account for 55 threads / 2.3% of threaded messages. Worst case observed: "happy hour", 36 messages over 391 days across 16 participants — a recurring invite, not a conversation. Measured 2026-08-14 |
 
+## What is still author-reported, and what would close it
+
+Both of the ladder's biggest levers are now publicly demonstrated. Contextual embedding
+(R2b) and thread reconstruction (R2c) both run inside `make demo`, on 1,200 public Enron
+emails anyone can download, with a paired significance test on each.
+
+What stays author-reported is the **magnitude on a real mailbox**. A 32,000-email archive
+is a harder target than 1,200 emails, and the private ladder's 45.6 → 93.3 cannot be
+re-run by a stranger. R3, R4, R5 and R8 all sit there.
+
+Two levers cannot be made public at all as things stand. Reranking (R6a) needs a paid
+endpoint, and a benchmark whose headline requires the reader to hold an API key is not a
+public benchmark. The TREC contrast (R7) needs a corpus that cannot be redistributed.
+
+The gap that could realistically close next is R7, which is unblocked but needs its
+collections rebuilt before it can be re-measured.
+
 ## Re-verification policy
 
 A full private re-run costs GPU hours and LLM calls, so this is **not** per-commit.

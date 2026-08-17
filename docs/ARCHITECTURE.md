@@ -293,6 +293,25 @@ See [MCP_SERVER.md](MCP_SERVER.md).
 | `src/cluster/` | Embedding-space noise-pocket discovery |
 | `src/eval/` | Retrieval/answer evaluation harness (dev-only) |
 | `src/config/` | Qdrant client seam, secrets; plus the legacy `RAGConfig` |
+| `scripts/` | Build, index, eval and maintenance utilities (including `scripts/eval/`) |
+| `tests/` | The test suite (pytest, ~1,500 tests) |
+| `docs/` | This map, the guides, the claims register and the eval write-ups |
+
+### Where the drop decision happens
+
+The `tag` step only *tags* by default, so nothing is thrown away before the LLM has seen
+it. The confident drop happens at `summarize`, the LLM pass. Which of the two you drop at
+is a deliberate budget-versus-quality knob: drop at `tag` and you skip the LLM cost
+entirely, drop at `summarize` and you get the cleaner index. The eval labels in
+[`EXPERIMENTS.md`](EXPERIMENTS.md) map onto these as **Pass-1 = `tag`** and
+**Pass-2 = `summarize`**.
+
+Between the two sits an optional triage that spends no LLM budget at all. `./mailrag scan`
+clusters the corpus embeddings at thread level and ranks the densest noise pockets, meaning
+bulk and automated mail, by `tag` enrichment, sender concentration and tightness. It reuses
+the already-embedded vectors when a collection exists and embeds once when it doesn't, then
+writes a JSON artifact mapping threads to `.eml` paths. The point is to see where the noise
+concentrates before deciding how much of the `summarize` pass to pay for.
 
 ## Design decisions, in one place
 
