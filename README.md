@@ -238,9 +238,11 @@ and pip-audit as advisory ones. Details in [`docs/CI.md`](docs/CI.md).
 ## Status
 
 Three pillars make mailrag usable as one node in a private context stack, and all have shipped:
-the **MCP server** ([#67](https://github.com/fmasi/mailrag/pull/67)), **live ingestion** via
-`./mailrag sync` ([#101](https://github.com/fmasi/mailrag/issues/101)), and the **guided TUI**
-([#36](https://github.com/fmasi/mailrag/issues/36)).
+the **MCP server** ([#67](https://github.com/fmasi/mailrag/pull/67),
+[#74](https://github.com/fmasi/mailrag/pull/74)), **live ingestion** via `./mailrag sync`
+([#101](https://github.com/fmasi/mailrag/issues/101)), and the **guided TUI** in
+[Textual](https://textual.textualize.io/) ([#36](https://github.com/fmasi/mailrag/issues/36)),
+with the old prompt flow still reachable as `--classic`.
 
 ![The mailrag wizard persona picker, a cost-ordered persona list on the left and a live preview of the highlighted recipe with colour-coded cost badges on the right](docs/images/tui/persona.svg)
 
