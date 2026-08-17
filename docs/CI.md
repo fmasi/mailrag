@@ -59,3 +59,5 @@ poetry run python -m pytest tests/ -q
 
 Documentation-only changes skip the test steps. See the project `CLAUDE.md` for what
 counts as documentation-only.
+
+<!-- stacked-PR verification: base layer -->
