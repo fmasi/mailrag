@@ -1,23 +1,22 @@
 # Why this runs on your own hardware
 
-The first time I pointed a cloud AI at my inbox it felt like a superpower. Then I
-thought about what it had actually required: handing my entire email history to
-someone else's servers to make it searchable. For contracts, receipts, and the record
-of who agreed to what, that is a bad trade at any level of vendor trust.
+The first time I pointed cloud AI at my inbox it felt like a superpower — until I
+thought about what it actually required: handing my entire email history to someone
+else's servers to make it searchable. For real correspondence — contracts, receipts,
+the record of who agreed to what — that's a non-starter.
 
-So mailrag was built the other way round. Open models, your machine, your disk, and
-nothing that has to leave your network.
+So I built the opposite. Open models, your machine, your disk, and nothing that has to
+leave your network.
 
 ## How sensitive is email? Look at what's public
 
-Here is the argument I find most persuasive, and it comes from the data rather than from
-principle.
+Interestingly enough, the data backs the instinct up.
 
 As far as I have been able to establish, nobody has ever published their own private
-mailbox. Every public email corpus of any size exists because someone **lost control**
-of one. Enron came out of a federal investigation. The Avocado collection came out of a
-company's liquidation. The FOIA sets came out of public-records law, and the assorted
-political archives came out of leaks.
+mailbox. Every email corpus available for training or evaluation exists because someone
+**lost control** of one. Enron came out of a federal investigation. The Avocado
+collection came out of a company's liquidation. The FOIA sets came out of public-records
+law, and the assorted political archives came out of leaks.
 
 There are consented exceptions, and they prove the point. Mailing lists like Apache,
 LKML and W3C are public by design. They are also nothing like private correspondence:

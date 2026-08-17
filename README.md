@@ -9,19 +9,19 @@
 
 ## Why this exists
 
-The first time I pointed a cloud AI at my inbox it felt like a superpower. Then I worked out
-what it had actually required: handing my entire email history to someone else's servers to
-make it searchable. For contracts, receipts, and the record of who agreed to what, that is a
-bad trade at any level of vendor trust.
+The first time I pointed cloud AI at my inbox it felt like a superpower — until I thought about
+what it actually required: handing my entire email history to someone else's servers to make it
+searchable. For real correspondence — contracts, receipts, the record of who agreed to what —
+that's a non-starter.
 
-So mailrag works the other way round. Open models, your machine, your disk, no mailbox upload,
-and no vendor holding the whole archive.
+So I built the opposite. mailrag runs on your own hardware, on open models, with nothing
+required to leave your network. No mailbox upload, no vendor to trust with the whole archive.
 
-The part that convinced me came from the data. Nobody has ever published their own private
-mailbox. Every public email corpus of any size exists because someone lost control of one,
-which is why a dataset from **2001** is still the field standard twenty-five years later.
-[`docs/WHY_LOCAL.md`](docs/WHY_LOCAL.md) sets that out in full, including what running locally
-costs you.
+Interestingly enough, the lack of public mailbox data seems to back that up. Nobody has ever
+published their own private mailbox, so every email corpus available for training or evaluation
+exists because someone *lost control* of one. That is why a dataset from **2001** is still the
+field standard twenty-five years later. [`docs/WHY_LOCAL.md`](docs/WHY_LOCAL.md) sets it out in
+full, including what running locally costs you.
 
 ## The idea: a conversation is the unit of truth
 
