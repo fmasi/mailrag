@@ -61,3 +61,4 @@ Documentation-only changes skip the test steps. See the project `CLAUDE.md` for 
 counts as documentation-only.
 
 <!-- stacked-PR verification: base layer -->
+<!-- stacked-PR verification: child layer -->
