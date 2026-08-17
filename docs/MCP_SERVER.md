@@ -137,8 +137,8 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
 // grep_email("210,000,000")
 [
   { "subject": "Global Partnership Staff call recap",
-    "from": "Eric.Levander@windriver.com", "to": "team@windriver.com",
-    "date": "Wed, 30 Jul 2025 …", "message_id": "<abc@windriver.com>",
+    "from": "Dana.Reyes@northwind.example", "to": "team@northwind.example",
+    "date": "Wed, 30 Jul 2025 …", "message_id": "<a1b2c3@northwind.example>",
     "attachment_names": ["Q3 MBO targets partner team.xlsx"],
     "matches": ["…20% of the $210 million annual plan…"],
     "path": "/Users/you/rag_eml/Inbox/Wind River/… .eml" }
