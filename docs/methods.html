@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>mailrag — methods and findings</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%230e7490'/%3E%3Ctext%20x='32'%20y='46'%20font-family='monospace'%20font-size='40'%20fill='%23fff'%20text-anchor='middle'%3Em%3C/text%3E%3C/svg%3E">
+<meta name="description" content="How the mailrag retrieval numbers were measured: evaluation design, confound controls, threading without headers, what replicates on public data, negative results, and one published claim that was withdrawn.">
+<style>
+  :root{
+    /* light — the family's warm cream paper */
+    --bg:#fbfaf7; --panel:#ffffff; --ink:#1a1f29; --muted:#5b6573;
+    --line:#e8e3d7; --rule:#d8d1c0; --accent:#0e7490; --accent2:#0891b2;
+    --ok:#0a7f4e; --warn:#9a5b12; --dead:#8a8375;
+    --ok-bg:#eef7f2; --warn-bg:#fbf4e9; --dead-bg:#f2f0eb;
+    --code-bg:#f3efe6;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+    --serif:ui-serif,"Iowan Old Style",Georgia,"Palatino Linotype",serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0a0e14; --panel:#11161f; --ink:#e6edf3; --muted:#8b97a7;
+      --line:#1f2733; --rule:#2a3542; --accent:#4cc9f0; --accent2:#80ffea;
+      --ok:#3ddc97; --warn:#f3b65a; --dead:#7c8794;
+      --ok-bg:#0f1d18; --warn-bg:#231b0f; --dead-bg:#151a22;
+      --code-bg:#0d1320;
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} }
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.62;
+       font-size:16.5px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 22px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+
+  /* ---------- masthead ---------- */
+  header{padding:70px 0 34px}
+  .crumb{font-family:var(--mono);font-size:12.5px;letter-spacing:.1em;color:var(--muted);text-transform:lowercase}
+  .crumb a{color:var(--accent2)}
+  h1{font-family:var(--serif);font-weight:600;font-size:clamp(30px,4.6vw,45px);line-height:1.14;
+     letter-spacing:-.015em;margin:16px 0 14px;max-width:17ch}
+  .standfirst{font-size:19px;color:var(--muted);max-width:62ch;margin:0}
+
+  /* ---------- the specimen: one claim with its whole chain ---------- */
+  .specimen{margin:34px 0 6px;border:1px solid var(--line);border-radius:14px;background:var(--panel);
+            overflow:hidden}
+  .specimen .head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;
+                  padding:12px 18px;border-bottom:1px solid var(--line);background:var(--code-bg)}
+  .specimen .claim{padding:20px 18px 6px;font-family:var(--serif);font-size:22px;line-height:1.35}
+  .specimen dl{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;margin:0;padding:12px 18px 20px;
+               font-family:var(--mono);font-size:12.8px}
+  .specimen dt{color:var(--muted);letter-spacing:.06em;text-transform:uppercase;font-size:11px;padding-top:4px}
+  .specimen dd{margin:0;padding-top:3px;color:var(--ink);word-break:break-word}
+  .caption{font-size:14px;color:var(--muted);margin:12px 0 0;max-width:64ch}
+
+  /* ---------- status chips: the page's organising device ---------- */
+  .chip{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+        border-radius:999px;padding:3px 9px;border:1px solid var(--line);white-space:nowrap;
+        display:inline-block;line-height:1.5}
+  .chip.pub{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+  .chip.priv{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
+  .chip.gone{color:var(--dead);background:var(--dead-bg)}
+  .chip.id{color:var(--muted);background:transparent;font-weight:600}
+
+  .legend{display:flex;flex-wrap:wrap;gap:16px 26px;margin:26px 0 0;padding:16px 18px;
+          border:1px dashed var(--rule);border-radius:12px}
+  .legend div{font-size:13.5px;color:var(--muted);max-width:27ch}
+  .legend .chip{display:block;width:fit-content;margin-bottom:7px}
+
+  /* ---------- sections: index column + prose column ---------- */
+  section{border-top:1px solid var(--line);padding:36px 0 8px;
+          display:grid;grid-template-columns:172px 1fr;gap:30px}
+  .idx{position:sticky;top:24px;align-self:start}
+  .idx .n{font-family:var(--mono);font-size:12px;color:var(--accent2);letter-spacing:.14em}
+  .idx h2{font-family:var(--serif);font-size:19px;font-weight:600;margin:6px 0 12px;line-height:1.25}
+  .idx .chips{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+  .body p{margin:0 0 15px;max-width:68ch}
+  .body p:last-child{margin-bottom:16px}
+  .body h3{font-family:var(--sans);font-size:15px;margin:22px 0 8px;letter-spacing:.01em}
+  .lede{font-size:18px}
+
+  table{width:100%;border-collapse:collapse;font-size:14.5px;margin:6px 0 18px;display:block;overflow-x:auto}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em}
+  td.n{font-family:var(--mono)}
+  td .up{color:var(--ok)} td .flat{color:var(--muted)}
+  code{font-family:var(--mono);background:var(--code-bg);border:1px solid var(--line);
+       border-radius:5px;padding:1px 5px;font-size:13px}
+
+  .retraction{border-left:3px solid var(--warn);background:var(--warn-bg);border-radius:0 10px 10px 0;
+              padding:14px 18px;margin:4px 0 18px}
+  .retraction .was{color:var(--muted);text-decoration:line-through;font-size:15px;margin:0 0 8px;
+                   text-decoration-thickness:1px}
+  .retraction .now{margin:0;font-size:15.5px}
+
+  footer{border-top:1px solid var(--line);margin-top:34px;padding:30px 0 70px;color:var(--muted);font-size:14.5px}
+
+  @media (max-width:760px){
+    section{grid-template-columns:1fr;gap:14px}
+    .idx{position:static}
+    .idx .chips{flex-direction:row;flex-wrap:wrap}
+    .specimen dl{grid-template-columns:1fr;gap:0}
+    .specimen dt{padding-top:10px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="crumb"><a href="index.html">mailrag</a> / methods</div>
+    <h1>How these numbers were measured</h1>
+    <p class="standfirst">A retrieval result is only as good as the question set behind it. This page
+       carries the evaluation design, the confounds that were controlled for, the results that a
+       stranger can reproduce, the ones that stay author-reported, and one claim that did not survive
+       being re-run.</p>
+
+    <div class="specimen">
+      <div class="head">
+        <span class="chip id">R2b</span>
+        <span class="chip pub">reproducible</span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">one claim, with everything attached to it</span>
+      </div>
+      <p class="claim">Embedding each email alongside its conversation's preceding context lifts
+         recall@5 from <b>60.6%</b> to <b>73.7%</b>.</p>
+      <dl>
+        <dt>produced by</dt><dd>scripts/demo.py</dd>
+        <dt>corpus</dt><dd>public Enron, 1,200 messages, 99 validated questions</dd>
+        <dt>test</dt><dd>paired, identical queries both arms. Fixes 16, breaks 3. McNemar exact p = 0.0044</dd>
+        <dt>run it</dt><dd>make demo &nbsp;<span style="color:var(--muted)">(no API key, no private data)</span></dd>
+        <dt>last verified</dt><dd>2026-08-14</dd>
+      </dl>
+    </div>
+    <p class="caption">Every figure on this page carries the same chain, recorded in the
+       <a href="https://github.com/fmasi/mailrag/blob/main/docs/CLAIMS.md">claims register</a>. The
+       identifiers in the left margin below (R4, S3, and so on) are that register's row IDs, so
+       anything here can be looked up against what produced it.</p>
+
+    <div class="legend">
+      <div><span class="chip pub">reproducible</span>Anyone can re-run it. No key, no private data.</div>
+      <div><span class="chip priv">author-reported</span>Measured on a private mailbox or behind a paid endpoint. Take my word for it, or don't.</div>
+      <div><span class="chip gone">withdrawn</span>Published, then contradicted by a re-run. Kept visible on purpose.</div>
+    </div>
+  </header>
+
+  <section>
+    <div class="idx">
+      <div class="n">01</div>
+      <h2>Why email is the hard case</h2>
+    </div>
+    <div class="body">
+      <p class="lede">As far as I have been able to establish, nobody has ever published their own
+         private mailbox.</p>
+      <p>Every email corpus available for training or evaluation exists because someone lost control of
+         one. Enron came from a federal investigation, the Avocado collection from a company's
+         liquidation, the FOIA sets from public-records law, the political archives from leaks. The
+         consented exceptions are mailing lists, which are public by design and nothing like private
+         correspondence: no terse replies, no context you had to be in the room for.</p>
+      <p>That is why a dataset from 2001 is still the field standard twenty-five years later, and it
+         has a direct consequence for method. Retrieval techniques for email get validated on a
+         corpus of internal energy-trading mail from a quarter of a century ago, or on somebody's
+         private archive that no reviewer can see. This project does both, and tries to be exact
+         about which claim came from which.</p>
+      <p>If you know of a corpus I have missed, please
+         <a href="https://github.com/fmasi/mailrag/issues">open an issue</a>. I would like to be wrong
+         about this.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="idx">
+      <div class="n">02</div>
+      <h2>Evaluation design</h2>
+      <div class="chips"><span class="chip priv">author-reported</span></div>
+    </div>
+    <div class="body">
+      <p>The private ladder is scored on <b>360 questions</b> against a ~32,000-email work archive,
+         split three ways because the failure modes are different:</p>
+      <table>
+        <tr><th>category</th><th>n</th><th>what it tests</th></tr>
+        <tr><td>content</td><td class="n">144</td><td>the answer sits in one message with enough words to match on</td></tr>
+        <tr><td>terse</td><td class="n">144</td><td>the answering message is short and nearly contentless on its own</td></tr>
+        <tr><td>spanning</td><td class="n">72</td><td>the answer genuinely needs several messages</td></tr>
+      </table>
+      <p>Each question was generated from a known email, so the recall ladder scores against
+         <b>hard gold labels with no LLM judge anywhere in the loop</b>. Generating a question from
+         its own answer risks circularity, where the question simply echoes the target's rare tokens,
+         so questions come from body content under a rule banning metadata questions, followed by a
+         validation pass.</p>
+      <p>The load-bearing guard against that circularity is external rather than procedural. The
+         same ordering of arms holds on public Enron-QA, whose questions were written by someone else
+         entirely, and on TREC Legal's real human relevance judgments. A generator cannot flatter
+         itself across three corpora it did not write.</p>
+      <h3>Where a judge is used, and how far it is trusted</h3>
+      <p>Answer quality is a separate lens and it does use a local LLM judge, calibrated against a
+         stronger reference model on 514 pooled pairs: Cohen's κ = <b>0.52</b> on the 0–3 scale,
+         Spearman 0.74. That is moderate agreement, not good agreement. The reason it is usable is
+         narrower than the correlation: both pre-registered decisions came out identical under both
+         judges. A judge that agrees on the decision you are about to make is worth more than a judge
+         with a flattering κ.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="idx">
+      <div class="n">03</div>
+      <h2>Confounds that were caught</h2>
+      <div class="chips">
+        <span class="chip id">R8</span>
+        <span class="chip priv">author-reported</span>
+      </div>
+    </div>
+    <div class="body">
+      <p>Two results changed materially once a control was run properly. Both are in the repo because
+         they are the more useful half of the story.</p>
+      <h3>A quantization artifact worth 3 points</h3>
+      <p>An early headline put contextual summaries at <b>+6pp</b>. The control collection had been
+         built with a summarizer at a different quantization from the treatment, so the comparison
+         was measuring two things at once. Re-running the control at matched precision split it
+         cleanly: <b>+3pp from quantization, +3pp from the method</b>. Holding the summarizer fixed is
+         the difference between a result and a mirage.</p>
+      <h3>A cross-dataset confound in the sparse number</h3>
+      <p>Learned-sparse looked worth +4.8 R@5 on the private corpus and only +2.5 on public Enron,
+         which is a suspicious gap for the same technique. The private collections carried embedded
+         summaries and the public ones did not, so sparse was being credited with part of the
+         summary's work. Building a body-only private control brought it to <b>+3.3</b>, in line with
+         the public figure. The headline result survived the correction, which is the only reason it
+         is still quoted.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="idx">
+      <div class="n">04</div>
+      <h2>Threading without headers</h2>
+      <div class="chips">
+        <span class="chip id">S3</span><span class="chip id">S4</span>
+        <span class="chip pub">reproducible</span>
+      </div>
+    </div>
+    <div class="body">
+      <p>The whole system treats the conversation as the unit of truth, which assumes conversations
+         can be recovered. On the standard public corpus they cannot be read off the headers at all.</p>
+      <p>Across <b>19,530</b> messages of the CMU Enron maildir, <code>In-Reply-To</code> and
+         <code>References</code> appear on <b>0.0%</b>. Not rarely. Zero. Yet 64.3% of messages are
+         replies or forwards by subject, and deriving conversations from a normalised subject plus
+         shared participants recovers <b>50.2% of messages into multi-message threads</b>, the largest
+         running to 59 messages.</p>
+      <p>That recall is bought at a price, and the price is measurable rather than hypothetical:</p>
+      <table>
+        <tr><th>failure mode</th><th>rate</th></tr>
+        <tr><td>same-thread pairs sharing no participant (transitive chaining)</td><td class="n">2.2%</td></tr>
+        <tr><td>threads spanning more than 30 days</td><td class="n">11.1%</td></tr>
+        <tr><td>threads spanning more than a year</td><td class="n">1.4%</td></tr>
+        <tr><td>threaded messages under generic subjects</td><td class="n">2.3%</td></tr>
+      </table>
+      <p>The worst case observed is a "happy hour" thread: 36 messages over 391 days across 16
+         participants, which is a recurring invitation rather than a conversation. Mail carrying real
+         threading headers, meaning any live IMAP account, avoids the problem entirely. Reporting the
+         derived-threading error rate matters because every thread-level number on public data
+         inherits it.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="idx">
+      <div class="n">05</div>
+      <h2>What replicates in public</h2>
+      <div class="chips">
+        <span class="chip id">R1</span><span class="chip id">R2b</span><span class="chip id">R2c</span>
+        <span class="chip pub">reproducible</span>
+      </div>
+    </div>
+    <div class="body">
+      <p>Two of the ladder's levers can now be checked by a stranger on 1,200 public Enron emails
+         with no API key. Both report a paired test, because both arms answer identical queries and
+         the unpaired intervals overlap.</p>
+      <h3>Contextual embedding, 99 single-message questions</h3>
+      <table>
+        <tr><th>index</th><th>R@1</th><th>R@5</th><th>R@10</th></tr>
+        <tr><td>plain</td><td class="n">37.4%</td><td class="n">60.6%</td><td class="n">74.7%</td></tr>
+        <tr><td><b>with thread context</b></td><td class="n"><b>50.5%</b></td><td class="n"><b>73.7%</b></td><td class="n"><b>80.8%</b></td></tr>
+      </table>
+      <h3>Thread reconstruction, 73 spanning questions</h3>
+      <p>The right conversation is found <b>97.3%</b> of the time at top-5. The top-5 <i>messages</i>
+         give you <b>52.6%</b> of that conversation, and expanding to the thread gives you all of it.
+         The gap between those two numbers is the argument for the whole design, and a single-message
+         benchmark cannot see it.</p>
+      <h3>The retrieval layer, 360 Enron-QA queries</h3>
+      <p>Dense scores 94.4 R@5 [91.6, 96.4] against 97.5 [95.3, 98.7] for dense plus learned-sparse.
+         Paired: 12 fixed, 1 broken, McNemar exact p = 0.0034. Widening the distractor pool fivefold
+         makes the task harder and the sparse advantage <i>larger</i>, at +4.4pp (p = 0.0001).
+         Direction under increasing difficulty is a more durable claim than a point estimate.</p>
+      <p>What none of this reproduces is <b>magnitude on a real mailbox</b>. A 32,000-email archive is
+         a harder target than 1,200 messages, and the 45.6 → 93.3 ladder stays author-reported.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="idx">
+      <div class="n">06</div>
+      <h2>The winner flips with the task</h2>
+      <div class="chips">
+        <span class="chip id">R7</span>
+        <span class="chip priv">author-reported</span>
+        <span class="chip gone">low power</span>
+      </div>
+    </div>
+    <div class="body">
+      <p>Running the same two stacks on legal e-discovery reverses the ranking. On three TREC Legal
+         topics with real human relevance judgments, a general-purpose dense-plus-rerank stack wins,
+         and the learned-sparse hybrid that leads on email trails it.</p>
+      <table>
+        <tr><th>arm</th><th>P@10</th></tr>
+        <tr><td>general-purpose dense + rerank</td><td class="n"><b>0.500</b></td></tr>
+        <tr><td>general-purpose dense</td><td class="n">0.367</td></tr>
+        <tr><td>bge-m3 hybrid + rerank</td><td class="n">0.300</td></tr>
+        <tr><td>bge-m3 hybrid</td><td class="n">0.200</td></tr>
+      </table>
+      <p>The obvious objection is the correct one, so it goes first: that stack is built and tuned for
+         general-purpose retrieval, and it is very good at it. E-discovery asks broad topical questions
+         with many relevant documents, which is what reranking is for. Email asks pinpoint questions
+         with specific terms, which is what learned-sparse is for. The finding is that specialising
+         for a task beats general-purpose on that task, and email is a task worth specialising for.</p>
+      <p>Three topics is low statistical power, one topic bucked the trend, and the absolute P@10
+         values are low because e-discovery is hard. Read it as a direction. The register also marks
+         this row unverifiable until its collections are rebuilt, so it is the weakest evidence on
+         this page and is labelled accordingly.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="idx">
+      <div class="n">07</div>
+      <h2>Negative results, and one withdrawal</h2>
+      <div class="chips">
+        <span class="chip id">R6b</span>
+        <span class="chip gone">withdrawn</span>
+      </div>
+    </div>
+    <div class="body">
+      <p>Three techniques that the literature and the tutorials both recommend did not earn their
+         place here, and one of them produced the only published claim this project has had to
+         withdraw.</p>
+      <h3>The withdrawal</h3>
+      <div class="retraction">
+        <p class="was">Reranking helps pointed questions but demotes the answer on thread-spanning
+           ones.</p>
+        <p class="now"><b>Re-running that arm over 360 queries found the reranker neutral or positive
+           on recall in every category.</b> Thread-spanning is unchanged at rank 5 and better at
+           rank 1.</p>
+      </div>
+      <table>
+        <tr><th>category</th><th>n</th><th>hybrid → +rerank, E@5</th><th>E@1</th></tr>
+        <tr><td>content</td><td class="n">144</td><td class="n">60.4 → 67.4 <span class="up">(+7.0)</span></td><td class="n">+1.4</td></tr>
+        <tr><td>terse</td><td class="n">144</td><td class="n">58.3 → 57.6 <span class="flat">(−0.7, one query)</span></td><td class="n">+8.3</td></tr>
+        <tr><td>spanning</td><td class="n">72</td><td class="n">70.8 → 70.8 <span class="flat">(0.0)</span></td><td class="n">+6.9</td></tr>
+      </table>
+      <p>The demotion was real, but it belonged to a different measurement: the LLM-judged
+         answer-quality eval, where reranking hurt every category. It had been restated next to a
+         recall figure until the two read as one result. Different metric, different run, and the
+         error was mine. Reranking is still off by default on the answer-quality finding.</p>
+      <p>The row stays in the register rather than being deleted, and it stays on this page rather
+         than in a footnote. A reader who saw the old wording should be able to find out what replaced
+         it.</p>
+      <h3>Two that simply did not pay</h3>
+      <p>Cross-encoder reranking adds <b>+2.5 R@5</b> overall for a per-query call to a paid endpoint,
+         which is a poor trade next to thread reconstruction's +29.1 for no LLM at all. Query-side
+         HyDE never beat the raw query on this corpus: the query already holds the entity anchors that
+         matter, so a hypothetical document can only echo them or add drift. Both remain in the tree,
+         off by default, for corpora shaped differently from this one.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="idx">
+      <div class="n">08</div>
+      <h2>The register</h2>
+      <div class="chips"><span class="chip pub">reproducible</span><span class="chip priv">author-reported</span></div>
+    </div>
+    <div class="body">
+      <p>Most published numbers come from one-off scripts run months ago against a corpus nobody else
+         can see. Without a register, "is that still true?" has no answer, and the honest answer drifts
+         as the code, the models and the dependencies move underneath it.</p>
+      <p>So every figure this project publishes has a row recording what produced it, which corpus it
+         came from, whether a stranger can reproduce it, and the date the producing script was last
+         <i>run</i> rather than last quoted. Rows older than the most recent release should not be
+         quoted without a caveat, and two rows currently carry a warning: one needs an endpoint,
+         one needs its collections rebuilt.</p>
+      <p>The register also caught something a checklist would have missed. When the public benchmark
+         shipped, its docs listed two omissions and missed a third: contextual summaries were switched
+         off too, so a reader could reasonably have assumed the +12.8 lever was in play. Writing every
+         claim down next to the thing that produces it is how that class of gap gets found.</p>
+      <p><a href="https://github.com/fmasi/mailrag/blob/main/docs/CLAIMS.md">Read the claims register →</a>
+         &nbsp;·&nbsp;
+         <a href="https://github.com/fmasi/mailrag/blob/main/docs/EXPERIMENTS.md">the full experiment log →</a>
+         &nbsp;·&nbsp;
+         <a href="https://fmasi.eu/blog/email-rag-retrieval/">the benchmark write-up →</a></p>
+    </div>
+  </section>
+
+  <footer>
+    <a href="index.html">← back to mailrag</a><br>
+    Built by <a href="https://www.linkedin.com/in/fmasi/">Frédéric Masi</a> — private, self-hosted AI
+    tools. By humans, for agents.<br>
+    Open source under <a href="https://github.com/fmasi/mailrag/blob/main/LICENSE">Apache-2.0</a>.
+    © 2026 Frédéric Masi.
+  </footer>
+
+</div>
+</body>
+</html>
