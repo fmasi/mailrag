@@ -61,7 +61,7 @@ write-up:
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token / acronym precision, fused with semantics | needs a sparse-capable embedder + fusion; more storage |
 | **+ LLM noise removal** | precision — catches the ~⅓ of noise regex can't, and clears junk out of the top results (measured below) | one-time LLM cost (see above) |
 | **+ contextual retrieval** (prepend each email's summary before embedding — the `C′` / `work-rag-ctx-*` collection) | short/terse emails match by *gist*; the best ranked arm *and* the end-to-end winner | one extra embedded collection to build/maintain |
-| **+ cross-encoder reranker** | small precision lift on pointed queries (**+2.5 R@5**) | **demotes the answer on thread-spanning queries** (and hurt outright under the earlier LLM-judged eval, §9); off by default |
+| **+ cross-encoder reranker** | small precision lift on pointed queries (**+2.5 R@5**) | a paid per-query call; neutral-to-positive on recall in every category, but it **hurt answer quality under the LLM judge** (§9) — off by default |
 | **+ thread reconstruction** (pull the full conversation of each top hit) | **message-level recall@5 64.2% → thread-level 93.3%** — match a small unit, answer from its whole thread | larger context per query (tunable: expand top-N threads) |
 
 **How the eval was run.** The eval set is **360 synthetic queries** (144 terse / 144 content /
@@ -96,11 +96,15 @@ Significance tests and confound controls are in
   dents gold recall (the DB still finds the answer), but then **21% of queries surface noise
   in their top-3** (~11% of slots) — junk the LLM removes for free in the pass that also
   writes the summary.
-- **Reranking helps pointed questions but hurts thread-spanning ones.** A cross-encoder reranker
-  adds only **+2.5 recall@5** overall and *demotes* the answer on multi-email questions (no single
-  message looks like the whole answer) — and it hurt outright under the earlier LLM-judged
-  answer-quality eval. Query-side HyDE never beat the raw query on this entity-rich corpus. Both
-  stay in-tree, off by default, for corpora where they'd pay off.
+- **Reranking helps pointed questions, and a claim that it hurt spanning ones did not survive
+  re-running.** A cross-encoder reranker adds only **+2.5 recall@5** overall. This document used to
+  say it *demoted* the answer on multi-email questions; re-measuring that arm on 2026-08-13 over the
+  same 360 queries found the opposite of a demotion — spanning recall is identical at @5 (70.8 → 70.8)
+  and better at @1 (+6.9), and no category loses recall. The demotion result came from the **§9
+  LLM-judged answer-quality** eval, a different metric on a different run, and it was being restated
+  next to a recall figure as though the two came from one measurement. Answer quality is still why the
+  reranker is off by default. Query-side HyDE never beat the raw query on this entity-rich corpus.
+  Both stay in-tree for corpora where they'd pay off. See [`CLAIMS.md`](CLAIMS.md) row R6b.
 - **The ceiling is retrieval, not the model.** With the answer in context the answer model
   was right ~88% of the time, and at matched precision a 4 B model essentially tied a
   6×-larger one; the lost points are queries where retrieval never surfaced the thread.

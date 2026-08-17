@@ -37,7 +37,7 @@ saying so.
 | R4 | thread reconstruction **64.2 → 93.3** (+29.1) | README, landing page | `scripts/eval/bench_thread_reconstruction.py` | private, `work-rag-ctx-threadaware` | Private ✅ **re-verified, exact** — and **corroborated publicly by R2c** (T@5 97.3% on public Enron) | 2026-08-13 |
 | R5 | contextual summaries **+12.8** | README, landing page | `scripts/eval/build_bodyonly_collections.py` (builds the no-summary control) | private | Private — **corroborated publicly by R2b** (+13.1pp R@5 on a different corpus) | 2026-06 (pre-register) |
 | R6a | cross-encoder rerank **+2.5** R@5 overall | README, landing page | `scripts/eval/bench_thread_reconstruction.py` (rerank arm) | private + paid NVIDIA endpoint | Private ✅ **re-verified, exact** (61.7 → 64.2) | 2026-08-13 |
-| R6b | rerank *demotes* the answer on **thread-spanning** queries | README, landing page | — | — | ⚠️ **NOT reproduced on recall** — see below | 2026-08-13 |
+| R6b | rerank *demotes* the answer on **thread-spanning** queries | **withdrawn** — was in README, landing page, `CASE_STUDY.md`, `RETRIEVAL_GUIDE.md`; removed from all four 2026-08-17 | — | — | ⚠️ **NOT reproduced on recall** — see below | 2026-08-13 |
 | R7 | NVIDIA's stack wins on TREC Legal; mailrag wins on email — "opposite winners" | README, landing page | `scripts/eval/bench_trec.py`, `build_trec_collection.py` | TREC Legal + paid NVIDIA endpoint | Private ⚠️ | 2026-06 (pre-register) |
 | R8 | an early **+6pp** gain was half a quantization artifact, worth **+3pp** at matched precision | README | private eval, §-numbered in `EXPERIMENTS.md` | private | Private | 2026-06 (pre-register) |
 
@@ -53,13 +53,18 @@ queries) shows rerank is **neutral or positive on recall in every category**:
 Thread-spanning is *exactly unchanged* at @5 and @10 and better at @1. So the
 demotion cannot be a recall result. It comes from the **§9 LLM-judged
 answer-quality** eval, where `EXPERIMENTS.md` records that rerank "HURT every
-category" — a different metric on a different run. The README states it directly
-beside the `+2.5 R@5` figure, which reads as though both come from the same
-measurement.
+category" — a different metric on a different run. Every surface that published it
+stated it directly beside the `+2.5 R@5` figure, which reads as though both numbers
+come from the same measurement.
 
 `EXPERIMENTS.md:151` separately describes the demotion as affecting *contentless
 **terse*** emails, not spanning ones — which matches this data far better than the
-README does. **The README wording needs correcting**; tracked in #128.
+withdrawn wording did.
+
+**Corrected 2026-08-17** in all four places it was published (README, landing page,
+`CASE_STUDY.md`, `RETRIEVAL_GUIDE.md`). The row stays in this register rather than
+being deleted: a withdrawn claim is part of the record, and anyone who read the old
+wording deserves to find out what replaced it. Tracked in #128.
 
 ⚠️ **R7 remains unverifiable by measurement** until its collections are rebuilt
 (`trec-bge` / `trec-e5` are no longer in Qdrant). The key is now available, so it
