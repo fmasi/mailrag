@@ -1,0 +1,68 @@
+name: CodeQL
+
+# Static security analysis.
+#
+# This replaces GitHub's managed "default setup", which had two drawbacks: its
+# actions could not be pinned to commit SHAs like every other workflow here, and
+# it only analysed pull requests targeting the default branch. That second one
+# makes stacked pull requests unmergeable, because a PR based on another branch
+# never receives the required CodeQL status and there is no way to trigger it.
+#
+# An unfiltered `pull_request:` trigger fixes that: every PR gets analysed
+# whatever it is based on.
+"on":
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    # Weekly, matching the cadence the default setup used. Catches advisories
+    # published against code that has not changed.
+    - cron: "27 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "codeql-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    # Job name plus matrix value becomes the status name, so these report as
+    # "CodeQL (actions)" and "CodeQL (python)". Both are branch-protection gates;
+    # renaming this job means updating the required checks on `main`.
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      security-events: write # upload the SARIF results
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, python]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+        with:
+          languages: ${{ matrix.language }}
+          # No `queries:` override, so this runs the `default` suite, which is what
+          # the managed setup ran. The swap changes how CodeQL is invoked and not
+          # which alerts it raises. Widening to `security-extended` is a separate
+          # decision, with its own triage cost.
+
+      # Python here is dependency-free by design: CodeQL's Python extractor reads
+      # source rather than a built artifact, so there is no build step to run.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@d6317709a54fd87078d323eeb0e48ec331c8e621 # v3
+        with:
+          category: "/language:${{ matrix.language }}"
