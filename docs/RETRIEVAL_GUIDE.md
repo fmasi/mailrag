@@ -94,8 +94,11 @@ it re-reads the *actual* query against the *actual* email, it pushes drifted-in 
 > `C` is the cleaned **body-only** collection (live: `work-rag-bodyonly`). See the
 > [terminology box in `EXPERIMENTS.md`](EXPERIMENTS.md#terminology-read-this-first), which also
 > disambiguates the two senses of "thread-aware" (retrieval expansion vs. summary conditioning).
-> - **Reranking helps pointed queries (+2.5 recall@5) but demotes the answer on thread-spanning
->   ones** (and hurt outright under the earlier LLM-judged eval). **Off by default.**
+> - **Reranking helps pointed queries (+2.5 recall@5); it does *not* demote thread-spanning ones.**
+>   That demotion was published here and later withdrawn — the 2026-08-13 re-run over 360 queries has
+>   spanning recall unchanged at @5 and better at @1, with no category losing recall. The harm sits in
+>   the LLM-judged answer-quality eval instead, which is why reranking is **off by default**. See
+>   [`CLAIMS.md`](CLAIMS.md) row R6b.
 > - **Contextual retrieval (`C′`) was the *best* arm** (ranked and end-to-end) — the "drift"
 >   penalty did not reproduce; **`C′` is kept, not retired.**
 > - **Thread reconstruction is the headline win — recall@5 62% → 93%** (thread-recall): match a

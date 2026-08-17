@@ -139,7 +139,7 @@
       <div class="card"><h3>Attachments, searchable</h3><p>Text pulled from PDFs, Office files, HTML and images — with OCR for scans (local Tesseract or a local vision model). Each attachment is chunked by its own structure: spreadsheet rows with a repeated header, PDF pages, deck slides — so a number buried in a 500-row sheet stays findable. Chunks trace back to their email and thread.</p></div>
       <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Local by default — but point it at <em>any</em> OpenAI-compatible server (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI) with one env var.</p></div>
       <div class="card"><h3>Stays current</h3><p>A collection built from a backup is a snapshot that quietly rots. <code>./mailrag sync</code> pulls new mail from a live account and indexes only the delta, so the index runs 1–2 days fresh instead of frozen at its export date. Deterministic point ids mean re-indexing <em>replaces</em> rather than duplicates; the content-addressed cache means only new mail costs an LLM call.</p></div>
-      <div class="card"><h3>Pluggable loaders &amp; sources</h3><p>Public Enron corpus, local <code>.eml</code> archives, or Azure Blob behind one <code>EmailLoader</code>; IMAP and Maildir behind a <code>MessageSource</code> seam with opaque cursors — so Gmail, JMAP or Graph slot in without a schema change.</p></div>
+      <div class="card"><h3>Pluggable loaders &amp; sources</h3><p>The public Enron corpus and local <code>.eml</code> archives sit behind one <code>EmailLoader</code>; IMAP and Maildir sit behind a <code>MessageSource</code> seam with opaque cursors, so Gmail, JMAP or Graph slot in without a schema change.</p></div>
       <div class="card"><h3>Measured methodology</h3><p>A 360-query eval that prices every technique, controls for confounds, reports significance — and in several cases overturned the intuitive choice.</p></div>
       <div class="card"><h3>Agents connect over MCP</h3><p>A multi-collection, read-only <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server (<code>./mailrag mcp</code>, MCP SDK v2): any agent can discover your indexed corpora, search and fetch whole threads, regex-grep the raw <code>.eml</code> corpus where embeddings are blind, ask grounded questions, and read attachment text — seven tools, no internals exposed.</p></div>
     </div>
@@ -161,11 +161,16 @@
          <b>87.6%</b> of a personal archive as noise — it would have deleted real receipts and bank
          statements — versus <b>61.5%</b> from a rubric calibrated for that corpus. A ~200-email
          calibration caught the gap before a multi-hour run, all on a local model with no cloud spend.</li>
-      <li><b>Reranking helps pointed questions but hurts thread-spanning ones.</b> A cross-encoder reranker
-         adds only <b>+2.5 recall@5</b> overall and actively <i>demotes</i> the answer on questions that span
-         several emails — because no single message looks like the whole answer. That's exactly the case
-         thread reconstruction fixes; the two are complementary. (Query-side HyDE never beat the raw query
-         on this entity-rich corpus either.) Both stay in-tree, off by default.</li>
+      <li><b>Reranking earns far less than its reputation — and one claim about it had to be withdrawn.</b>
+         A cross-encoder reranker adds <b>+2.5 recall@5</b> overall, a fraction of what thread reconstruction
+         buys, in exchange for a per-query call to a paid endpoint. These pages used to say it demoted the
+         answer on thread-spanning questions. Re-running that arm over 360 queries in August 2026 did not
+         reproduce it: on recall the reranker is neutral or positive in every category, and thread-spanning
+         is unchanged at rank 5 and better at rank 1. The harm is real but it belongs to a different
+         measurement — answer quality under an LLM judge — and that is why the reranker stays off by
+         default. (Query-side HyDE never beat the raw query on this entity-rich corpus either.) Both stay
+         in-tree. Every published figure, including this correction, is tracked in the
+         <a href="https://github.com/fmasi/mailrag/blob/main/docs/CLAIMS.md">claims register</a>.</li>
       <li><b>The ceiling is retrieval, not the model.</b> With the answer in context, even a 4 B model
          answered ~88% correctly; the lost points are queries where retrieval never surfaced the
          thread. Model size was second-order.</li>
@@ -178,7 +183,7 @@
     <picture>
       <!-- dark mode keeps the crisp dark diagram; light mode (and no-preference) gets the light one -->
       <source srcset="architecture.png" media="(prefers-color-scheme: dark)">
-      <img src="architecture-light.png" alt="mailrag pipeline: loaders (.eml / Enron / Azure Blob) to clean, chunk, embed (bge-m3), Qdrant hybrid store, thread-aware retrieval, and a local-LLM answer — with llm-none / llm-verify / llm-all personas, all on your own machine" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
+      <img src="architecture-light.png" alt="mailrag pipeline: loaders (.eml / Enron / IMAP sync) to clean, chunk, embed (bge-m3), Qdrant hybrid store, thread-aware retrieval, and a local-LLM answer — with llm-none / llm-verify / llm-all personas, all on your own machine" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
     </picture>
   </section>
 
