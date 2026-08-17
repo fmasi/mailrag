@@ -73,9 +73,20 @@ class TestLaunchdPlist(unittest.TestCase):
         self.assertEqual(parsed["StandardOutPath"], "/tmp/sync.log")
         self.assertEqual(parsed["StandardErrorPath"], "/tmp/sync.log")
 
-    def test_does_not_run_at_load(self):
-        """Loading the agent should not kick off an unexpected sync mid-install."""
-        self.assertFalse(plistlib.loads(self._plist().encode("utf-8"))["RunAtLoad"])
+    def test_runs_at_load_so_a_boot_does_not_lose_the_window(self):
+        """A LaunchAgent loads at login, so RunAtLoad is the boot catch-up.
+
+        With this false, the first sync after every restart is one whole interval
+        away — a measured 4 h blind window on 2026-08-17, when a reboot at 11:09
+        left `launchctl print` reporting zero runs at 11:35. The systemd sibling
+        never had this gap (``OnBootSec=5min``), so macOS was the one platform
+        that lost a window on boot.
+
+        The cost is a sync at install time, which is harmless: ``sync`` is
+        one-shot and idempotent over a resumable queue, so the worst case is an
+        idle tick that indexes nothing.
+        """
+        self.assertTrue(plistlib.loads(self._plist().encode("utf-8"))["RunAtLoad"])
 
     def test_escapes_xml_metacharacters_in_paths(self):
         parsed = plistlib.loads(self._plist(log_path="/tmp/a&b<c>.log").encode("utf-8"))

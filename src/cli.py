@@ -588,6 +588,8 @@ def _cmd_sync(args):
         accounts = _sync_accounts(args)
 
         if args.status:
+            from src.sync.health import health_warnings  # noqa: PLC0415
+
             for account in accounts:
                 st = state.status(account.id)
                 last = st["last_run"]
@@ -621,24 +623,15 @@ def _cmd_sync(args):
                         # printing only the status would hide the one line that
                         # says what to do.
                         print(f"  note: {last['message']}")
-                    if last["status"] == "running":
-                        # A killed tick (sleep, shutdown, SIGKILL) is the NORMAL
-                        # way a run ends on a laptop, and leaves completed_at
-                        # NULL — so a staleness check that reads only
-                        # completed_at is switched off exactly when it matters.
-                        print("  WARNING: the last run never finished (killed or still running)")
-                success = state.last_successful_run(account.id)
-                now = datetime.now(timezone.utc)
-                if success is None:
-                    if last is not None:
-                        print("  WARNING: no run has EVER completed successfully")
-                else:
-                    stale = _staleness_hours(success["completed_at"], now)
-                    if stale is not None and stale > 48:
-                        # Measured from the last SUCCESS, not the last attempt:
-                        # 120 consecutive failed ticks would otherwise look fresh
-                        # because the newest attempt is two hours old.
-                        print(f"  WARNING: last SUCCESSFUL sync was {stale:.0f}h ago")
+                # Every judgement about whether this account is HEALTHY lives in
+                # src.sync.health, pure and tested. Inline here it was untestable,
+                # which is how a 48h threshold went unnoticed against a 4h tick.
+                for warning in health_warnings(
+                    last_run=last,
+                    last_success=state.last_successful_run(account.id),
+                    now=datetime.now(timezone.utc),
+                ):
+                    print(f"  WARNING: {warning}")
             return 0
 
         if args.requeue:
@@ -753,16 +746,6 @@ def _install_sync_agent(args, accounts):
     return 0
 
 
-def _staleness_hours(completed_at, now):
-    """Hours since *completed_at*, or None if it is missing/unparseable."""
-    from datetime import datetime  # noqa: PLC0415
-
-    if not completed_at:
-        return None
-    try:
-        return (now - datetime.fromisoformat(completed_at)).total_seconds() / 3600.0
-    except (TypeError, ValueError):
-        return None
 
 
 def _configure_sync(p):

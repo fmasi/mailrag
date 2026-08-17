@@ -190,7 +190,8 @@ holds.
 
 `--status` measures staleness from the last **successful** run, not the last
 attempt, and warns separately when the last run never finished — which on a
-laptop is the normal way a run ends.
+laptop is the normal way a run ends. The full set of warnings lives in
+`src/sync/health.py`; see [What `--status` can and cannot detect](#what---status-can-and-cannot-detect).
 
 ### Judge failures: outage vs poison
 
@@ -238,11 +239,24 @@ advances past it**. One poison message must never wedge a folder forever.
 `mailrag sync` is the portable unit. `--install-agent` writes the platform's
 scheduler unit:
 
-- **macOS** — a launchd LaunchAgent with `StartInterval`. Not cron: cron silently
-  skips a window that passes while the machine is asleep; launchd runs the job on
-  wake. For a laptop that spends nights closed, that's the difference between a
-  fresh index and a stale one.
-- **Linux** — a systemd user timer with `Persistent=true`, which behaves the same way.
+- **macOS** — a launchd LaunchAgent with `StartInterval` **and `RunAtLoad`**. Not
+  cron: cron silently skips a window that passes while the machine is asleep;
+  launchd coalesces it into a single run on wake. `RunAtLoad` covers the gap
+  coalescing does not — a **restart**. A LaunchAgent loads at login, so without it
+  the first sync after every boot is one whole interval away (measured: a reboot
+  at 11:09 left the agent with zero runs at 11:35, next tick due 15:09). The cost
+  is one idle tick at install time, which is nothing.
+- **Linux** — a systemd user timer with `Persistent=true` and `OnBootSec=5min`,
+  which behaves the same way on both counts.
+
+### What the scheduler deliberately does not do
+
+**A machine asleep with the lid closed and unplugged will not sync, and that is
+intended.** macOS parks launchd timers once the machine enters standby, so no tick
+fires until it genuinely wakes — and waking a laptop on battery to load a model
+onto the GPU is not worth a few hours of index freshness. Expect gaps the length
+of a closed night; they are not a fault, and `--status` is tuned not to cry wolf
+about them.
 
 The most common way this feature fails is a scheduler running mailrag outside its
 conda environment, dying on the first import, silently, for weeks. So pass
@@ -254,7 +268,26 @@ written for the **devcontainer**, where `host.docker.internal` resolves — on t
 host it does not, so a unit relying on it would fail every tick forever while
 reporting the LLM and vector store as unavailable. Override with
 `environment={...}` if your endpoints live elsewhere. The backstop is
-`sync --status`, which warns when the last successful sync was over 48 hours ago.
+`sync --status`.
+
+### What `--status` can and cannot detect
+
+Because a closed, unplugged laptop legitimately produces no runs, **age alone can
+never mean "broken"** — only "stale". A threshold tight enough to catch a broken
+schedule would fire every ordinary night and be trained into noise. So the checks
+in `src/sync/health.py` split by what the evidence actually supports:
+
+| Warning | Trigger | Why it is unambiguous |
+|---|---|---|
+| the last run ended in `'<status>'` | newest run is not `ok` | The schedule is firing and failing. Invisible to an age check, whose newest attempt is always recent. |
+| the last run never finished | newest run still `running` | A tick killed by sleep or shutdown leaves `completed_at` NULL. |
+| no run has EVER completed successfully | no `ok` run on record | The install has never worked at all. |
+| index is stale — last SUCCESSFUL sync was *N*h ago | over **24 h** since the last `ok` | Informational. Longer than a closed night, shorter than a lost day. |
+
+The staleness bound was **48 h** when the interval was 12 h. Against the 4 h
+interval actually installed, that let twelve consecutive missed ticks pass without
+a word — which is how a 20 h outage went unnoticed until someone thought to ask.
+Keep the bound proportionate if you change the interval.
 
 **An idle tick is cheap, so a short interval is affordable.** The embedder is
 passed down as a factory rather than an instance, and is called only once the

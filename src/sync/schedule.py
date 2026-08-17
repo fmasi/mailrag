@@ -101,8 +101,23 @@ def render_launchd_plist(
 ) -> str:
     """Render a LaunchAgent plist for ``~/Library/LaunchAgents/<label>.plist``.
 
-    ``StartInterval`` (not ``StartCalendarInterval``) so a missed window while
-    asleep is coalesced into a single run on wake instead of being lost.
+    Two settings carry the whole "survives a laptop" claim, and they cover
+    different gaps:
+
+    * ``StartInterval`` (not ``StartCalendarInterval``) so a window missed while
+      asleep is coalesced into a single run on wake instead of being lost.
+    * ``RunAtLoad`` for the case coalescing does NOT cover — a restart. A
+      LaunchAgent loads at login, so without this the first sync after every boot
+      is one whole interval away. Measured on 2026-08-17: a reboot at 11:09 left
+      the agent with zero runs at 11:35, and the next tick would not have landed
+      until 15:09. The systemd sibling below never had this gap, because
+      ``OnBootSec=5min`` catches up after boot — macOS was the only platform
+      losing a window. A run at load costs one idle tick, which is nothing:
+      ``sync`` is one-shot and idempotent over a resumable queue.
+
+    Sleeping with the lid closed and unplugged is deliberately NOT addressed:
+    macOS parks timers in standby, and waking a laptop on battery to do GPU work
+    is not worth a few hours of freshness.
     """
     args = sync_command(repo_root=repo_root, conda_env=conda_env, account=account, model=model)
     program_args = "\n".join(f"        <string>{_xml_escape(a)}</string>" for a in args)
@@ -131,7 +146,7 @@ def render_launchd_plist(
     <key>StartInterval</key>
     <integer>{int(interval_seconds)}</integer>
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
     <key>StandardOutPath</key>
     <string>{_xml_escape(log_path)}</string>
     <key>StandardErrorPath</key>
