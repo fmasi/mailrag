@@ -342,6 +342,56 @@ class TestGrepEmailTool(unittest.TestCase):
         self.assertNotIn("max_files", grep.call_args.kwargs)
 
 
+class TestAttachmentStoreNeverBuilt(unittest.TestCase):
+    """An un-ingested store must not answer like a thread with no attachments.
+
+    The real incident: attachment text was searchable (indexing extracts it down
+    its own path), so the corpus looked complete — while every list_attachments
+    call returned [] because `attachments build` had never run. Absence and
+    never-looked must not share a representation.
+    """
+
+    class _EmptyStore:
+        root = "/tmp/attachments"
+
+        def count(self):
+            return 0
+
+        def list_for(self, **kw):
+            return []
+
+        def fetch(self, sha256, extractor=None):
+            raise KeyError(sha256)
+
+        def close(self):
+            pass
+
+    class _PopulatedStore(_EmptyStore):
+        def count(self):
+            return 12
+
+    def test_empty_store_raises_actionable_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            server.list_attachments(thread_id="t1", store=self._EmptyStore())
+        msg = str(ctx.exception)
+        self.assertIn("empty", msg)
+        self.assertIn("attachments build", msg)
+
+    def test_populated_store_returns_empty_for_a_thread_without_attachments(self):
+        # The guard must not turn a legitimate "no attachments here" into an error.
+        self.assertEqual(server.list_attachments(thread_id="t1", store=self._PopulatedStore()), [])
+
+    def test_get_attachment_on_empty_store_names_the_cause(self):
+        with self.assertRaises(ValueError) as ctx:
+            server.get_attachment("deadbeef", store=self._EmptyStore())
+        self.assertIn("attachments build", str(ctx.exception))
+
+    def test_get_attachment_on_populated_store_reports_unknown_sha(self):
+        with self.assertRaises(ValueError) as ctx:
+            server.get_attachment("deadbeef", store=self._PopulatedStore())
+        self.assertIn("unknown attachment", str(ctx.exception))
+
+
 class TestAnswerQuestionHealthcheck(unittest.TestCase):
     def test_healthcheck_runs_before_llm_by_default(self):
         searcher = _FakeSearcher(_threads())
@@ -565,13 +615,22 @@ class _FakeMeta:
 
 
 class _FakeStore:
-    def __init__(self, metas=None, fetch_result=None, fetch_raises=False):
+    # `count` defaults to a populated store: these tests exercise lookups against
+    # a store that HAS been ingested, so an empty result means "no attachments on
+    # this thread" rather than "never built" (see TestAttachmentStoreNeverBuilt).
+    root = "/tmp/attachments"
+
+    def __init__(self, metas=None, fetch_result=None, fetch_raises=False, count=7):
+        self._count = count
         self._metas = metas or []
         self._fetch_result = fetch_result
         self._fetch_raises = fetch_raises
         self.closed = False
         self.list_calls = []
         self.fetch_calls = []
+
+    def count(self):
+        return self._count
 
     def list_for(self, *, thread_id=None, message_id=None):
         self.list_calls.append((thread_id, message_id))

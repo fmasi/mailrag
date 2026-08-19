@@ -230,6 +230,15 @@ grounded natural-language answer for you.
 List the files attached to a thread or a message (parity with the CLI
 `./mailrag attachments list`) — and the way in to their contents.
 
+> **The store must be built once, separately.** `mailrag onboard` / `index` /
+> `sync` do **not** populate it: they extract attachment *text* for retrieval
+> down a different path (`src/indexing/attachment_docs.py`), which is why
+> attachment content can be fully searchable while `list_attachments` returns
+> nothing for every thread. Run `./mailrag attachments build --profile
+> <corpus.profile.json>` once to populate it. Both attachment tools now raise an
+> actionable error naming that command when the store is empty, rather than
+> answering like a thread that simply has no attachments.
+
 > **Attachment contents are invisible to `search_email`, `answer_question` and
 > `grep_email`.** Those index message *bodies* only. So when the answer lives in
 > a document somebody emailed — an invoice PDF, a spreadsheet of figures, a

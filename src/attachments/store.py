@@ -69,6 +69,20 @@ class AttachmentStore:
     def close(self) -> None:
         self._conn.close()
 
+    def count(self) -> int:
+        """Total attachment rows in the store (0 = never ingested).
+
+        Exists so callers can tell "this thread has no attachments" apart from
+        "no attachments have ever been ingested". The store is populated only by
+        ``mailrag attachments build``; indexing and continuous sync extract
+        attachment *text* for retrieval down a separate path
+        (``src.indexing.attachment_docs``) and never write here. So a corpus can
+        be fully indexed, with attachment content searchable, while this store
+        is still empty — and every lookup then returns an empty list that looks
+        exactly like a thread with no attachments.
+        """
+        return int(self._conn.execute("SELECT COUNT(*) FROM attachments").fetchone()[0])
+
     def path_for(self, sha256: str) -> str:
         return os.path.join(self._blobs, sha256[:2], sha256)
 

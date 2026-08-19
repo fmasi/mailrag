@@ -438,6 +438,30 @@ def _meta_to_dict(meta) -> Dict[str, Any]:
     }
 
 
+def _require_populated_store(store) -> None:
+    """Raise when the store has never been ingested, instead of returning nothing.
+
+    An empty store answers every lookup with an empty list, which is
+    indistinguishable from "this thread genuinely has no attachments" — so a
+    caller reasonably concludes the mail has no attachments when in truth none
+    have ever been ingested. That is the same failure the grep scan report
+    exists to prevent: absence and not-looked-at must not share a
+    representation. Indexing and sync do NOT populate this store (they extract
+    attachment text for retrieval down a separate path), so a fully indexed
+    corpus with an empty store is the expected state until `attachments build`
+    is run once.
+    """
+    if store.count() == 0:
+        raise ValueError(
+            f"attachment store at {store.root!r} is empty — no attachments have been "
+            "ingested, so every lookup returns nothing regardless of the thread. "
+            "Populate it with `mailrag attachments build --profile <corpus.profile.json>`. "
+            "(Indexing and sync extract attachment TEXT for search down a separate path "
+            "and never write this store, so attachment content can be searchable while "
+            "this store is still empty.)"
+        )
+
+
 def list_attachments(
     thread_id: Optional[str] = None,
     message_id: Optional[str] = None,
@@ -462,6 +486,8 @@ def list_attachments(
         store = AttachmentStore(resolve_attach_store())
     try:
         metas = store.list_for(thread_id=thread_id, message_id=message_id)
+        if not metas:
+            _require_populated_store(store)
         return [_meta_to_dict(m) for m in metas]
     finally:
         if owns:
@@ -494,6 +520,7 @@ def get_attachment(
         try:
             fetched = store.fetch(sha256, extractor=ocr)
         except KeyError as exc:
+            _require_populated_store(store)
             raise ValueError(f"unknown attachment {sha256}") from exc
         return {
             "sha256": fetched["sha256"],
