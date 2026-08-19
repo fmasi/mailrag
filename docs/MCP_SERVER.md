@@ -257,14 +257,28 @@ List the files attached to a thread or a message (parity with the CLI
 - **Returns:** a row per attachment
   `{sha256, filename, mime, size, thread_id, message_id, inline}`.
 
-> **Decoration is filtered out by default.** On a real 45k-row corpus, 73% of
-> attachment rows are signature logos, spacer pixels and footer badges, which
-> bury the documents you are looking for. They are identified by **recurrence** —
-> a small inline image reused across several messages — not by filename or mime,
-> because `image002.png` is a 259-byte spacer in one message and a 12 MB pasted
-> screenshot in another. One-off inline images are kept: a pasted screenshot is
-> content. Pass `include_boilerplate=true` for the unfiltered list. The store
-> itself keeps every row; only this tool takes the opinion.
+> **Decoration is filtered out by default.** On a real 45k-row corpus, 63% of
+> attachment rows are signature strips, newsletter headers, marketing templates
+> and spacer pixels, which bury the documents you are looking for. Pass
+> `include_boilerplate=true` for the unfiltered list; the store itself keeps
+> every row, only this tool takes the opinion.
+>
+> The rule is **recurrence across threads, scaled by size** — not filename, mime
+> or shape, all of which were tried and fail:
+>
+> | Signal | Why it fails |
+> |---|---|
+> | Filename / mime | `image002.png` is a 259-byte spacer in one message and a 12 MB screenshot in another; both `image/png`, both inline. |
+> | Aspect ratio | A 2475×383 "banner" turned out to be a product-lifecycle table with EOL dates. |
+> | Reuse across **messages** | An image quoted down an 18-message reply chain appears 18 times in *one* thread. This hid 36% of what it removed, including a feature-request table. |
+>
+> So: count distinct **threads** (decoration is reused by unrelated
+> conversations; quoted content is not), and require wider reuse for bigger
+> images (under 20 KB → 5 threads; 20–100 KB → 15 threads; over 100 KB → never
+> decoration). Verified by inspecting the images at each boundary: what it
+> removes at the top end is a newsletter header in 52 threads, what it keeps is
+> a benchmark table shared into 5. The rule errs toward keeping.
+
 - **Errors:** `ValueError` when neither identifier is supplied.
 
 ```jsonc

@@ -13,8 +13,10 @@ import tempfile
 import unittest
 
 from src.attachments.store import (
+    BOILERPLATE_LARGE_MIN_THREADS,
     BOILERPLATE_MAX_SIZE,
-    BOILERPLATE_MIN_MESSAGES,
+    BOILERPLATE_SMALL_MAX_SIZE,
+    BOILERPLATE_SMALL_MIN_THREADS,
     AttachmentStore,
 )
 
@@ -42,51 +44,92 @@ class TestBoilerplateFilter(unittest.TestCase):
         )
 
     def _seed(self):
-        """A logo reused across many messages, plus a one-off screenshot."""
+        """A logo reused across many THREADS, plus a one-off screenshot."""
         logo = b"L" * 6000
-        for i in range(BOILERPLATE_MIN_MESSAGES + 2):
-            self._put(logo, msg=f"m{i}")
+        for i in range(BOILERPLATE_SMALL_MIN_THREADS + 2):
+            self._put(logo, msg=f"m{i}", thread=f"th{i}")
         # Same name, same mime, same inline flag — only recurrence and size differ.
-        self._put(b"S" * (BOILERPLATE_MAX_SIZE * 3), msg="m0", name="image001.png")
-        self._put(b"%PDF-real", msg="m0", name="deck.pptx", mime="application/pdf", inline=False)
+        self._put(b"S" * (BOILERPLATE_MAX_SIZE * 3), msg="m0", thread="th0", name="image001.png")
+        self._put(
+            b"%PDF-real",
+            msg="m0",
+            thread="th0",
+            name="deck.pptx",
+            mime="application/pdf",
+            inline=False,
+        )
 
     def test_recurring_small_inline_image_is_dropped(self):
         self._seed()
-        sizes = [m.size for m in self.store.list_for(thread_id="t1", include_boilerplate=False)]
+        sizes = [m.size for m in self.store.list_for(thread_id="th0", include_boilerplate=False)]
         self.assertNotIn(6000, sizes, "the reused 6KB logo should be filtered out")
 
     def test_one_off_large_inline_image_is_kept(self):
         # The false positive that matters: a pasted screenshot carries the same
         # auto-generated name as the logo and is still inline.
         self._seed()
-        sizes = [m.size for m in self.store.list_for(thread_id="t1", include_boilerplate=False)]
+        sizes = [m.size for m in self.store.list_for(thread_id="th0", include_boilerplate=False)]
         self.assertIn(BOILERPLATE_MAX_SIZE * 3, sizes, "a one-off screenshot is content")
 
     def test_real_document_always_survives(self):
         self._seed()
-        names = [m.filename for m in self.store.list_for(thread_id="t1", include_boilerplate=False)]
+        names = [
+            m.filename for m in self.store.list_for(thread_id="th0", include_boilerplate=False)
+        ]
         self.assertIn("deck.pptx", names)
 
     def test_rarely_reused_small_image_is_kept(self):
         # Below the recurrence threshold: not enough evidence that it is decoration.
         rare = b"R" * 5000
-        for i in range(BOILERPLATE_MIN_MESSAGES - 1):
-            self._put(rare, msg=f"r{i}", thread="t2")
-        kept = self.store.list_for(thread_id="t2", include_boilerplate=False)
-        self.assertEqual(len(kept), BOILERPLATE_MIN_MESSAGES - 1)
+        for i in range(BOILERPLATE_SMALL_MIN_THREADS - 1):
+            self._put(rare, msg=f"r{i}", thread=f"rare{i}")
+        kept = self.store.list_for(thread_id="rare0", include_boilerplate=False)
+        self.assertEqual(len(kept), 1)
+
+    def test_image_quoted_down_one_thread_is_kept(self):
+        """The regression that motivated counting threads, not messages.
+
+        A real image attached once and quoted down a long reply chain appears in
+        every message of that ONE thread. Counting messages read that as
+        decoration and hid it — on the live corpus that was 36% of everything
+        the rule removed, including a feature-request table and a product
+        lifecycle table (both verified by eye).
+        """
+        quoted = b"Q" * 5000
+        for i in range(18):
+            self._put(quoted, msg=f"q{i}", thread="one-long-thread")
+        kept = self.store.list_for(thread_id="one-long-thread", include_boilerplate=False)
+        self.assertEqual(len(kept), 18, "quoting is not evidence of decoration")
+
+    def test_large_image_needs_far_wider_reuse_to_count_as_decoration(self):
+        """Size scales the bar: a useful table shared into a few threads is content.
+
+        Verified on the live corpus — a benchmark table (88.8KB) appeared in 5
+        threads and the size-blind rule hid it, while the decoration it removed
+        at that recurrence was uniformly under 20KB.
+        """
+        table = b"T" * (BOILERPLATE_SMALL_MAX_SIZE * 4)  # 80KB, over the small tier
+        for i in range(BOILERPLATE_SMALL_MIN_THREADS + 2):
+            self._put(table, msg=f"tb{i}", thread=f"tb{i}")
+        self.assertEqual(len(self.store.list_for(thread_id="tb0", include_boilerplate=False)), 1)
+
+        banner = b"B" * (BOILERPLATE_SMALL_MAX_SIZE * 4)
+        for i in range(BOILERPLATE_LARGE_MIN_THREADS + 1):
+            self._put(banner, msg=f"bn{i}", thread=f"bn{i}")
+        self.assertEqual(len(self.store.list_for(thread_id="bn0", include_boilerplate=False)), 0)
 
     def test_include_boilerplate_returns_the_raw_list(self):
         self._seed()
-        raw = self.store.list_for(thread_id="t1", include_boilerplate=True)
-        filtered = self.store.list_for(thread_id="t1", include_boilerplate=False)
+        raw = self.store.list_for(thread_id="th0", include_boilerplate=True)
+        filtered = self.store.list_for(thread_id="th0", include_boilerplate=False)
         self.assertGreater(len(raw), len(filtered))
 
     def test_default_is_unfiltered_at_the_store_layer(self):
         # The store stays a faithful record; only the MCP tool opts into filtering.
         self._seed()
         self.assertEqual(
-            len(self.store.list_for(thread_id="t1")),
-            len(self.store.list_for(thread_id="t1", include_boilerplate=True)),
+            len(self.store.list_for(thread_id="th0")),
+            len(self.store.list_for(thread_id="th0", include_boilerplate=True)),
         )
 
     def test_message_scoped_listing_filters_too(self):
