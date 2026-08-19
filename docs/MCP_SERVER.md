@@ -257,27 +257,19 @@ List the files attached to a thread or a message (parity with the CLI
 - **Returns:** a row per attachment
   `{sha256, filename, mime, size, thread_id, message_id, inline}`.
 
-> **Decoration is filtered out by default.** On a real 45k-row corpus, 63% of
-> attachment rows are signature strips, newsletter headers, marketing templates
-> and spacer pixels, which bury the documents you are looking for. Pass
-> `include_boilerplate=true` for the unfiltered list; the store itself keeps
-> every row, only this tool takes the opinion.
+> **Decoration is filtered out by default** — signature blocks, legal
+> disclaimers rendered as images, newsletter headers and spacer pixels, which
+> are 61% of attachment rows on a real corpus. Pass `include_boilerplate=true`
+> for the unfiltered list; the store keeps every row, only this tool takes the
+> opinion.
 >
-> The rule is **recurrence across threads, scaled by size** — not filename, mime
-> or shape, all of which were tried and fail:
->
-> | Signal | Why it fails |
-> |---|---|
-> | Filename / mime | `image002.png` is a 259-byte spacer in one message and a 12 MB screenshot in another; both `image/png`, both inline. |
-> | Aspect ratio | A 2475×383 "banner" turned out to be a product-lifecycle table with EOL dates. |
-> | Reuse across **messages** | An image quoted down an 18-message reply chain appears 18 times in *one* thread. This hid 36% of what it removed, including a feature-request table. |
->
-> So: count distinct **threads** (decoration is reused by unrelated
-> conversations; quoted content is not), and require wider reuse for bigger
-> images (under 20 KB → 5 threads; 20–100 KB → 15 threads; over 100 KB → never
-> decoration). Verified by inspecting the images at each boundary: what it
-> removes at the top end is a newsletter header in 52 threads, what it keeps is
-> a benchmark table shared into 5. The rule errs toward keeping.
+> The verdict prefers **measured OCR signals** and falls back to a metadata
+> heuristic for blobs not yet measured (see
+> [Noise signals](#noise-signals-attachments-build)). Signals win because the
+> heuristic is a guess about content made from metadata, and it misfires both
+> ways — it hid a quarterly reporting-deadline table (small, quoted into 15
+> threads because it is a useful reference) while a text-poor "access denied"
+> screenshot is content someone pasted deliberately.
 
 - **Errors:** `ValueError` when neither identifier is supplied.
 
@@ -359,6 +351,61 @@ Config mirrors `./mailrag ask` and is resolved from flags/environment:
 > non-LLM tools (`search_email`, `grep_email`, `list_collections`,
 > `list_attachments`, `get_attachment`) do **not** depend on the LLM and keep
 > working when it is down.
+
+## Noise signals (`attachments build`)
+
+`./mailrag attachments build` measures each blob after ingesting it and records
+the signals used to judge decoration. Roughly 4 minutes for a 45k-row corpus,
+because measurement is keyed by **content hash** — the one 6.5 KB logo carried by
+2,273 messages is a single blob — and bounded to the cheap tier.
+
+```bash
+./mailrag attachments build --profile ~/corpus.profile.json
+# attachments: {'emails': 31969, 'attachments': 47956, 'skipped': 0}
+# classified:  {'measured': 2570, 'skipped': 0, 'failed': 0}
+
+./mailrag attachments build --profile … --no-classify        # skip it
+./mailrag attachments build --profile … --classify-max-size 50000
+```
+
+**Why bulk, when extraction is otherwise lazy.** `get_attachment` runs OCR on
+first fetch and caches it, which is right for real documents — a large PDF takes
+minutes. But filtering happens when attachments are *listed*, while extraction
+happens when one is *fetched*, so the blobs nobody has fetched are exactly the
+ones polluting listings; lazy measurement never reaches them. The saving grace is
+that decoration is small: ~0.09s per blob with tesseract. So the cheap tier is
+measured in bulk and the expensive tier stays lazy.
+
+**Engine choice.** The pass defaults to `tesseract`, not the global `llm`
+default — it exists to answer "does this image contain words", and measured on
+the same images the LLM path is 16–20× slower (8.5s vs 0.4s on a table). Override
+with `--extractor` or `$RAG_ATTACH_CLASSIFY_EXTRACTOR`. LLM output is normalised
+first: that provider prefixes a `DESCRIPTION:` preamble, which measured raw
+inflates a three-word newsletter header from 22 to 159 characters — across the
+text-rich threshold — so only the transcription is counted, and the two engines
+produce identical signals for the same image.
+
+**Signals, not verdicts.** The store records `chars`, `words`, `unique_words`,
+`digits`, dimensions, status and extractor per blob; the verdict is computed from
+them at read time. The measurement is corpus-agnostic ("a logo has no text, a
+table does"); the thresholds are not — work mail is 41% bulk against personal
+mail's 7%. Keeping them apart means re-calibrating for another corpus is a SQL
+query, not a re-OCR of thousands of blobs.
+
+The rule, calibrated against images inspected by eye:
+
+| Condition | Verdict |
+|---|---|
+| Inline, in ≥20 threads | decoration — a disclaimer image sat in 829 threads, a signature block in 61 |
+| ≥100 chars of text | content — rescues tables the metadata heuristic hid |
+| <30 chars **and** in ≥5 threads | decoration |
+| anything else | no opinion → metadata heuristic decides |
+
+Known limit: the 15–25 thread band is ambiguous on recurrence alone — a real
+reporting-deadline table sits at 15 threads, a disclaimer at 18. The cut errs
+toward keeping, so some signature images survive rather than one real table being
+hidden. Splitting that band properly needs a content rule (disclaimer phrasing,
+contact-detail patterns), not a bigger threshold.
 
 ## Usage logging
 

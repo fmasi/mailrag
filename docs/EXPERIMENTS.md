@@ -861,6 +861,107 @@ in an API the eval never exercised, which is exactly where defects survive.
 
 ---
 
+## 16. Attachment noise — four signals that failed before one worked (2026-08-19)
+
+Populating the attachment store for the first time (31,969 emails → 47,956 attachments,
+45,454 rows after deduplication) made `list_attachments` usable and immediately unusable:
+**61% of rows are decoration** — signature blocks, legal disclaimers rendered as images,
+newsletter headers, spacer pixels. A thread whose real payload was one `.pptx` returned
+three rows, the other two being a 10 KB logo and a 259-byte spacer.
+
+The interesting part is not the filter that works. It is that every cheap signal we reached
+for first was wrong, and each one was only caught by opening the images.
+
+### 16.1 Filename and MIME type — no separation at all
+
+Outlook names embedded images `image001.png`, `image002.png`, `ATT00001.png` regardless of
+what they are. In this corpus `image002.png` is a **259-byte spacer** in one message and a
+**12 MB pasted screenshot** in another. Both `image/png`, both marked inline. There is no
+information in the name.
+
+### 16.2 Aspect ratio — a plausible proxy that is simply false
+
+153 of 244 candidates were banner-shaped (≥3:1), which reads as "signature strip". The
+largest of them, 2475×383, is a **product-lifecycle table with end-of-life dates**. Shape
+describes layout, not purpose.
+
+### 16.3 Counting messages — right idea, wrong denominator
+
+Decoration recurs; content does not. True, but an image attached *once* and quoted down an
+18-message reply chain appears in 18 messages. Counting `message_id` read that as
+decoration and removed **237 of 659 blobs (36%)** wrongly, including a Samsung
+feature-request table and the lifecycle table above.
+
+Counting distinct **threads** fixes it — decoration is reused by unrelated conversations,
+quoted content is not — at a cost of 10 points of noise removal (74% → 64%).
+
+### 16.4 Recurrence alone — still catches useful content
+
+A benchmark table of upgrade durations, shared into 5 threads *because it is useful*, looks
+identical to a logo at that recurrence. Size separates them: decoration at that recurrence
+is uniformly under 20 KB, while the false positives were 60–93 KB. Hence a size-scaled bar
+(<20 KB needs 5 threads; 20–100 KB needs 15).
+
+### 16.5 What actually works: measure the text
+
+A logo OCRs to a company name or nothing; a table OCRs to dozens of words and numbers. That
+observation is corpus-agnostic in a way none of the metadata proxies are, and it is cheap —
+~0.09s per blob with tesseract, and keyed by **content hash**, so the one 6.5 KB logo carried
+by 2,273 messages is measured once. The live corpus took **2,570 blobs in 240s, zero
+failures**.
+
+Two corrections came out of calibrating it, both from looking rather than reasoning:
+
+- **Text-poor is not decoration.** A pasted "401 Access is denied" screenshot measures 29
+  characters. It is content someone sent deliberately. Only text-poor *and* reused across
+  unrelated threads condemns.
+- **Text-rich is not content.** A **legal confidentiality disclaimer rendered as an image**
+  measures 748 characters and appears in **829 threads**; signature blocks with name, title
+  and phone numbers measure ~195 characters across 61 threads. Nothing genuine appears in
+  that many unrelated conversations, so ubiquity overrides text-richness.
+
+Measuring rescued **43 blobs** the metadata heuristic was hiding.
+
+### 16.6 The residual ambiguity, stated rather than hidden
+
+The 15–25 thread band cannot be split on recurrence: a real quarterly reporting-deadline
+table sits at 15 threads, a disclaimer at 18. The threshold errs toward keeping, so a
+handful of signature images survive rather than one real table being hidden. Splitting that
+band needs a content rule — disclaimer phrasing, contact-detail patterns — not a bigger
+number.
+
+### 16.7 Deleting the noise would have saved 13 MB
+
+The obvious follow-on — stop storing this junk — does not survive measurement. Blobs are
+addressed by sha256, so the 2,273 copies of a logo are already **one** 6.5 KB blob. A safe
+prune rule reclaims **13 MB of a 3.4 GB store (0.4%)**. The 461 MB that looks like image
+waste is one-off pasted screenshots, which is content. Recompression is filed as an idea
+(#161); deletion is not worth a destructive verb.
+
+### 16.8 Benchmarking the two OCR engines exposed a correctness bug
+
+Tesseract against the LLM vision path on the same images: **0.41s vs 8.49s** on a table,
+0.07s vs 1.61s on a header — 16–20×, so the cheap tier defaults to tesseract.
+
+The comparison mattered for a second reason. The LLM provider answers with a `DESCRIPTION:`
+preamble before its transcription, so a three-word newsletter header measures **22
+characters via tesseract and 159 via the LLM** — across the 100-character "text-rich"
+threshold. The same image would have been classified as decoration by one engine and
+content by the other. Signals are now measured on the transcription only, and both engines
+agree exactly.
+
+Generalisation: when a rule is a threshold over an extractor's output, the extractor is part
+of the rule. The store records which engine produced each measurement, and signals from an
+uncalibrated engine yield *no opinion* rather than borrowing another engine's numbers.
+
+### 16.9 Why the signals are stored and the verdict is not
+
+Measurement is corpus-agnostic; thresholds are not. This corpus (work mail) is 41% bulk by
+the Pass-1 header rule against personal mail's 7%. So the store keeps `chars`, `words`,
+`unique_words`, `digits`, dimensions, status and extractor per blob, and computes the
+verdict at read time. Re-calibrating against another corpus is a SQL query rather than
+re-OCRing thousands of blobs — the mistake §14 already paid for once with the LLM rubric.
+
 ## Open threads / next experiments
 
 - ~~**Thread-aware retrieval**~~ — implemented (§8). Retires C′; dedup subsumed. Sub-research
