@@ -283,6 +283,45 @@ class TestGrepScanBounds(unittest.TestCase):
         self.assertTrue(res["complete"])
         self.assertEqual(res["scanned"], self.CORPUS_FILES)
 
+    def test_non_positive_max_files_rejected(self):
+        # Rejected rather than clamped to 1, matching max_seconds: a caller
+        # passing 0 means "none", and scanning one file would answer a
+        # different question without saying so.
+        with _Corpus() as root:
+            for bad in (0, -1):
+                with self.subTest(max_files=bad):
+                    with self.assertRaises(ValueError):
+                        grep.grep_email("e", max_files=bad, root=root)
+
+    def test_max_files_above_corpus_size_completes(self):
+        with _Corpus() as root:
+            res = grep.grep_email("thisstringappearsnowhere", max_files=10_000, root=root)
+        self.assertTrue(res["complete"])
+        self.assertEqual(res["stop_reason"], "complete")
+        self.assertEqual(res["scanned"], self.CORPUS_FILES)
+
+    def test_elapsed_includes_file_discovery(self):
+        """elapsed_s is the wall time the CALLER waited, walk included.
+
+        Discovery is ~0.25s over 73k files, so timing it from after the walk
+        under-reports the cost of exactly the calls that hurt. Proven by making
+        discovery slow rather than by asserting a number is positive, which a
+        fast temp corpus rounds to 0.0 anyway.
+        """
+        import time
+        from unittest import mock
+
+        real = grep._discover_eml
+
+        def slow(root):
+            time.sleep(0.05)
+            return real(root)
+
+        with _Corpus() as root:
+            with mock.patch.object(grep, "_discover_eml", slow):
+                res = grep.grep_email("e", root=root)
+        self.assertGreaterEqual(res["elapsed_s"], 0.05)
+
     def test_non_positive_max_seconds_rejected(self):
         with _Corpus() as root:
             with self.assertRaises(ValueError):

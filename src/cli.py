@@ -513,11 +513,17 @@ def _cmd_attachments_build(args):
             # per content hash, so this is minutes even on a large corpus. The
             # expensive documents stay on the lazy get_attachment path.
             from src.attachments.classify import classify_blobs
+
+            # Only build an extractor when one was explicitly requested:
+            # build_default_extractor(None) resolves $RAG_ATTACH_EXTRACTOR, which
+            # defaults to the vision LLM, and would silently override the
+            # tesseract default that makes this pass cheap enough to run in bulk.
             from src.attachments.extract import build_default_extractor
 
+            explicit = build_default_extractor(args.extractor) if args.extractor else None
             stats = classify_blobs(
                 store,
-                extractor=build_default_extractor(args.extractor),
+                extractor=explicit,
                 max_size=args.classify_max_size,
                 progress=True,
             )
@@ -982,7 +988,10 @@ def build_parser():
     atb.add_argument(
         "--extractor",
         default=None,
-        help="OCR backend used by the noise-signal pass (default: $RAG_ATTACH_EXTRACTOR or llm)",
+        help=(
+            "OCR backend for the noise-signal pass "
+            "(default: $RAG_ATTACH_CLASSIFY_EXTRACTOR or tesseract)"
+        ),
     )
     atb.set_defaults(func=_cmd_attachments_build)
 

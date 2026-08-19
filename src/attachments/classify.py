@@ -69,7 +69,7 @@ def classify_blobs(
         )
 
     todo = store.unmeasured_blobs(max_size=max_size, images_only=images_only)
-    if limit:
+    if limit is not None:
         todo = todo[:limit]
 
     bar = None

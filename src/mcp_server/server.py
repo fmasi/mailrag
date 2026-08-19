@@ -475,7 +475,8 @@ def list_attachments(
     Parity with the CLI ``attachments list``: at least one of ``thread_id`` /
     ``message_id`` must be given. Recurring small inline images (signature logos,
     spacer pixels) are excluded unless ``include_boilerplate=True`` — on a real
-    corpus they are 73% of all rows and would bury the actual documents. Returns a row per attachment
+    corpus they are 73% of all rows and would bury the actual documents.
+    Returns a row per attachment
     (``sha256``, ``filename``, ``mime``, ``size``, ``thread_id``, ``message_id``,
     ``inline``). The store is corpus-wide, so ``collection`` is accepted for API
     symmetry but not required. ``store`` is injectable for tests.
@@ -493,6 +494,20 @@ def list_attachments(
         )
         if not metas:
             _require_populated_store(store)
+            if not include_boilerplate:
+                # An empty result after filtering is a THIRD kind of nothing, and
+                # it must not read like the other two. "No attachments here" and
+                # "everything here was decoration" are different answers, and a
+                # caller told the first will stop looking.
+                raw = store.list_for(
+                    thread_id=thread_id, message_id=message_id, include_boilerplate=True
+                )
+                if raw:
+                    raise ValueError(
+                        f"all {len(raw)} attachment(s) here are decoration (signature "
+                        "images, disclaimer graphics, spacer pixels) — there is no document "
+                        "attached. Pass include_boilerplate=true to see them anyway."
+                    )
         return [_meta_to_dict(m) for m in metas]
     finally:
         if owns:
@@ -525,7 +540,13 @@ def get_attachment(
         try:
             fetched = store.fetch(sha256, extractor=ocr)
         except KeyError as exc:
-            _require_populated_store(store)
+            # `from None` on the store-empty path: the KeyError is noise once we
+            # know the real cause is an un-ingested store, and chaining it buries
+            # the actionable message under "another exception occurred".
+            try:
+                _require_populated_store(store)
+            except ValueError as empty:
+                raise empty from None
             raise ValueError(f"unknown attachment {sha256}") from exc
         return {
             "sha256": fetched["sha256"],

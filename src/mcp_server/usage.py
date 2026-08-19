@@ -24,6 +24,7 @@ a broken log is worth strictly less than a working search.
 from __future__ import annotations
 
 import functools
+import inspect
 import json
 import os
 import time
@@ -155,8 +156,6 @@ def instrument(tool: str) -> Callable:
     def decorate(fn: Callable) -> Callable:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            import inspect
-
             try:
                 bound = inspect.signature(fn).bind(*args, **kwargs)
                 bound.apply_defaults()

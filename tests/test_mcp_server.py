@@ -365,6 +365,47 @@ class TestListAttachmentsBoilerplateDefault(unittest.TestCase):
         self.assertEqual(store.boilerplate_calls, [True])
 
 
+class TestAllDecorationIsNotNoAttachments(unittest.TestCase):
+    """A third kind of nothing, which must not read like the other two.
+
+    "No attachments here", "the store was never built" and "everything here was
+    decoration" are different answers. A caller told the first will stop
+    looking, which is the whole failure this work exists to remove.
+    """
+
+    class _Store:
+        root = "/tmp/attachments"
+
+        def __init__(self, raw):
+            self._raw = raw
+
+        def count(self):
+            return 12
+
+        def list_for(self, *, thread_id=None, message_id=None, include_boilerplate=True):
+            return self._raw if include_boilerplate else []
+
+        def close(self):
+            pass
+
+    def test_all_decoration_raises_rather_than_returning_empty(self):
+        store = self._Store([_FakeMeta("a", "logo.png", "image/png", 900, "t1", "m1", inline=True)])
+        with self.assertRaises(ValueError) as ctx:
+            server.list_attachments(thread_id="t1", store=store)
+        msg = str(ctx.exception)
+        self.assertIn("decoration", msg)
+        self.assertIn("include_boilerplate", msg)
+
+    def test_thread_with_genuinely_no_attachments_returns_empty(self):
+        # Nothing raw either — so the honest answer really is "nothing here".
+        self.assertEqual(server.list_attachments(thread_id="t1", store=self._Store([])), [])
+
+    def test_include_boilerplate_true_never_raises(self):
+        store = self._Store([_FakeMeta("a", "logo.png", "image/png", 900, "t1", "m1", inline=True)])
+        rows = server.list_attachments(thread_id="t1", include_boilerplate=True, store=store)
+        self.assertEqual([r["filename"] for r in rows], ["logo.png"])
+
+
 class TestAttachmentStoreNeverBuilt(unittest.TestCase):
     """An un-ingested store must not answer like a thread with no attachments.
 
@@ -696,7 +737,10 @@ class TestListAttachments(unittest.TestCase):
     def test_message_id_passthrough(self):
         store = _FakeStore([])
         server.list_attachments(message_id="m9", store=store)
-        self.assertEqual(store.list_calls, [(None, "m9")])
+        # Two calls: the filtered listing, then a raw re-read to tell "nothing
+        # attached" apart from "everything attached was decoration". The second
+        # only happens on the empty path.
+        self.assertEqual(store.list_calls, [(None, "m9"), (None, "m9")])
 
     def test_requires_an_identifier(self):
         with self.assertRaises(ValueError):
