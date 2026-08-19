@@ -22,3 +22,26 @@ or a doc.
 ## Documentation-only changes
 
 No tests required. Skip steps 1 and 2 above.
+
+## Know the audience before you write
+
+Every published surface has a different reader. State which one you are writing
+for — and for a blog post, which job it is doing — before drafting. The same
+finding needs a different shape on each: a negative result is credibility on
+GitHub, noise on a recruiter page, and a story hook on the blog.
+
+| Surface | Reader |
+|---------|--------|
+| This repo — `README.md`, `docs/*.md` | Technical peers: solution architects, engineers. Often reached during an interview process or a community discussion. |
+| `docs/index.html` → fmasi.eu | Recruiters first; hiring managers may get dedicated pages, and they need something different. |
+| Blog (`fmasi.github.io/blog/…`), amplified on LinkedIn | Varies by post: demonstrate rigour and findings, promote the project, or show domain knowledge. Pick one. |
+
+Within the repo, [`docs/INDEX.md`](docs/INDEX.md) is the canonical map and reading
+order: README → INDEX → guides → deep dives → the evidence tier
+(`CLAIMS` / `BENCHMARK` / `CASE_STUDY` / `EXPERIMENTS`). Route new material to the
+file whose job it is rather than appending where it happens to fit — mechanics to
+the subsystem doc, findings and dead ends to `EXPERIMENTS.md`, and **every
+published number to `CLAIMS.md`** with its source, corpus and date.
+
+Keep `README.md` short. It is the front door, not the manual: it points at
+`docs/INDEX.md` instead of repeating it.
