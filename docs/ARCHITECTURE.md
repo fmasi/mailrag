@@ -282,6 +282,25 @@ flood an agent's context. Every tool call is logged one line at a time to
 `~/.mailrag/mcp_usage.jsonl`, which is how we tell an unused tool from a badly
 described one. See [MCP_SERVER.md](MCP_SERVER.md).
 
+**Attachments travel two independent paths, on purpose.** Attachment *text* is extracted at
+index time and embedded for retrieval (`src/indexing/attachment_docs.py`), which is what
+makes a spreadsheet's contents findable by `search_email`. Attachment *bytes and metadata*
+go to a separate sha256-addressed store (`src/attachments/`), which is what
+`list_attachments` / `get_attachment` read. The split is deliberate — retrieval wants
+chunked text in Qdrant, an agent fetching a document wants the file — but it has a sharp
+edge: only the index path runs during `onboard` / `index` / `sync`, so a fully indexed
+corpus can have an empty attachment store, and every listing then returns nothing that
+looks exactly like "this thread has no attachments". Both tools now check the store and
+say so. Keeping the two in step is tracked in
+[#160](https://github.com/fmasi/mailrag/issues/160).
+
+Judging which attachments are decoration is a **measure-then-judge** design: the store
+records signals per blob (OCR character count, word and digit counts, dimensions, status,
+extractor) and computes the verdict at read time, rather than storing a verdict. The
+measurement is corpus-agnostic, the thresholds are not — so re-tuning for a different
+mailbox is a query, not a re-extraction. `EXPERIMENTS.md` §16 records the four cheaper
+signals that were tried first and why each failed.
+
 ## Module map
 
 | Path | Responsibility |
@@ -296,6 +315,7 @@ described one. See [MCP_SERVER.md](MCP_SERVER.md).
 | `src/query/` | Hybrid searcher, RRF fusion, rerankers, thread expansion, HyDE |
 | `src/sync/` | Maildir/IMAP sources, spool, ledger, runner, scheduler units |
 | `src/mcp_server/` | Seven-tool stdio MCP server, bounded corpus grep, tool-usage log |
+| `src/attachments/` | Attachment blob store (sha256-addressed), lazy text extraction, bulk noise signals |
 | `src/persona/`, `src/tui/` | Named recipes over the verbs; full-screen Textual wizard |
 | `src/cluster/` | Embedding-space noise-pocket discovery |
 | `src/eval/` | Retrieval/answer evaluation harness (dev-only) |

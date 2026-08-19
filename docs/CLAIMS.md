@@ -77,6 +77,33 @@ is unblocked — it just needs the build step first.
 | P1 | `make bench` runs in **1.6 min** (MPS) / **14.7 min** (CPU-only) | README, `BENCHMARK.md`, Makefile | timed `make bench`, M5 Pro 6P+12E / 48 GB, load-gated | **Public** ✅ | 2026-08-12 |
 | P2 | `make bench` spends **zero LLM calls** | README, `BENCHMARK.md` | code inspection: `embed_summary=False`, `apply_noise_filter=False`, no profile, retrieval-only scoring | **Public** ✅ | 2026-08-12 |
 
+## Attachment-noise claims (2026-08-19)
+
+All measured on the private work corpus, so **author-reported**: reproducible by anyone
+with an equivalent mailbox and the commands below, not by a stranger. Recorded here
+because these figures appear in `MCP_SERVER.md`, `ARCHITECTURE.md` and `EXPERIMENTS.md` §16.
+
+| # | Claim | Produced by | Corpus | Status | Last verified |
+|---|---|---|---|---|---|
+| A1 | **61%** of attachment rows are decoration (signature blocks, disclaimer images, newsletter headers, spacers) | `store.list_for(include_boilerplate=False)` over the built store | private work corpus, 45 454 rows / 6 761 blobs | Author-reported | 2026-08-19 |
+| A2 | Counting distinct *messages* rather than *threads* misclassifies **237 of 659 blobs (36%)** — images quoted down one reply chain | ad-hoc SQL over `attachments`, verified by opening the images | same | Author-reported | 2026-08-19 |
+| A3 | Measuring OCR text rescues **43 blobs** the metadata heuristic hid | `classify_blobs` then verdict diff against the heuristic | same | Author-reported | 2026-08-19 |
+| A4 | Bulk measurement costs **2 570 blobs in 240s, 0 failures** (~0.09s/blob, tesseract) | `./mailrag attachments build` | same | Author-reported | 2026-08-19 |
+| A5 | Tesseract against LLM vision on identical images: **0.41s vs 8.49s** (table), 0.07s vs 1.61s (header) — 16–20× | `scratchpad` benchmark over three labelled blobs | same, 3 images | Author-reported ⚠️ small n | 2026-08-19 |
+| A6 | LLM vision inflates a 3-word header from **22 to 159 characters** via its `DESCRIPTION:` preamble, crossing the text-rich threshold | same benchmark | same | Author-reported | 2026-08-19 |
+| A7 | Pruning decoration blobs would reclaim **13 MB of a 3.4 GB store (0.4%)** — sha256 dedup already collapses repeats | SQL over distinct `sha256` sizes | same | Author-reported | 2026-08-19 |
+| A8 | Bulk-header tagging rates differ by corpus: work **41.2% `is_bulk`** against personal **7.2%** | Qdrant `points/count` with payload filter | `work-rag-ctx-threadaware-v2` (132 269 pts), `personal-rag` (16 743 pts) | Author-reported | 2026-08-19 |
+
+> **A8 is not evidence that work mail is bulkier.** The two collections were built under
+> different policies: work v2 tags and keeps, while `personal-rag` was built with
+> `--embed-summary`, which drops noise ≥ 0.7 at build time — so its low residual rate means
+> the noise was already removed. Both are chunk-weighted, not per-email. Recorded because
+> the raw pair is easy to misread.
+
+> **A5 rests on three images.** Enough to choose the cheap engine by an order of magnitude,
+> not enough to publish a per-image latency figure. What A6 establishes — that the two
+> engines' character counts are not comparable without normalisation — does not depend on n.
+
 ## Scope claims (things we assert are *not* measured)
 
 | # | Claim | Verified by |

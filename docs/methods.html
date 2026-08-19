@@ -377,6 +377,47 @@
     </div>
   </section>
 
+  <section class="card">
+    <div class="head">
+      <h2>When the metadata lies: four signals that failed</h2>
+      <div class="chips">
+        <span class="chip id">A1–A3</span>
+        <span class="chip">author-reported</span>
+      </div>
+    </div>
+    <div class="body">
+      <p>Email attachments are mostly not attachments. On a real 45,454-row mailbox, <b>61% of
+         them are decoration</b> — signature blocks, legal disclaimers rendered as images,
+         newsletter headers, spacer pixels. Filtering them out sounds like a five-minute job.
+         Every cheap way of doing it was wrong, and each one was caught only by opening the
+         images rather than trusting what the database said about them.</p>
+      <table>
+        <tr><th>signal</th><th>why it fails</th></tr>
+        <tr><td>filename / type</td><td><code>image002.png</code> is a 259-byte spacer in one message and a 12&nbsp;MB pasted screenshot in another. Both <code>image/png</code>, both inline.</td></tr>
+        <tr><td>aspect ratio</td><td>"Banner-shaped means signature" — the largest banner turned out to be a product-lifecycle table with end-of-life dates.</td></tr>
+        <tr><td>reuse across messages</td><td>An image quoted down an 18-message reply chain counts 18 times. This wrongly removed <b>36%</b> of what it touched, including a feature-request table.</td></tr>
+        <tr><td>reuse across threads</td><td>Better — but a benchmark table shared into five threads <i>because it is useful</i> still looks like a logo.</td></tr>
+      </table>
+      <p>What works is measuring the text the image actually contains: a logo reads as a company
+         name or nothing, a table reads as dozens of words and numbers. Cheap, too —
+         <b>0.09s per image</b>, and keyed by content hash, so the one logo carried by 2,273
+         messages is measured once.</p>
+      <p>Calibrating that produced two corrections in opposite directions. A pasted
+         "401 Access is denied" screenshot measures 29 characters and <i>is</i> content, so
+         text-poverty alone cannot condemn. And a confidentiality disclaimer rendered as an
+         image measures 748 characters across <b>829 threads</b> — text-rich, and certainly not
+         content. Nothing genuine appears in that many unrelated conversations.</p>
+      <p>One more trap, found only by benchmarking the two OCR engines against each other: the
+         vision model prefixes a description before its transcription, so the same three-word
+         header measures <b>22 characters via tesseract and 159 via the LLM</b> — across the
+         threshold that decides the verdict. A rule that is a threshold over an extractor's
+         output has the extractor as part of the rule.</p>
+      <p>A band between 15 and 25 threads stays genuinely ambiguous — a real reporting-deadline
+         table sits at 15, a disclaimer at 18 — so the cut errs toward keeping. Some signature
+         images survive rather than one real document being hidden.</p>
+    </div>
+  </section>
+
   <section>
     <div class="idx">
       <div class="n">08</div>
