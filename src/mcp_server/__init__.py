@@ -7,7 +7,9 @@ searcher (``src.query.hybrid.build_hybrid_searcher``), the grounded-answer path
 Claude Desktop / Claude Code) can discover, search, question and read attachments
 from any indexed email corpus. No retrieval/extraction logic is reimplemented.
 
-Launch with ``python -m src.mcp_server`` or ``mailrag mcp``.
+Launch with ``mailrag mcp`` (the repo-root shim: self-locating, and it loads
+``.env`` so the model/key/corpus-root come from project config) or, if the
+environment is already fully set, ``python -m src.mcp_server``.
 """
 
 from src.mcp_server.server import (
