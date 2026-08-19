@@ -271,9 +271,16 @@ is reimplemented — and every query tool takes an optional `collection`, so one
 running server serves any indexed corpus. `grep_email` deserves a note: it is
 a literal/regex scan over the raw `.eml` corpus that bypasses embeddings
 entirely, because needle hunts (an ID, an amount, an error string) are exactly
-where semantic retrieval is blind. Search output is snippet-bounded with a
-hard character cap so a single tool call can never flood an agent's context.
-See [MCP_SERVER.md](MCP_SERVER.md).
+where semantic retrieval is blind. It carries no index, so its cost is inverted
+from what you would expect: a *frequent* pattern returns in seconds because the
+walk stops at the match cap, while a *rare or absent* one decodes the whole
+corpus. It is therefore bounded by wall clock and file count as well as matches,
+and reports `scanned`/`corpus_files`/`complete` so an empty result cannot be read
+as a confident "not there" when the scan simply ran out of budget. Search output
+is snippet-bounded with a hard character cap so a single tool call can never
+flood an agent's context. Every tool call is logged one line at a time to
+`~/.mailrag/mcp_usage.jsonl`, which is how we tell an unused tool from a badly
+described one. See [MCP_SERVER.md](MCP_SERVER.md).
 
 ## Module map
 
@@ -288,7 +295,7 @@ See [MCP_SERVER.md](MCP_SERVER.md).
 | `src/ingest/` | Embedder protocol + bge-m3/NIM impls, Qdrant hybrid collection management |
 | `src/query/` | Hybrid searcher, RRF fusion, rerankers, thread expansion, HyDE |
 | `src/sync/` | Maildir/IMAP sources, spool, ledger, runner, scheduler units |
-| `src/mcp_server/` | Seven-tool stdio MCP server, corpus grep |
+| `src/mcp_server/` | Seven-tool stdio MCP server, bounded corpus grep, tool-usage log |
 | `src/persona/`, `src/tui/` | Named recipes over the verbs; full-screen Textual wizard |
 | `src/cluster/` | Embedding-space noise-pocket discovery |
 | `src/eval/` | Retrieval/answer evaluation harness (dev-only) |

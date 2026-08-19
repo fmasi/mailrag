@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 
 from src.attachments.store import AttachmentStore
 from src.llm.answer import answer_from_threads
+from src.mcp_server import usage
 from src.mcp_server.grep import grep_email as _grep_email
 from src.onboard import latest_manifest_collection
 from src.query.hybrid import build_hybrid_searcher
@@ -345,7 +346,9 @@ def grep_email(
     collection: Optional[str] = None,
     max_matches: int = 50,
     regex: bool = False,
-) -> List[Dict[str, Any]]:
+    max_files: Optional[int] = None,
+    max_seconds: Optional[float] = None,
+) -> Dict[str, Any]:
     """Literal / regex search over the raw email corpus — no embeddings (issue #82).
 
     Thin wrapper over :func:`src.mcp_server.grep.grep_email`: walks the raw ``.eml``
@@ -354,9 +357,20 @@ def grep_email(
     escape hatch for needle hunts (numbers, IDs, emails, error strings) where dense
     retrieval is blind. Attachment *contents* are not searched (issue #80).
 
+    The scan is bounded by matches, files **and** wall clock, and the result
+    reports ``scanned``/``corpus_files``/``complete`` so an empty result can be
+    read correctly — see the underlying function for the cost model.
+    ``max_seconds=None`` here means "use the module default" (60s), not "no
+    deadline"; pass the deadline explicitly to widen it.
+
     Raises ``ValueError`` on a blank pattern, an invalid regex, or a missing corpus.
     """
-    return _grep_email(pattern, collection=collection, max_matches=max_matches, regex=regex)
+    kwargs: Dict[str, Any] = {"collection": collection, "max_matches": max_matches, "regex": regex}
+    if max_files is not None:
+        kwargs["max_files"] = max_files
+    if max_seconds is not None:
+        kwargs["max_seconds"] = max_seconds
+    return _grep_email(pattern, **kwargs)
 
 
 def answer_question(
@@ -516,6 +530,7 @@ def build_server():
     server = MCPServer(SERVER_NAME)
 
     @server.tool(name="list_collections")
+    @usage.instrument("list_collections")
     def _tool_list_collections() -> List[Dict[str, Any]]:
         """Discover the indexed email corpora available on the Qdrant instance.
 
@@ -525,6 +540,7 @@ def build_server():
         return list_collections()
 
     @server.tool(name="search_email")
+    @usage.instrument("search_email")
     def _tool_search_email(
         query: str,
         collection: Optional[str] = None,
@@ -557,6 +573,7 @@ def build_server():
         )
 
     @server.tool(name="get_thread")
+    @usage.instrument("get_thread")
     def _tool_get_thread(
         thread_id: str,
         collection: Optional[str] = None,
@@ -572,28 +589,63 @@ def build_server():
         return get_thread(thread_id, collection=collection, mode=mode)
 
     @server.tool(name="grep_email")
+    @usage.instrument("grep_email")
     def _tool_grep_email(
         pattern: str,
         collection: Optional[str] = None,
         max_matches: int = 50,
         regex: bool = False,
-    ) -> List[Dict[str, Any]]:
-        """Literal/regex search over the raw email corpus — no embeddings.
+        max_files: Optional[int] = None,
+        max_seconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Exact literal/regex search over the RAW email corpus — no embeddings.
 
-        The escape hatch for exact needle hunts (numbers, IDs, emails, error
-        strings) where dense retrieval is blind. Returns matched line snippets
-        plus message metadata. Searches subject + decoded body only; attachment
-        *contents* are not yet covered.
+        The escape hatch for needle hunts that retrieval is blind to: account
+        numbers, order ids, email addresses, error strings — anything where the
+        exact characters matter. Searches subject + decoded body (quoted-printable,
+        base64, HTML→text). Attachment CONTENTS are not searched; use
+        ``list_attachments`` / ``get_attachment`` for those.
+
+        COST — read this before choosing arguments. There is no index: each call
+        decodes raw ``.eml`` files one at a time (~2ms each, over a corpus that is
+        routinely tens of thousands of messages). The scan stops the moment
+        ``max_matches`` messages have matched, so a pattern that hits often returns
+        in seconds — while a pattern that matches rarely, or not at all, walks the
+        ENTIRE corpus. "Does X appear anywhere?" is the most expensive question you
+        can ask here, and ``regex=True`` costs no more per message than a literal:
+        what costs is how rarely the pattern hits.
+
+        So: prefer a literal pattern; use ``max_matches=1`` for an existence check
+        (it returns on the first hit); and bound the work with ``max_seconds`` /
+        ``max_files`` rather than waiting — a partial answer you can describe beats
+        a call that hangs until the client times out.
+
+        Returns ``{matches, scanned, corpus_files, complete, stop_reason,
+        elapsed_s, root}``. An empty ``matches`` means "not in this corpus" ONLY
+        when ``complete`` is true. When it is false the needle is merely absent
+        from the first ``scanned`` of ``corpus_files`` messages — report it that
+        way, or re-run with a bigger budget. Do not turn a truncated scan into a
+        confident "not found".
 
         Args:
             pattern: Literal string, or a regex when ``regex=True``.
             collection: Accepted for symmetry (grep is corpus-directory based).
             max_matches: Max matching messages (default 50, hard cap 500).
             regex: Treat ``pattern`` as a Python regex (default False = literal).
+            max_files: Stop after scanning this many messages (default: no limit).
+            max_seconds: Wall-clock budget in seconds (default 60, hard cap 900).
         """
-        return grep_email(pattern, collection=collection, max_matches=max_matches, regex=regex)
+        return grep_email(
+            pattern,
+            collection=collection,
+            max_matches=max_matches,
+            regex=regex,
+            max_files=max_files,
+            max_seconds=max_seconds,
+        )
 
     @server.tool(name="answer_question")
+    @usage.instrument("answer_question")
     def _tool_answer_question(
         query: str,
         collection: Optional[str] = None,
@@ -609,12 +661,29 @@ def build_server():
         return answer_question(query, collection=collection, k=k)
 
     @server.tool(name="list_attachments")
+    @usage.instrument("list_attachments")
     def _tool_list_attachments(
         thread_id: Optional[str] = None,
         message_id: Optional[str] = None,
         collection: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """List the attachments of an email thread or message.
+        """List the files attached to a thread — the way in to their contents.
+
+        Attachment contents are INVISIBLE to ``search_email``, ``answer_question``
+        and ``grep_email``: those index message bodies only. So when the real
+        answer lives in a document somebody emailed — an invoice PDF, a
+        spreadsheet of figures, a signed contract, a scanned letter, a ticket or
+        boarding pass — body search finds the covering email and then looks as
+        though the numbers simply are not there. They are; they are in the file.
+
+        Workflow: ``search_email`` / ``grep_email`` to find the thread → this tool
+        to list its attachments → ``get_attachment(sha256)`` to read one. A search
+        hit's ``attachment_names`` tells you a document exists; this tool gets you
+        the ``sha256`` you need to open it.
+
+        Returns a row per attachment: ``{sha256, filename, mime, size, thread_id,
+        message_id, inline}``. ``inline`` marks embedded images (signatures,
+        tracking pixels, logos) rather than real enclosures — usually skip those.
 
         Args:
             thread_id: Thread whose attachments to list (one of thread_id/message_id).
@@ -624,8 +693,19 @@ def build_server():
         return list_attachments(thread_id=thread_id, message_id=message_id, collection=collection)
 
     @server.tool(name="get_attachment")
+    @usage.instrument("get_attachment")
     def _tool_get_attachment(sha256: str, ocr: Optional[str] = None) -> Dict[str, Any]:
-        """Return the extracted text and metadata for one attachment by sha256.
+        """Read the extracted TEXT of one attachment — PDF, spreadsheet, doc, scan.
+
+        The only way to see inside an emailed document. Extracts (or serves the
+        cached) text for the attachment identified by ``sha256``, running OCR when
+        the file is a scan or an image. Raw bytes are never returned over MCP. Get
+        the ``sha256`` from ``list_attachments``.
+
+        Returns ``{sha256, filename, mime, size, text, text_status}``. Always check
+        ``text_status``: it reports when extraction failed or OCR was unavailable,
+        so an empty ``text`` is not evidence that the document is blank — and
+        should not be reported as such.
 
         Args:
             sha256: Content hash of the attachment (from ``list_attachments``).

@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "mailrag": {
+      "type": "stdio",
+      "command": "${MAILRAG_PYTHON:-python}",
+      "args": ["-m", "src.mcp_server"],
+      "env": {
+        "PYTHONPATH": "${MAILRAG_HOME:-.}",
+        "MAILRAG_QDRANT_URL": "${MAILRAG_QDRANT_URL:-http://localhost:6333}",
+        "MAILRAG_EML_ROOT": "${MAILRAG_EML_ROOT:-~/rag_eml}",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "RAG_LLM_API_BASE": "${RAG_LLM_API_BASE:-http://localhost:1234/v1}",
+        "RAG_LLM_MODEL": "${RAG_LLM_MODEL:-mistralai/magistral-small-2509}",
+        "RAG_LLM_API_KEY": "${RAG_LLM_API_KEY:-}"
+      }
+    }
+  }
+}

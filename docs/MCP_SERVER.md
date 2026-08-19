@@ -37,7 +37,9 @@ All seven tools are registered on one server. Every query tool accepts an option
 > full thread on demand with `get_thread` (or `search_email(..., full=True)`).
 > For exact needle hunts — a number, an ID, an email address, an error string —
 > use `grep_email`, a literal/regex scan over the raw corpus that bypasses
-> embeddings entirely.
+> embeddings entirely (mind its [cost model](#cost-model--why-the-scan-is-bounded)).
+> None of those three read inside attachments: for a figure in a spreadsheet or a
+> PDF, go `list_attachments` → `get_attachment`.
 
 ### `list_collections()`
 
@@ -112,7 +114,7 @@ are normalised before lookup, so `<abc@host>` and `abc@host` both work.
 - **Returns:** `{thread_id, subject, num_emails, text, date, last_date, from, to, message_ids, attachment_names}`.
 - **Errors:** `ValueError` on a blank id, an unknown thread, or an unconfigured corpus.
 
-### `grep_email(pattern, collection=None, max_matches=50, regex=False)`
+### `grep_email(pattern, collection=None, max_matches=50, regex=False, max_files=None, max_seconds=60)`
 
 Literal / regex search over the **raw email corpus** — no embeddings (issue #82).
 Walks the raw `.eml` files, decodes each body (quoted-printable + base64, HTML
@@ -125,31 +127,73 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
   - `collection` (str, optional) — accepted for API symmetry; grep is
     corpus-directory based (see the `MAILRAG_EML_ROOT` config below).
   - `max_matches` (int, default 50) — maximum matching **messages** to return.
-    Clamped to a hard cap of **500**.
+    Clamped to a hard cap of **500**. Set it to `1` for an existence check.
   - `regex` (bool, default `false`) — treat `pattern` as a Python regex.
-- **Returns:** up to `max_matches` rows
+  - `max_files` (int, optional) — stop after scanning this many messages.
+  - `max_seconds` (float, default 60, hard cap 900) — wall-clock budget for the
+    scan. `null` disables the deadline, which is only safe on a small corpus.
+- **Returns:** `{matches, scanned, corpus_files, complete, stop_reason, elapsed_s, root}`.
+  `matches` holds up to `max_matches` rows
   `{subject, from, to, date, message_id, attachment_names, matches, path}`, where
-  `matches` is a list of matched-line snippets.
-- **Errors:** `ValueError` on a blank `pattern`, an invalid regex, or a missing corpus
-  (`MAILRAG_EML_ROOT` unset and `~/rag_eml` absent).
+  the inner `matches` is a list of matched-line snippets.
+- **Errors:** `ValueError` on a blank `pattern`, an invalid regex, a non-positive
+  `max_seconds`, or a missing corpus (`MAILRAG_EML_ROOT` unset and `~/rag_eml`
+  absent).
 
 ```jsonc
 // grep_email("210,000,000")
-[
-  { "subject": "Global Partnership Staff call recap",
-    "from": "Dana.Reyes@northwind.example", "to": "team@northwind.example",
-    "date": "Wed, 30 Jul 2025 …", "message_id": "<a1b2c3@northwind.example>",
-    "attachment_names": ["Q3 MBO targets partner team.xlsx"],
-    "matches": ["…20% of the $210 million annual plan…"],
-    "path": "/Users/you/rag_eml/Inbox/Wind River/… .eml" }
-]
+{
+  "matches": [
+    { "subject": "Global Partnership Staff call recap",
+      "from": "Dana.Reyes@northwind.example", "to": "team@northwind.example",
+      "date": "Wed, 30 Jul 2025 …", "message_id": "<a1b2c3@northwind.example>",
+      "attachment_names": ["Q3 MBO targets partner team.xlsx"],
+      "matches": ["…20% of the $210 million annual plan…"],
+      "path": "/Users/you/rag_eml/Inbox/Wind River/… .eml" }
+  ],
+  "scanned": 1841, "corpus_files": 73219, "complete": false,
+  "stop_reason": "max_matches", "elapsed_s": 4.4, "root": "/Users/you/rag_eml"
+}
 ```
+
+#### Cost model — why the scan is bounded
+
+There is no index behind `grep_email`: every call decodes raw `.eml` files one at
+a time, at roughly **2ms per message**. On a real personal corpus (73k messages /
+11 GB is typical) a full pass is minutes of CPU warm, and considerably worse cold.
+
+The match cap alone does **not** bound that work — it stops the walk early only
+when the pattern actually *hits*. So:
+
+| Pattern | Behaviour |
+|---------|-----------|
+| Matches often | Returns in seconds — stops at `max_matches`. |
+| Matches rarely / never | Scans the **entire** corpus. |
+
+Which makes *"does this string appear anywhere?"* the most expensive question you
+can ask here — and it is the common one. `regex=true` costs no more per message
+than a literal (measured: 1.6 vs 1.8 ms/file); what costs is how rarely the
+pattern hits. A loose regex that matches nothing is the worst case, and one such
+call previously ran an agent into a 30-minute client timeout with nothing to show
+for it.
+
+Hence `max_seconds` (default 60) and `max_files`, and hence the scan report:
+
+> **An empty `matches` means "not in this corpus" only when `complete` is
+> `true`.** Otherwise the needle is merely absent from the first `scanned` of
+> `corpus_files` messages — a weaker claim, and one worth stating as such rather
+> than reporting the needle as missing. Re-run with a larger budget to settle it.
+
+For a pure literal over the raw tree, shell `rg` is far faster than this tool —
+its one blind spot is base64/quoted-printable bodies, which is exactly what
+`grep_email` decodes.
 
 > **Scope note.** `grep_email` searches the message **subject + decoded body**
 > only. It does **not** yet read attachment *bytes* — a spreadsheet cell or PDF
 > text buried in an `.xlsx`/`.pdf` will not match, though the attachment's
-> filename is reported in `attachment_names`. Attachment content indexing is
-> tracked separately (issue #80).
+> filename is reported in `attachment_names`. Use `list_attachments` +
+> `get_attachment` to read inside those. Attachment content indexing is tracked
+> separately (issue #80).
 
 ### `answer_question(query, collection=None, k=3)`
 
@@ -183,8 +227,17 @@ grounded natural-language answer for you.
 
 ### `list_attachments(thread_id=None, message_id=None, collection=None)`
 
-List the attachments belonging to a thread or a message (parity with the CLI
-`./mailrag attachments list`).
+List the files attached to a thread or a message (parity with the CLI
+`./mailrag attachments list`) — and the way in to their contents.
+
+> **Attachment contents are invisible to `search_email`, `answer_question` and
+> `grep_email`.** Those index message *bodies* only. So when the answer lives in
+> a document somebody emailed — an invoice PDF, a spreadsheet of figures, a
+> signed contract, a scanned letter — body search finds the covering email and
+> then looks as though the numbers are not there. They are; they are in the file.
+> The route is: `search_email` / `grep_email` to find the thread → this tool for
+> its `sha256`s → `get_attachment` to read one. A search hit's
+> `attachment_names` is the hint that a document exists.
 
 - **Args:**
   - `thread_id` (str, optional) — thread whose attachments to list.
@@ -207,15 +260,18 @@ List the attachments belonging to a thread or a message (parity with the CLI
 
 ### `get_attachment(sha256, ocr=None)`
 
-Return the **extracted text** (and metadata) for one attachment (parity with the
-CLI `./mailrag attachments get --text`). Raw bytes are **never** returned over MCP.
+Read the **extracted text** of one attachment — PDF, spreadsheet, doc, scan
+(parity with the CLI `./mailrag attachments get --text`). The only way to see
+inside an emailed document: it extracts (or serves the cached) text, running OCR
+when the file is a scan or an image. Raw bytes are **never** returned over MCP.
 
 - **Args:**
   - `sha256` (str, required) — content hash of the attachment (from `list_attachments`).
   - `ocr` (str, optional) — extraction backend: `llm` | `tesseract` | `cloud`
     (like the CLI `--extractor` flag). Defaults to `$RAG_ATTACH_EXTRACTOR` or `llm`.
-- **Returns:** `{sha256, filename, mime, size, text, text_status}`. `text_status`
-  reports how extraction went (e.g. `ok`, `ocr_unavailable`).
+- **Returns:** `{sha256, filename, mime, size, text, text_status}`. Always check
+  `text_status` (e.g. `ok`, `ocr_unavailable`): it reports when extraction failed,
+  so an empty `text` is **not** evidence that the document is blank.
 - **Errors:** `ValueError` on a blank `sha256` or an unknown attachment.
 
 ```jsonc
@@ -260,6 +316,8 @@ Config mirrors `./mailrag ask` and is resolved from flags/environment:
 | Answer LLM key | `$RAG_LLM_API_KEY` → `lm-studio` placeholder | **Set this in the MCP server config if your endpoint enforces auth** — the `lm-studio` placeholder is for auth-less local servers and is rejected with a 401 otherwise (issue #83). The startup healthcheck names it on failure. |
 | Answer LLM model | `$RAG_LLM_MODEL` | Required for `answer_question`; the healthcheck names it when unset. |
 | Raw corpus (grep) | `$MAILRAG_EML_ROOT` → `~/rag_eml` | The directory of raw `.eml` files `grep_email` scans. Must be the corpus you onboarded. |
+| Usage log | `$MAILRAG_MCP_USAGE_LOG` → `~/.mailrag/mcp_usage.jsonl` | One JSON line per tool call. Set to `off` (or `""`/`0`/`none`) to disable. See [Usage logging](#usage-logging). |
+| Usage log arguments | `$MAILRAG_MCP_USAGE_ARGS` → `values` | `values` logs truncated argument values; `names` logs only names and types. |
 | Attachment OCR backend | `ocr` arg → `$RAG_ATTACH_EXTRACTOR` → `llm` | `$RAG_ATTACH_MAX_PAGES` bounds how many PDF pages OCR renders. |
 
 > **`answer_question` startup healthcheck.** The first `answer_question` call
@@ -269,6 +327,40 @@ Config mirrors `./mailrag ask` and is resolved from flags/environment:
 > non-LLM tools (`search_email`, `grep_email`, `list_collections`,
 > `list_attachments`, `get_attachment`) do **not** depend on the LLM and keep
 > working when it is down.
+
+## Usage logging
+
+Every tool call appends one JSON line to `~/.mailrag/mcp_usage.jsonl` (override
+with `$MAILRAG_MCP_USAGE_LOG`, disable with `off`):
+
+```jsonc
+{"ts": "2026-08-19T08:22:21+00:00", "tool": "grep_email",
+ "args": {"pattern": "support@…", "max_matches": 50, "regex": true, "max_seconds": 10},
+ "duration_ms": 10088.1, "ok": true, "result_count": 0,
+ "complete": false, "scanned": 4138, "stop_reason": "deadline"}
+```
+
+Arguments left unset are omitted, so the log shows what callers actually *chose*
+to pass — which is the signal for whether a parameter earns its place in the tool
+schema. Values are truncated to 200 characters; set `MAILRAG_MCP_USAGE_ARGS=names`
+to log only names and types when even a search query is too sensitive to keep on
+disk. The log lives outside the repo because it records your own queries against
+your own mail.
+
+What it is for: a tool nobody calls is usually a badly *described* tool rather
+than an unwanted one, and the log is the only way to tell the difference — along
+with which calls are slow enough to be abandoned, which fail, and which arguments
+are dead weight. Logging failures are swallowed: a broken log must never break a
+search.
+
+```bash
+# what gets used
+jq -r .tool ~/.mailrag/mcp_usage.jsonl | sort | uniq -c | sort -rn
+# slowest calls
+jq -r 'select(.duration_ms > 5000) | "\(.duration_ms)ms \(.tool) \(.args)"' ~/.mailrag/mcp_usage.jsonl
+# greps that ran out of budget rather than finding nothing
+jq -r 'select(.tool=="grep_email" and .complete==false)' ~/.mailrag/mcp_usage.jsonl
+```
 
 ## Running it
 
@@ -298,6 +390,22 @@ client — and there is **no *installed* console command** (Poetry stays
 `package-mode = false`). So point clients directly at the `mailrag` env's Python
 running the module, with `PYTHONPATH` set to the repo root so `src` is importable.
 Adjust the paths to your checkout.
+
+### Project scope (`.mcp.json`)
+
+The repo ships a project-scoped [`.mcp.json`](../.mcp.json), so any MCP client
+that reads project config picks the server up with no per-machine setup. It holds
+no secrets — every value is an env lookup with a default:
+
+| Variable | Default | Set it when |
+|----------|---------|-------------|
+| `MAILRAG_PYTHON` | `python` | Your interpreter is not on `PATH` (e.g. `/opt/miniconda3/envs/mailrag/bin/python`). |
+| `MAILRAG_HOME` | `.` | The client does not launch the server from the repo root. |
+| `MAILRAG_EML_ROOT` | `~/rag_eml` | Your raw `.eml` corpus lives elsewhere. |
+| `RAG_LLM_API_KEY` | *(empty)* | Your LLM endpoint enforces auth — inherited from your shell, never committed. |
+
+Per-user config (`claude mcp add`, below) still wins over it, so keep the machine
+-specific values there and leave `.mcp.json` as the portable baseline.
 
 ### Claude Code
 

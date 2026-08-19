@@ -5,6 +5,10 @@ attachment) in a temp dir, so no live services and no loader coupling. Asserts:
 literal match, regex match, no-match, decoding of each encoding, subject match,
 metadata + attachment-name surfacing, and the bounds (max_matches / hard cap /
 invalid inputs / missing corpus).
+
+``TestGrepScanBounds`` covers the work bounds and the scan report — the part
+that lets a caller tell "this needle is not in the corpus" apart from "the scan
+ran out of budget", which an unqualified empty list could not express.
 """
 
 import base64
@@ -123,10 +127,15 @@ class _Corpus:
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
+def _matches(*args, **kwargs):
+    """Call grep_email and return just the rows (the scan report is asserted below)."""
+    return grep.grep_email(*args, **kwargs)["matches"]
+
+
 class TestGrepEmail(unittest.TestCase):
     def test_literal_match_in_plain_body(self):
         with _Corpus() as root:
-            rows = grep.grep_email("4021", root=root)
+            rows = _matches("4021", root=root)
         subjects = [r["subject"] for r in rows]
         self.assertIn("Invoice", subjects)
         hit = next(r for r in rows if r["subject"] == "Invoice")
@@ -134,7 +143,7 @@ class TestGrepEmail(unittest.TestCase):
 
     def test_metadata_surfaced(self):
         with _Corpus() as root:
-            rows = grep.grep_email("4021", root=root)
+            rows = _matches("4021", root=root)
         hit = next(r for r in rows if r["subject"] == "Invoice")
         self.assertEqual(hit["from"], "alice@x.com")
         self.assertEqual(hit["to"], "bob@y.com")
@@ -144,23 +153,23 @@ class TestGrepEmail(unittest.TestCase):
 
     def test_decodes_quoted_printable(self):
         with _Corpus() as root:
-            rows = grep.grep_email("fifty", root=root)
+            rows = _matches("fifty", root=root)
         self.assertTrue(any(r["subject"] == "QP message" for r in rows))
 
     def test_decodes_base64_body(self):
         with _Corpus() as root:
-            rows = grep.grep_email("ABC-999-XYZ", root=root)
+            rows = _matches("ABC-999-XYZ", root=root)
         self.assertTrue(any(r["subject"] == "B64 message" for r in rows))
 
     def test_strips_html_and_matches_text(self):
         with _Corpus() as root:
-            rows = grep.grep_email("210,000,000", root=root)
+            rows = _matches("210,000,000", root=root)
         subjects = [r["subject"] for r in rows]
         self.assertIn("HTML message", subjects)
 
     def test_regex_match(self):
         with _Corpus() as root:
-            rows = grep.grep_email(r"\$[0-9,]+", regex=True, root=root)
+            rows = _matches(r"\$[0-9,]+", regex=True, root=root)
         self.assertTrue(any(r["subject"] == "Invoice" for r in rows))
 
     def test_invalid_regex_raises(self):
@@ -170,23 +179,23 @@ class TestGrepEmail(unittest.TestCase):
 
     def test_no_match_returns_empty(self):
         with _Corpus() as root:
-            rows = grep.grep_email("thisstringappearsnowhere", root=root)
+            rows = _matches("thisstringappearsnowhere", root=root)
         self.assertEqual(rows, [])
 
     def test_subject_only_match_surfaces(self):
         with _Corpus() as root:
-            rows = grep.grep_email("MBO targets", root=root)
+            rows = _matches("MBO targets", root=root)
         self.assertTrue(any(r["subject"].startswith("Q3 MBO") for r in rows))
 
     def test_attachment_names_surfaced_but_bytes_not_searched(self):
         with _Corpus() as root:
             # Match the body so the message surfaces; assert the attachment name
             # is reported even though its cell contents are NOT searched (#80).
-            rows = grep.grep_email("MBO targets", root=root)
+            rows = _matches("MBO targets", root=root)
             mbo = next(r for r in rows if r["subject"].startswith("Q3 MBO"))
             self.assertIn("targets.xlsx", mbo["attachment_names"])
             # The number lives ONLY in the attachment bytes -> grep must NOT find it.
-            att_hits = grep.grep_email("210,000,000", root=root)
+            att_hits = _matches("210,000,000", root=root)
             self.assertFalse(any(r["subject"].startswith("Q3 MBO") for r in att_hits))
 
     def test_blank_pattern_rejected(self):
@@ -196,12 +205,12 @@ class TestGrepEmail(unittest.TestCase):
 
     def test_max_matches_bounds_results(self):
         with _Corpus() as root:
-            rows = grep.grep_email("e", regex=False, max_matches=1, root=root)
+            rows = _matches("e", regex=False, max_matches=1, root=root)
         self.assertEqual(len(rows), 1)
 
     def test_max_matches_hard_capped(self):
         with _Corpus() as root:
-            rows = grep.grep_email("e", max_matches=10**9, root=root)
+            rows = _matches("e", max_matches=10**9, root=root)
         self.assertLessEqual(len(rows), grep._HARD_MAX_MATCHES)
 
     def test_missing_corpus_raises_clear_error(self):
@@ -215,6 +224,81 @@ class TestGrepEmail(unittest.TestCase):
 
             with mock.patch.dict(os.environ, {"MAILRAG_EML_ROOT": root}, clear=True):
                 self.assertEqual(grep.resolve_eml_root(), root)
+
+
+class TestGrepScanBounds(unittest.TestCase):
+    """The scan report, and the three ways a scan can stop early."""
+
+    CORPUS_FILES = 5  # .eml files written by _Corpus
+
+    def test_full_scan_reports_complete(self):
+        with _Corpus() as root:
+            res = grep.grep_email("thisstringappearsnowhere", root=root)
+        self.assertTrue(res["complete"])
+        self.assertEqual(res["stop_reason"], "complete")
+        self.assertEqual(res["scanned"], self.CORPUS_FILES)
+        self.assertEqual(res["corpus_files"], self.CORPUS_FILES)
+        self.assertEqual(res["matches"], [])
+
+    def test_max_files_truncates_scan(self):
+        with _Corpus() as root:
+            res = grep.grep_email("e", max_files=2, root=root)
+        self.assertEqual(res["scanned"], 2)
+        self.assertEqual(res["corpus_files"], self.CORPUS_FILES)
+        self.assertFalse(res["complete"])
+        self.assertEqual(res["stop_reason"], "max_files")
+
+    def test_absent_needle_under_a_file_budget_is_not_reported_as_complete(self):
+        # The whole point of the report: an empty result from a truncated scan
+        # must NOT look like an empty result from a full scan, or a caller will
+        # turn "I ran out of budget" into a confident "it is not there".
+        with _Corpus() as root:
+            truncated = grep.grep_email("thisstringappearsnowhere", max_files=1, root=root)
+            full = grep.grep_email("thisstringappearsnowhere", root=root)
+        self.assertEqual(truncated["matches"], full["matches"])
+        self.assertFalse(truncated["complete"])
+        self.assertTrue(full["complete"])
+
+    def test_match_cap_marks_the_scan_incomplete(self):
+        # Stopping on max_matches means the corpus was NOT exhausted either.
+        with _Corpus() as root:
+            res = grep.grep_email("e", max_matches=1, root=root)
+        self.assertEqual(len(res["matches"]), 1)
+        self.assertEqual(res["stop_reason"], "max_matches")
+        self.assertFalse(res["complete"])
+
+    def test_deadline_stops_the_scan(self):
+        # An already-expired budget stops before the first file is parsed, which
+        # keeps the assertion deterministic rather than timing-dependent.
+        with _Corpus() as root:
+            res = grep.grep_email("e", max_seconds=1e-9, root=root)
+        self.assertEqual(res["stop_reason"], "deadline")
+        self.assertEqual(res["scanned"], 0)
+        self.assertFalse(res["complete"])
+        self.assertEqual(res["matches"], [])
+
+    def test_max_seconds_none_disables_the_deadline(self):
+        with _Corpus() as root:
+            res = grep.grep_email("thisstringappearsnowhere", max_seconds=None, root=root)
+        self.assertTrue(res["complete"])
+        self.assertEqual(res["scanned"], self.CORPUS_FILES)
+
+    def test_non_positive_max_seconds_rejected(self):
+        with _Corpus() as root:
+            with self.assertRaises(ValueError):
+                grep.grep_email("e", max_seconds=0, root=root)
+
+    def test_max_seconds_clamped_to_hard_cap(self):
+        with _Corpus() as root:
+            res = grep.grep_email("e", max_seconds=10**9, root=root)
+        # Clamping must not itself stop the scan; the cap only bounds the wait.
+        self.assertLessEqual(res["elapsed_s"], grep._HARD_MAX_SECONDS)
+        self.assertEqual(res["corpus_files"], self.CORPUS_FILES)
+
+    def test_root_is_reported(self):
+        with _Corpus() as root:
+            res = grep.grep_email("e", root=root)
+        self.assertEqual(res["root"], root)
 
 
 if __name__ == "__main__":

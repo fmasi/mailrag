@@ -311,13 +311,35 @@ class TestGetThread(unittest.TestCase):
 
 
 class TestGrepEmailTool(unittest.TestCase):
+    _RESULT = {"matches": [{"subject": "hit"}], "complete": True, "scanned": 5}
+
     def test_delegates_to_grep_module(self):
-        with mock.patch(
-            "src.mcp_server.server._grep_email", return_value=[{"subject": "hit"}]
-        ) as grep:
-            rows = server.grep_email("210,000,000", max_matches=5, regex=False)
+        with mock.patch("src.mcp_server.server._grep_email", return_value=self._RESULT) as grep:
+            res = server.grep_email("210,000,000", max_matches=5, regex=False)
         grep.assert_called_once_with("210,000,000", collection=None, max_matches=5, regex=False)
-        self.assertEqual(rows[0]["subject"], "hit")
+        self.assertEqual(res["matches"][0]["subject"], "hit")
+
+    def test_scan_report_is_passed_through(self):
+        # The caller needs `complete` to read an empty result correctly; the
+        # wrapper must not flatten the report back down to a bare row list.
+        with mock.patch("src.mcp_server.server._grep_email", return_value=self._RESULT):
+            res = server.grep_email("nothing")
+        self.assertTrue(res["complete"])
+        self.assertEqual(res["scanned"], 5)
+
+    def test_work_bounds_are_forwarded_when_given(self):
+        with mock.patch("src.mcp_server.server._grep_email", return_value=self._RESULT) as grep:
+            server.grep_email("x", max_files=100, max_seconds=5)
+        self.assertEqual(grep.call_args.kwargs["max_files"], 100)
+        self.assertEqual(grep.call_args.kwargs["max_seconds"], 5)
+
+    def test_unset_bounds_are_left_to_the_grep_defaults(self):
+        # Passing max_seconds=None through would disable the deadline outright,
+        # which is the opposite of what an unset argument should mean here.
+        with mock.patch("src.mcp_server.server._grep_email", return_value=self._RESULT) as grep:
+            server.grep_email("x")
+        self.assertNotIn("max_seconds", grep.call_args.kwargs)
+        self.assertNotIn("max_files", grep.call_args.kwargs)
 
 
 class TestAnswerQuestionHealthcheck(unittest.TestCase):
@@ -687,7 +709,9 @@ class TestServerRegistration(unittest.TestCase):
         )
         self.assertEqual(
             set(by_name["grep_email"].input_schema["properties"]),
-            {"pattern", "collection", "max_matches", "regex"},
+            # The work bounds are part of the tool contract: without them an
+            # agent has no way to stop a scan that will not find anything.
+            {"pattern", "collection", "max_matches", "regex", "max_files", "max_seconds"},
         )
         self.assertEqual(
             set(by_name["answer_question"].input_schema["properties"]),
@@ -766,10 +790,15 @@ class TestServerRegistration(unittest.TestCase):
 
     def test_call_tool_dispatches_into_grep_email(self):
         srv = server.build_server()
-        rows = [{"subject": "hit", "thread_id": "t1", "line": "an invoice line"}]
+        rows = {
+            "matches": [{"subject": "hit", "thread_id": "t1", "line": "an invoice line"}],
+            "complete": True,
+        }
         with mock.patch("src.mcp_server.server._grep_email", return_value=rows) as grep:
             result = asyncio.run(srv.call_tool("grep_email", {"pattern": "invoice"}))
-        self.assertEqual(result.structured_content["result"][0]["subject"], "hit")
+        payload = result.structured_content["result"]
+        self.assertEqual(payload["matches"][0]["subject"], "hit")
+        self.assertTrue(payload["complete"])
         self.assertFalse(result.is_error)
         # The pattern reaches the grep layer rather than being dropped or reused
         # as a semantic query — grep_email is the no-embeddings path.
