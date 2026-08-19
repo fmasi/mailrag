@@ -493,6 +493,7 @@ def _configure_prune(p):
 
 
 _DEFAULT_ATTACH_STORE = "~/.mailrag/attachments"
+_CLASSIFY_MAX_SIZE = 100_000
 
 
 def _cmd_attachments_build(args):
@@ -505,9 +506,24 @@ def _cmd_attachments_build(args):
     store = AttachmentStore(args.store)
     try:
         counts = ingest_eml(kept, store, progress=True)
+        print(f"attachments: {counts}")
+        if not args.no_classify:
+            # Measure the cheap tier in the same pass: the small inline images
+            # that pollute listings are ~0.05s each to OCR and are measured once
+            # per content hash, so this is minutes even on a large corpus. The
+            # expensive documents stay on the lazy get_attachment path.
+            from src.attachments.classify import classify_blobs
+            from src.attachments.extract import build_default_extractor
+
+            stats = classify_blobs(
+                store,
+                extractor=build_default_extractor(args.extractor),
+                max_size=args.classify_max_size,
+                progress=True,
+            )
+            print(f"classified: {stats.as_dict()}")
     finally:
         store.close()
-    print(f"attachments: {counts}")
     return 0
 
 
@@ -953,9 +969,20 @@ def build_parser():
     atb.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
     atb.add_argument("--limit", type=int, default=None)
     atb.add_argument(
+        "--no-classify",
+        action="store_true",
+        help="skip the noise-signal pass (listings then fall back to the metadata heuristic)",
+    )
+    atb.add_argument(
+        "--classify-max-size",
+        type=int,
+        default=_CLASSIFY_MAX_SIZE,
+        help=f"only measure blobs smaller than this (default {_CLASSIFY_MAX_SIZE} bytes)",
+    )
+    atb.add_argument(
         "--extractor",
         default=None,
-        help="OCR backend (accepted for forward compatibility; not yet wired into build)",
+        help="OCR backend used by the noise-signal pass (default: $RAG_ATTACH_EXTRACTOR or llm)",
     )
     atb.set_defaults(func=_cmd_attachments_build)
 

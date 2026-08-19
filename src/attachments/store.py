@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE INDEX IF NOT EXISTS idx_att_msg ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_att_thread ON attachments(thread_id);
 CREATE INDEX IF NOT EXISTS idx_att_sha ON attachments(sha256);
+CREATE TABLE IF NOT EXISTS blob_signals (
+    sha256 TEXT PRIMARY KEY, chars INTEGER, words INTEGER, unique_words INTEGER,
+    digits INTEGER, width INTEGER, height INTEGER, status TEXT, extractor TEXT,
+    measured_at TEXT
+);
 CREATE TABLE IF NOT EXISTS text_cache (
     sha256 TEXT, extractor TEXT, text TEXT, status TEXT,
     extractor_used TEXT, created_at TEXT,
@@ -124,6 +129,76 @@ class AttachmentStore:
         """
         return int(self._conn.execute("SELECT COUNT(*) FROM attachments").fetchone()[0])
 
+    def put_signals(self, sha256: str, signals) -> None:
+        """Record measured signals for one blob (keyed by content hash).
+
+        Keyed by sha256 because that is content identity: measuring the one
+        6.5KB logo once covers all 2,273 messages that carry it. 45,454 rows in
+        this corpus are only 6,761 distinct blobs.
+        """
+        self._conn.execute(
+            """INSERT OR REPLACE INTO blob_signals
+               (sha256, chars, words, unique_words, digits, width, height, status,
+                extractor, measured_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                sha256,
+                signals.chars,
+                signals.words,
+                signals.unique_words,
+                signals.digits,
+                signals.width,
+                signals.height,
+                signals.status,
+                signals.extractor,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        self._conn.commit()
+
+    def get_signals(self, sha256: str):
+        """Measured signals for one blob, or ``None`` if never measured."""
+        from src.attachments.signals import BlobSignals
+
+        r = self._conn.execute(
+            """SELECT chars, words, unique_words, digits, width, height, status, extractor
+               FROM blob_signals WHERE sha256=?""",
+            (sha256,),
+        ).fetchone()
+        if r is None:
+            return None
+        return BlobSignals(*r)
+
+    def unmeasured_blobs(self, *, max_size: Optional[int] = None, images_only: bool = True):
+        """Distinct blobs with no recorded signals yet — the classify work list.
+
+        Returns ``(sha256, mime, filename, size)`` rows. ``max_size`` bounds the
+        pass to the cheap tier: OCR on a 6KB logo is ~0.05s, while a 200-page
+        PDF is minutes, so bulk measurement is worth it only for the small
+        inline images that actually pollute listings.
+        """
+        sql = """SELECT a.sha256, a.mime, a.filename, MIN(a.size)
+                 FROM attachments a
+                 LEFT JOIN blob_signals s ON s.sha256 = a.sha256
+                 WHERE s.sha256 IS NULL"""
+        params: List[Any] = []
+        if images_only:
+            sql += " AND a.mime LIKE 'image/%'"
+        if max_size is not None:
+            sql += " AND a.size < ?"
+            params.append(max_size)
+        sql += " GROUP BY a.sha256"
+        return self._conn.execute(sql, params).fetchall()
+
+    def thread_counts(self) -> dict:
+        """sha256 -> number of distinct threads carrying it (the recurrence signal)."""
+        return {
+            r[0]: r[1]
+            for r in self._conn.execute(
+                "SELECT sha256, COUNT(DISTINCT thread_id) FROM attachments GROUP BY sha256"
+            )
+        }
+
     def path_for(self, sha256: str) -> str:
         return os.path.join(self._blobs, sha256[:2], sha256)
 
@@ -201,16 +276,51 @@ class AttachmentStore:
             where, params = "a.message_id=?", [message_id]
         elif thread_id is not None:
             where, params = "a.thread_id=?", [thread_id]
-        if not include_boilerplate:
-            where += " AND " + _NOT_BOILERPLATE
-            params += [
-                BOILERPLATE_MAX_SIZE,
-                BOILERPLATE_SMALL_MAX_SIZE,
-                BOILERPLATE_SMALL_MIN_THREADS,
-                BOILERPLATE_LARGE_MIN_THREADS,
-            ]
-        rows = self._conn.execute(f"SELECT a.* FROM attachments a WHERE {where}", params)
-        return [self._row_to_meta(r) for r in rows]
+        rows = list(self._conn.execute(f"SELECT a.* FROM attachments a WHERE {where}", params))
+        metas = [self._row_to_meta(r) for r in rows]
+        if include_boilerplate:
+            return metas
+        return [m for m in metas if not self._is_boilerplate(m)]
+
+    def _is_boilerplate(self, meta) -> bool:
+        """Decide one attachment, preferring measured signals over the heuristic.
+
+        Measured OCR signals win when they have an opinion, because the
+        heuristic is a guess about content made from metadata and is known to
+        misfire both ways — it hid a quarterly reporting-deadline table (small,
+        quoted into six threads because it is useful) while a text-poor "access
+        denied" screenshot is content someone pasted deliberately. Blobs that
+        were never measured, or whose extraction failed, fall back to the
+        heuristic, so coverage gaps degrade to today's behaviour rather than to
+        no filtering at all.
+        """
+        from src.attachments.signals import is_decoration
+
+        threads = self._thread_count(meta.sha256)
+        verdict = is_decoration(self.get_signals(meta.sha256), threads, meta.inline)
+        if verdict is not None:
+            return verdict
+        return self._heuristic_boilerplate(meta, threads)
+
+    def _thread_count(self, sha256: str) -> int:
+        return int(
+            self._conn.execute(
+                "SELECT COUNT(DISTINCT thread_id) FROM attachments WHERE sha256=?", (sha256,)
+            ).fetchone()[0]
+        )
+
+    def _heuristic_boilerplate(self, meta, threads: int) -> bool:
+        """Metadata-only fallback: recurrence across threads, scaled by size."""
+        if not (meta.inline and meta.mime.startswith("image/")):
+            return False
+        if meta.size >= BOILERPLATE_MAX_SIZE:
+            return False
+        needed = (
+            BOILERPLATE_SMALL_MIN_THREADS
+            if meta.size < BOILERPLATE_SMALL_MAX_SIZE
+            else BOILERPLATE_LARGE_MIN_THREADS
+        )
+        return threads >= needed
 
     def get_bytes(self, sha256: str) -> bytes:
         blob = self.path_for(sha256)
