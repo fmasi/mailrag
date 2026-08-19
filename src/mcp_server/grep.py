@@ -12,6 +12,11 @@ than importing the ingest loader — the loader is owned by another change and m
 not be modified. Decoding here mirrors the loader's approach (prefer ``text/plain``,
 fall back to stripped ``text/html``) closely enough for literal matching.
 
+**Bounded by design:** the scan is capped by matches, by files and by wall
+clock, and every result reports ``scanned`` / ``corpus_files`` / ``complete`` so
+a caller can tell "this needle is not in the corpus" apart from "the scan ran
+out of budget before it got there". See :func:`grep_email` for the cost model.
+
 **Scope note:** grep covers the message *envelope* (subject/from/to/date) and the
 decoded *body* text only. It does **not** yet read attachment bytes — spreadsheet
 / PDF / doc contents are out of scope here (that is attachment indexing, issue #80).
@@ -25,6 +30,7 @@ import email
 import email.header
 import os
 import re
+import time
 from email import policy
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
@@ -39,6 +45,17 @@ DEFAULT_EML_ROOT = "~/rag_eml"
 _DEFAULT_MAX_MATCHES = 50
 _HARD_MAX_MATCHES = 500
 _SNIPPET_CHARS = 200  # chars of context kept around each matched line
+
+# Work bounds. The match cap alone does NOT bound the scan: it stops the walk
+# early only when the pattern actually *hits*. A pattern that matches rarely --
+# or not at all, which is exactly the shape of a "does X appear anywhere?"
+# existence check -- walks every file in the corpus. On a real personal corpus
+# (tens of thousands of messages, several GB) that is minutes of CPU at best,
+# and it once ran a caller into a 30-minute MCP client timeout with nothing to
+# show for it. So the scan is also bounded by wall-clock and by file count, and
+# the result reports how far it actually got -- see ``complete`` below.
+_DEFAULT_MAX_SECONDS = 60.0
+_HARD_MAX_SECONDS = 900.0
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -233,13 +250,23 @@ def grep_email(
     regex: bool = False,
     *,
     root: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    max_files: Optional[int] = None,
+    max_seconds: Optional[float] = _DEFAULT_MAX_SECONDS,
+) -> Dict[str, Any]:
     """Literal / regex search over the raw email corpus (no embeddings).
 
-    Walks the raw ``.eml`` corpus, decodes each body (QP/base64 + HTML→text),
+    Walks the raw ``.eml`` corpus, decodes each body (QP/base64 + HTML->text),
     and returns one row per **matching message** with the matched line snippets
     and message metadata. This is the escape hatch for exact needle hunts where
     dense/hybrid retrieval is blind to numerals and identifiers (issue #82).
+
+    **Cost model.** There is no index: every call decodes raw ``.eml`` files one
+    at a time (~2ms per message). The walk stops early as soon as ``max_matches``
+    messages have matched, so a *frequent* pattern returns almost immediately
+    while a *rare or absent* one scans the whole corpus. ``regex=True`` is not
+    inherently slower than a literal -- what costs is how rarely the pattern
+    hits. ``max_seconds`` / ``max_files`` therefore bound the work directly, and
+    the result says how far the scan actually got.
 
     Args:
         pattern: The string (or regex, when ``regex=True``) to find. Matching is
@@ -249,17 +276,32 @@ def grep_email(
             per-collection mapping is wired up (currently a no-op label).
         max_matches: Maximum matching **messages** to return. Clamped to
             ``[1, 500]`` (hard cap) so a broad pattern can never flood output.
+            Set to 1 for an existence check -- it returns on the first hit.
         regex: When true, ``pattern`` is a Python regex; otherwise it is matched
             literally (special characters are escaped).
         root: Explicit corpus root (tests/advanced use); defaults to
             ``$MAILRAG_EML_ROOT`` or ``~/rag_eml``.
+        max_files: Stop after scanning this many messages (``None`` = no file
+            bound; the deadline still applies).
+        max_seconds: Wall-clock budget, clamped to ``(0, 900]``. ``None``
+            disables the deadline -- only safe on a small corpus.
 
     Returns:
-        Up to ``max_matches`` rows, each
-        ``{subject, from, to, date, message_id, attachment_names, matches, path}``
-        where ``matches`` is a list of matched-line snippets. ``attachment_names``
-        lists attachment filenames present on the message; their *contents* are
-        NOT searched (attachment indexing is issue #80).
+        ``{matches, scanned, corpus_files, complete, stop_reason, elapsed_s, root}``:
+
+        * ``matches`` -- up to ``max_matches`` rows, each
+          ``{subject, from, to, date, message_id, attachment_names, matches, path}``
+          where the inner ``matches`` is a list of matched-line snippets.
+          ``attachment_names`` lists attachment filenames present on the message;
+          their *contents* are NOT searched (attachment indexing is issue #80).
+        * ``scanned`` / ``corpus_files`` -- messages examined, out of the total
+          discovered under ``root``.
+        * ``complete`` -- true only when the **entire** corpus was scanned. An
+          empty ``matches`` means "not present in this corpus" only when this is
+          true; otherwise the needle is merely absent from the first ``scanned``
+          messages, which is a different claim.
+        * ``stop_reason`` -- ``complete`` | ``max_matches`` | ``max_files`` |
+          ``deadline``.
 
     Raises:
         ValueError: on a blank ``pattern``, an invalid regex, or a missing corpus.
@@ -267,11 +309,34 @@ def grep_email(
     if not pattern or not pattern.strip():
         raise ValueError("pattern must be a non-empty string")
     limit = max(1, min(int(max_matches), _HARD_MAX_MATCHES))
+    file_budget = max(1, int(max_files)) if max_files is not None else None
+    if max_seconds is None:
+        budget_s = None
+    else:
+        budget_s = min(float(max_seconds), _HARD_MAX_SECONDS)
+        if budget_s <= 0:
+            raise ValueError("max_seconds must be > 0 (or None to disable the deadline)")
     rx = _compile(pattern, regex)
     corpus = resolve_eml_root(root)
 
+    # Materialise the file list first: the walk is cheap next to parsing (~0.25s
+    # for 73k files) and it buys the caller a denominator, so a partial scan can
+    # be reported as "3,000 of 73,251" rather than an unqualified empty result.
+    paths = list(_discover_eml(corpus))
+    started = time.monotonic()
+    deadline = started + budget_s if budget_s is not None else None
+
     results: List[Dict[str, Any]] = []
-    for path in _discover_eml(corpus):
+    scanned = 0
+    stop_reason = "complete"
+    for path in paths:
+        if file_budget is not None and scanned >= file_budget:
+            stop_reason = "max_files"
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            stop_reason = "deadline"
+            break
+        scanned += 1
         parsed = _parse(path)
         if parsed is None:
             continue
@@ -287,5 +352,14 @@ def grep_email(
         row["matches"] = matches[:20]  # cap per-message snippets too
         results.append(row)
         if len(results) >= limit:
+            stop_reason = "max_matches"
             break
-    return results
+    return {
+        "matches": results,
+        "scanned": scanned,
+        "corpus_files": len(paths),
+        "complete": stop_reason == "complete",
+        "stop_reason": stop_reason,
+        "elapsed_s": round(time.monotonic() - started, 3),
+        "root": corpus,
+    }
