@@ -12,7 +12,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from src.attachments.extract import (
     ExtractResult,
@@ -35,6 +35,47 @@ CREATE TABLE IF NOT EXISTS text_cache (
     extractor_used TEXT, created_at TEXT,
     PRIMARY KEY (sha256, extractor)
 );
+"""
+
+
+# Boilerplate thresholds, calibrated on a real 45k-row corpus and verified by
+# LOOKING at the images at every boundary (2026-08-19). 70% of attachment rows
+# are recurring inline decoration — signature strips, newsletter headers,
+# marketing templates, spacer pixels — which drown the actual documents.
+#
+# Three things that look like they should work, and do not:
+#
+# * Filename/mime. `image002.png` is a 259-byte spacer in one message and a
+#   12 MB pasted screenshot in another. Both inline, both image/png.
+# * Aspect ratio. "Banner-shaped means signature" is wrong: a 2475x383 strip in
+#   this corpus is a product-lifecycle table with EOL dates.
+# * Counting messages. A real image quoted down an 18-message reply chain
+#   appears in 18 messages of ONE thread. A message-based rule read 237 blobs
+#   (36% of everything it removed) as decoration that way — including a Samsung
+#   feature-request table. Count distinct THREADS: decoration is reused by
+#   unrelated conversations, quoted content is not.
+#
+# What remains is that recurrence alone still catches genuinely reused content —
+# a benchmark table shared into 5 threads because it is useful. Size separates
+# them: decoration at that recurrence is uniformly tiny, while the reused-content
+# false positives were 60-93 KB. So the bar scales with size — a big image must
+# be far more widely reused before it counts as decoration.
+#
+# Verified at the boundary: what this removes at the top end is a newsletter
+# header in 52 threads and a marketing template in 25; what it now keeps is that
+# benchmark table (88.8 KB, 5 threads). Costs 1 point of noise removal (64% ->
+# 63%) over the size-blind rule. The rule errs toward keeping: leaving some
+# decoration in beats hiding one real document.
+BOILERPLATE_SMALL_MAX_SIZE = 20_000  # below this, 5 threads is enough evidence
+BOILERPLATE_SMALL_MIN_THREADS = 5
+BOILERPLATE_MAX_SIZE = 100_000  # nothing bigger is ever treated as decoration
+BOILERPLATE_LARGE_MIN_THREADS = 15  # 20-100KB must be this widely reused
+
+_NOT_BOILERPLATE = """
+    NOT (a.inline = 1 AND a.mime LIKE 'image/%' AND a.size < ?
+         AND (SELECT COUNT(DISTINCT b.thread_id) FROM attachments b
+              WHERE b.sha256 = a.sha256)
+             >= (CASE WHEN a.size < ? THEN ? ELSE ? END))
 """
 
 
@@ -68,6 +109,20 @@ class AttachmentStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    def count(self) -> int:
+        """Total attachment rows in the store (0 = never ingested).
+
+        Exists so callers can tell "this thread has no attachments" apart from
+        "no attachments have ever been ingested". The store is populated only by
+        ``mailrag attachments build``; indexing and continuous sync extract
+        attachment *text* for retrieval down a separate path
+        (``src.indexing.attachment_docs``) and never write here. So a corpus can
+        be fully indexed, with attachment content searchable, while this store
+        is still empty — and every lookup then returns an empty list that looks
+        exactly like a thread with no attachments.
+        """
+        return int(self._conn.execute("SELECT COUNT(*) FROM attachments").fetchone()[0])
 
     def path_for(self, sha256: str) -> str:
         return os.path.join(self._blobs, sha256[:2], sha256)
@@ -126,14 +181,35 @@ class AttachmentStore:
         )
 
     def list_for(
-        self, *, message_id: Optional[str] = None, thread_id: Optional[str] = None
+        self,
+        *,
+        message_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        include_boilerplate: bool = True,
     ) -> List[AttachmentMeta]:
+        """Attachments for a message or thread (or the whole store).
+
+        ``include_boilerplate=False`` drops recurring small inline images —
+        signature logos, spacer pixels, footer badges — using the recurrence
+        rule described at :data:`BOILERPLATE_SMALL_MIN_THREADS`. One-off inline
+        images (pasted screenshots) are kept, as are images reused only *within* one
+        thread — quoting down a reply chain is not evidence of decoration.
+        """
+        where = "1=1"
+        params: List[Any] = []
         if message_id is not None:
-            rows = self._conn.execute("SELECT * FROM attachments WHERE message_id=?", (message_id,))
+            where, params = "a.message_id=?", [message_id]
         elif thread_id is not None:
-            rows = self._conn.execute("SELECT * FROM attachments WHERE thread_id=?", (thread_id,))
-        else:
-            rows = self._conn.execute("SELECT * FROM attachments")
+            where, params = "a.thread_id=?", [thread_id]
+        if not include_boilerplate:
+            where += " AND " + _NOT_BOILERPLATE
+            params += [
+                BOILERPLATE_MAX_SIZE,
+                BOILERPLATE_SMALL_MAX_SIZE,
+                BOILERPLATE_SMALL_MIN_THREADS,
+                BOILERPLATE_LARGE_MIN_THREADS,
+            ]
+        rows = self._conn.execute(f"SELECT a.* FROM attachments a WHERE {where}", params)
         return [self._row_to_meta(r) for r in rows]
 
     def get_bytes(self, sha256: str) -> bytes:

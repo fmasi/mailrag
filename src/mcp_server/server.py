@@ -438,17 +438,44 @@ def _meta_to_dict(meta) -> Dict[str, Any]:
     }
 
 
+def _require_populated_store(store) -> None:
+    """Raise when the store has never been ingested, instead of returning nothing.
+
+    An empty store answers every lookup with an empty list, which is
+    indistinguishable from "this thread genuinely has no attachments" — so a
+    caller reasonably concludes the mail has no attachments when in truth none
+    have ever been ingested. That is the same failure the grep scan report
+    exists to prevent: absence and not-looked-at must not share a
+    representation. Indexing and sync do NOT populate this store (they extract
+    attachment text for retrieval down a separate path), so a fully indexed
+    corpus with an empty store is the expected state until `attachments build`
+    is run once.
+    """
+    if store.count() == 0:
+        raise ValueError(
+            f"attachment store at {store.root!r} is empty — no attachments have been "
+            "ingested, so every lookup returns nothing regardless of the thread. "
+            "Populate it with `mailrag attachments build --profile <corpus.profile.json>`. "
+            "(Indexing and sync extract attachment TEXT for search down a separate path "
+            "and never write this store, so attachment content can be searchable while "
+            "this store is still empty.)"
+        )
+
+
 def list_attachments(
     thread_id: Optional[str] = None,
     message_id: Optional[str] = None,
     collection: Optional[str] = None,
+    include_boilerplate: bool = False,
     *,
     store=None,
 ) -> List[Dict[str, Any]]:
     """List the attachments belonging to a thread or message.
 
     Parity with the CLI ``attachments list``: at least one of ``thread_id`` /
-    ``message_id`` must be given. Returns a row per attachment
+    ``message_id`` must be given. Recurring small inline images (signature logos,
+    spacer pixels) are excluded unless ``include_boilerplate=True`` — on a real
+    corpus they are 73% of all rows and would bury the actual documents. Returns a row per attachment
     (``sha256``, ``filename``, ``mime``, ``size``, ``thread_id``, ``message_id``,
     ``inline``). The store is corpus-wide, so ``collection`` is accepted for API
     symmetry but not required. ``store`` is injectable for tests.
@@ -461,7 +488,11 @@ def list_attachments(
     if store is None:
         store = AttachmentStore(resolve_attach_store())
     try:
-        metas = store.list_for(thread_id=thread_id, message_id=message_id)
+        metas = store.list_for(
+            thread_id=thread_id, message_id=message_id, include_boilerplate=include_boilerplate
+        )
+        if not metas:
+            _require_populated_store(store)
         return [_meta_to_dict(m) for m in metas]
     finally:
         if owns:
@@ -494,6 +525,7 @@ def get_attachment(
         try:
             fetched = store.fetch(sha256, extractor=ocr)
         except KeyError as exc:
+            _require_populated_store(store)
             raise ValueError(f"unknown attachment {sha256}") from exc
         return {
             "sha256": fetched["sha256"],
@@ -666,6 +698,7 @@ def build_server():
         thread_id: Optional[str] = None,
         message_id: Optional[str] = None,
         collection: Optional[str] = None,
+        include_boilerplate: bool = False,
     ) -> List[Dict[str, Any]]:
         """List the files attached to a thread — the way in to their contents.
 
@@ -682,15 +715,28 @@ def build_server():
         the ``sha256`` you need to open it.
 
         Returns a row per attachment: ``{sha256, filename, mime, size, thread_id,
-        message_id, inline}``. ``inline`` marks embedded images (signatures,
-        tracking pixels, logos) rather than real enclosures — usually skip those.
+        message_id, inline}``.
+
+        Signature logos, spacer pixels and footer badges are excluded by default:
+        on a real corpus they are 73% of every row and would bury the documents
+        you are looking for. They are identified by RECURRENCE (a small inline
+        image reused across several messages), not by name or type — because
+        ``image002.png`` is a 259-byte spacer in one message and a 12 MB pasted
+        screenshot in another. One-off inline images are therefore kept: a pasted
+        screenshot is content. Pass ``include_boilerplate=True`` for the raw list.
 
         Args:
             thread_id: Thread whose attachments to list (one of thread_id/message_id).
             message_id: Message whose attachments to list (one of thread_id/message_id).
             collection: Accepted for symmetry; the attachment store is corpus-wide.
+            include_boilerplate: Include recurring inline decoration (default False).
         """
-        return list_attachments(thread_id=thread_id, message_id=message_id, collection=collection)
+        return list_attachments(
+            thread_id=thread_id,
+            message_id=message_id,
+            collection=collection,
+            include_boilerplate=include_boilerplate,
+        )
 
     @server.tool(name="get_attachment")
     @usage.instrument("get_attachment")

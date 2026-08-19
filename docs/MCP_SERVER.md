@@ -230,6 +230,15 @@ grounded natural-language answer for you.
 List the files attached to a thread or a message (parity with the CLI
 `./mailrag attachments list`) — and the way in to their contents.
 
+> **The store must be built once, separately.** `mailrag onboard` / `index` /
+> `sync` do **not** populate it: they extract attachment *text* for retrieval
+> down a different path (`src/indexing/attachment_docs.py`), which is why
+> attachment content can be fully searchable while `list_attachments` returns
+> nothing for every thread. Run `./mailrag attachments build --profile
+> <corpus.profile.json>` once to populate it. Both attachment tools now raise an
+> actionable error naming that command when the store is empty, rather than
+> answering like a thread that simply has no attachments.
+
 > **Attachment contents are invisible to `search_email`, `answer_question` and
 > `grep_email`.** Those index message *bodies* only. So when the answer lives in
 > a document somebody emailed — an invoice PDF, a spreadsheet of figures, a
@@ -247,6 +256,29 @@ List the files attached to a thread or a message (parity with the CLI
     is corpus-wide, so it is not required to select a store.
 - **Returns:** a row per attachment
   `{sha256, filename, mime, size, thread_id, message_id, inline}`.
+
+> **Decoration is filtered out by default.** On a real 45k-row corpus, 63% of
+> attachment rows are signature strips, newsletter headers, marketing templates
+> and spacer pixels, which bury the documents you are looking for. Pass
+> `include_boilerplate=true` for the unfiltered list; the store itself keeps
+> every row, only this tool takes the opinion.
+>
+> The rule is **recurrence across threads, scaled by size** — not filename, mime
+> or shape, all of which were tried and fail:
+>
+> | Signal | Why it fails |
+> |---|---|
+> | Filename / mime | `image002.png` is a 259-byte spacer in one message and a 12 MB screenshot in another; both `image/png`, both inline. |
+> | Aspect ratio | A 2475×383 "banner" turned out to be a product-lifecycle table with EOL dates. |
+> | Reuse across **messages** | An image quoted down an 18-message reply chain appears 18 times in *one* thread. This hid 36% of what it removed, including a feature-request table. |
+>
+> So: count distinct **threads** (decoration is reused by unrelated
+> conversations; quoted content is not), and require wider reuse for bigger
+> images (under 20 KB → 5 threads; 20–100 KB → 15 threads; over 100 KB → never
+> decoration). Verified by inspecting the images at each boundary: what it
+> removes at the top end is a newsletter header in 52 threads, what it keeps is
+> a benchmark table shared into 5. The rule errs toward keeping.
+
 - **Errors:** `ValueError` when neither identifier is supplied.
 
 ```jsonc
