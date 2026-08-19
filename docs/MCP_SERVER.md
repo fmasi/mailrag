@@ -394,6 +394,19 @@ works with no activated environment, no `PYTHONPATH`, and whatever working
 directory the client happens to use. There is no *installed* console command
 (Poetry stays `package-mode = false`), so this shim is the stable entry point.
 
+**Pick a scope first.** Client config comes in two scopes and they are not
+interchangeable:
+
+| | Reaches | Use when |
+|---|---|---|
+| **User scope** (`claude mcp add -s user`) | every session, any directory | You query your mail *from other projects* — the usual case, since the point of the server is reaching your mail while working on something else. |
+| **Project scope** (`.mcp.json`, committed) | only sessions inside this repo | You work on mailrag itself, or you want a shareable zero-setup default for other people cloning it. |
+
+User scope **overrides** project scope, so an entry in both means the user-scope
+one runs everywhere and `.mcp.json` is never exercised. Point them at the same
+command (below) and that costs you nothing — but be aware that agents outside
+this repo see *only* the user-scope entry. Removing it silently cuts them off.
+
 Launching via the shim (`./mailrag mcp`) also runs `load_dotenv()`, which the
 bare `python -m src.mcp_server` module path does **not**. That is the difference
 between one line of client config and duplicating your whole `.env` — model,
@@ -401,7 +414,7 @@ corpus root and API key included — into every client that wants the server.
 Secret references (`keychain:` / `env:` / `file:`) resolve too, so no client
 config need hold a plaintext key.
 
-### Project scope (`.mcp.json`) — recommended
+### Project scope (`.mcp.json`) — in-repo work and clean clones
 
 The repo ships a project-scoped [`.mcp.json`](../.mcp.json), so any MCP client
 that reads project config picks the server up with no per-machine setup and no
@@ -435,22 +448,19 @@ fight without editing `.env` (the [issue #29](https://github.com/fmasi/mailrag/i
 gotcha).
 
 Claude Code asks you to approve a project-scoped server the first time it sees
-it. Per-user config (`claude mcp add`, below) **overrides** `.mcp.json` entirely
-— so if you add a user-scope `mailrag` entry, that is what runs, and this file is
-ignored. Prefer one or the other, not both.
+it. **Approve it through the `/mcp` prompt, not by editing `~/.claude.json`** —
+a running client rewrites that file from its own in-memory state, so hand-edited
+approvals are silently discarded. The same applies to adding servers: use
+`claude mcp add` rather than editing the file under a live session.
+
+Remember this file is invisible to sessions outside the repo. If your agents
+query mail from elsewhere, you need the user-scope entry below as well.
 
 ### Claude Code
 
-Working in the repo, you need nothing: `.mcp.json` is picked up on approval.
-Verify with:
-
-```bash
-claude mcp list
-# mailrag: ${CLAUDE_PROJECT_DIR:-.}/mailrag mcp - ✔ Connected
-```
-
-To reach the server from *outside* the repo, add it at user scope instead —
-noting that this then shadows `.mcp.json` everywhere:
+Working *inside* the repo you need nothing — `.mcp.json` is picked up on
+approval. For everywhere else, which is where a mail server usually earns its
+keep, add it at user scope:
 
 ```bash
 claude mcp add mailrag \
@@ -458,6 +468,14 @@ claude mcp add mailrag \
   --env MAILRAG_EML_ROOT=/Users/you/rag_eml \
   --env RAG_LLM_API_BASE=http://localhost:1234/v1 \
   -- /Users/you/Git/mailrag/mailrag mcp
+```
+
+Verify from a directory outside the repo — that is the case project scope cannot
+cover:
+
+```bash
+cd ~ && claude mcp list
+# mailrag: /Users/you/Git/mailrag/mailrag mcp - ✔ Connected
 ```
 
 Everything after `--` is the launch command; an absolute path to the shim works
