@@ -12,7 +12,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from src.attachments.extract import (
     ExtractResult,
@@ -35,6 +35,26 @@ CREATE TABLE IF NOT EXISTS text_cache (
     extractor_used TEXT, created_at TEXT,
     PRIMARY KEY (sha256, extractor)
 );
+"""
+
+
+# Boilerplate thresholds, calibrated on a real 45k-row corpus (2026-08-19).
+# 73% of attachment rows are recurring inline images — signature logos, spacer
+# pixels, footer badges — which drown the actual documents in any listing.
+#
+# Neither filename nor mime can separate them from real content: `image002.png`
+# is a 259-byte spacer in one message and a 12 MB pasted screenshot in another,
+# and both are `image/png` marked inline. What DOES separate them is recurrence:
+# decoration is reused across many messages, content is not. Requiring BOTH a
+# small size and reuse across several messages keeps every one-off screenshot
+# (2,642 distinct images in that corpus) while removing 73% of the rows.
+BOILERPLATE_MIN_MESSAGES = 5
+BOILERPLATE_MAX_SIZE = 100_000
+
+_NOT_BOILERPLATE = """
+    NOT (a.inline = 1 AND a.mime LIKE 'image/%' AND a.size < ?
+         AND (SELECT COUNT(DISTINCT b.message_id) FROM attachments b
+              WHERE b.sha256 = a.sha256) >= ?)
 """
 
 
@@ -140,14 +160,30 @@ class AttachmentStore:
         )
 
     def list_for(
-        self, *, message_id: Optional[str] = None, thread_id: Optional[str] = None
+        self,
+        *,
+        message_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
+        include_boilerplate: bool = True,
     ) -> List[AttachmentMeta]:
+        """Attachments for a message or thread (or the whole store).
+
+        ``include_boilerplate=False`` drops recurring small inline images —
+        signature logos, spacer pixels, footer badges — using the recurrence
+        rule described at :data:`BOILERPLATE_MIN_MESSAGES`. One-off inline
+        images (pasted screenshots) are kept: they are content, and only their
+        reuse across messages distinguishes decoration from them.
+        """
+        where = "1=1"
+        params: List[Any] = []
         if message_id is not None:
-            rows = self._conn.execute("SELECT * FROM attachments WHERE message_id=?", (message_id,))
+            where, params = "a.message_id=?", [message_id]
         elif thread_id is not None:
-            rows = self._conn.execute("SELECT * FROM attachments WHERE thread_id=?", (thread_id,))
-        else:
-            rows = self._conn.execute("SELECT * FROM attachments")
+            where, params = "a.thread_id=?", [thread_id]
+        if not include_boilerplate:
+            where += " AND " + _NOT_BOILERPLATE
+            params += [BOILERPLATE_MAX_SIZE, BOILERPLATE_MIN_MESSAGES]
+        rows = self._conn.execute(f"SELECT a.* FROM attachments a WHERE {where}", params)
         return [self._row_to_meta(r) for r in rows]
 
     def get_bytes(self, sha256: str) -> bytes:

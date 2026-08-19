@@ -342,6 +342,29 @@ class TestGrepEmailTool(unittest.TestCase):
         self.assertNotIn("max_files", grep.call_args.kwargs)
 
 
+class TestListAttachmentsBoilerplateDefault(unittest.TestCase):
+    """The MCP tool must filter decoration by default; the store must not.
+
+    73% of rows on a real corpus are recurring inline images, so an unfiltered
+    listing buries the documents. But the store stays a faithful record — the
+    opinion belongs to the agent-facing tool, not the storage layer.
+    """
+
+    def test_tool_defaults_to_filtering(self):
+        store = _FakeStore(
+            [_FakeMeta("a", "d.pdf", "application/pdf", 9, "t1", "m1", inline=False)]
+        )
+        server.list_attachments(thread_id="t1", store=store)
+        self.assertEqual(store.boilerplate_calls, [False])
+
+    def test_tool_can_request_the_raw_list(self):
+        store = _FakeStore(
+            [_FakeMeta("a", "d.pdf", "application/pdf", 9, "t1", "m1", inline=False)]
+        )
+        server.list_attachments(thread_id="t1", include_boilerplate=True, store=store)
+        self.assertEqual(store.boilerplate_calls, [True])
+
+
 class TestAttachmentStoreNeverBuilt(unittest.TestCase):
     """An un-ingested store must not answer like a thread with no attachments.
 
@@ -627,13 +650,15 @@ class _FakeStore:
         self._fetch_raises = fetch_raises
         self.closed = False
         self.list_calls = []
+        self.boilerplate_calls = []
         self.fetch_calls = []
 
     def count(self):
         return self._count
 
-    def list_for(self, *, thread_id=None, message_id=None):
+    def list_for(self, *, thread_id=None, message_id=None, include_boilerplate=True):
         self.list_calls.append((thread_id, message_id))
+        self.boilerplate_calls.append(include_boilerplate)
         return self._metas
 
     def fetch(self, sha256, *, extractor=None, force=False):
@@ -778,7 +803,7 @@ class TestServerRegistration(unittest.TestCase):
         )
         self.assertEqual(
             set(by_name["list_attachments"].input_schema["properties"]),
-            {"thread_id", "message_id", "collection"},
+            {"thread_id", "message_id", "collection", "include_boilerplate"},
         )
         self.assertEqual(
             set(by_name["get_attachment"].input_schema["properties"]),

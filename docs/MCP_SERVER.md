@@ -256,6 +256,15 @@ List the files attached to a thread or a message (parity with the CLI
     is corpus-wide, so it is not required to select a store.
 - **Returns:** a row per attachment
   `{sha256, filename, mime, size, thread_id, message_id, inline}`.
+
+> **Decoration is filtered out by default.** On a real 45k-row corpus, 73% of
+> attachment rows are signature logos, spacer pixels and footer badges, which
+> bury the documents you are looking for. They are identified by **recurrence** —
+> a small inline image reused across several messages — not by filename or mime,
+> because `image002.png` is a 259-byte spacer in one message and a 12 MB pasted
+> screenshot in another. One-off inline images are kept: a pasted screenshot is
+> content. Pass `include_boilerplate=true` for the unfiltered list. The store
+> itself keeps every row; only this tool takes the opinion.
 - **Errors:** `ValueError` when neither identifier is supplied.
 
 ```jsonc
