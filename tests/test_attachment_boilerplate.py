@@ -141,3 +141,64 @@ class TestBoilerplateFilter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestThreadCountsChunking(unittest.TestCase):
+    """Blob counts must not be limited by SQLite's bound-parameter cap.
+
+    The IN list is one parameter per blob. The cap is 250k on SQLite 3.53 and
+    32,766 since 3.32, so this never bites on a modern build — but it is 999 on
+    older ones, where a mailbox with a thousand distinct attachments would crash
+    rather than degrade. Chunking removes the cliff entirely.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="chunk_")
+        self.store = AttachmentStore(self.dir)
+
+    def tearDown(self):
+        self.store.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_counts_resolve_beyond_one_chunk(self):
+        from src.attachments.store import _MAX_SQL_PARAMS
+
+        n = _MAX_SQL_PARAMS * 2 + 7  # spans three chunks, last one partial
+        shas = [
+            self.store.put(
+                f"blob-{i}".encode(),
+                message_id=f"m{i}",
+                thread_id=f"t{i}",
+                filename="a.png",
+                mime="image/png",
+                size=9,
+                source_type="eml",
+                source_ref="r",
+                inline=True,
+            )
+            for i in range(n)
+        ]
+        counts = self.store.thread_counts(sha256s=shas)
+        self.assertEqual(len(counts), n)
+        self.assertTrue(all(v == 1 for v in counts.values()))
+
+    def test_subset_and_full_queries_agree(self):
+        for i in range(5):
+            self.store.put(
+                b"same-blob",
+                message_id=f"m{i}",
+                thread_id=f"t{i}",
+                filename="logo.png",
+                mime="image/png",
+                size=9,
+                source_type="eml",
+                source_ref="r",
+                inline=True,
+            )
+        full = self.store.thread_counts()
+        subset = self.store.thread_counts(sha256s=list(full))
+        self.assertEqual(full, subset)
+        self.assertEqual(list(full.values()), [5])
+
+    def test_empty_request_short_circuits(self):
+        self.assertEqual(self.store.thread_counts(sha256s=[]), {})

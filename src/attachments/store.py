@@ -12,7 +12,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.attachments.extract import (
     ExtractResult,
@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS text_cache (
 # benchmark table (88.8 KB, 5 threads). Costs 1 point of noise removal (64% ->
 # 63%) over the size-blind rule. The rule errs toward keeping: leaving some
 # decoration in beats hiding one real document.
+# Stay well under the 999-parameter cap of pre-3.32 SQLite builds.
+_MAX_SQL_PARAMS = 500
+
 BOILERPLATE_SMALL_MAX_SIZE = 20_000  # below this, 5 threads is enough evidence
 BOILERPLATE_SMALL_MIN_THREADS = 5
 BOILERPLATE_MAX_SIZE = 100_000  # nothing bigger is ever treated as decoration
@@ -196,16 +199,33 @@ class AttachmentStore:
         Pass ``sha256s`` to resolve just those blobs in a single query; omit it
         for the whole store.
         """
-        sql = "SELECT sha256, COUNT(DISTINCT thread_id) FROM attachments"
-        params: List[Any] = []
-        if sha256s is not None:
-            unique = sorted(set(sha256s))
-            if not unique:
-                return {}
-            sql += " WHERE sha256 IN (%s)" % ",".join("?" * len(unique))
-            params = list(unique)
-        sql += " GROUP BY sha256"
-        return {r[0]: r[1] for r in self._conn.execute(sql, params)}
+        if sha256s is None:
+            return {
+                r[0]: r[1]
+                for r in self._conn.execute(
+                    "SELECT sha256, COUNT(DISTINCT thread_id) FROM attachments GROUP BY sha256"
+                )
+            }
+        unique = sorted(set(sha256s))
+        # Chunked because the IN list is one bound parameter per blob, and
+        # SQLite caps them. The cap is 250k on the SQLite this project runs
+        # (3.53) and 32,766 since 3.32, so no realistic corpus reaches it here —
+        # but it is 999 on builds older than that, where a mailbox with a
+        # thousand distinct attachments would crash rather than degrade.
+        out: Dict[str, int] = {}
+        for i in range(0, len(unique), _MAX_SQL_PARAMS):
+            chunk = unique[i : i + _MAX_SQL_PARAMS]
+            out.update(
+                {
+                    r[0]: r[1]
+                    for r in self._conn.execute(
+                        "SELECT sha256, COUNT(DISTINCT thread_id) FROM attachments "
+                        "WHERE sha256 IN (%s) GROUP BY sha256" % ",".join("?" * len(chunk)),
+                        chunk,
+                    )
+                }
+            )
+        return out
 
     def path_for(self, sha256: str) -> str:
         return os.path.join(self._blobs, sha256[:2], sha256)
