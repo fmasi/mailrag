@@ -143,44 +143,23 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestThreadCountsChunking(unittest.TestCase):
-    """Blob counts must not be limited by SQLite's bound-parameter cap.
+class TestThreadCounts(unittest.TestCase):
+    """Batched blob counts must agree with the per-blob answer.
 
-    The IN list is one parameter per blob. The cap is 250k on SQLite 3.53 and
-    32,766 since 3.32, so this never bites on a modern build — but it is 999 on
-    older ones, where a mailbox with a thousand distinct attachments would crash
-    rather than degrade. Chunking removes the cliff entirely.
+    (An earlier revision chunked this query to dodge SQLite's bound-parameter
+    cap. Dropped: that cap has defaulted to 32,766 since SQLite 3.32 in 2020 and
+    pyproject requires Python >=3.11 from 2022, so no supported interpreter can
+    reach the historical 999 limit. Defending against it was complexity for a
+    state the project's own constraints exclude.)
     """
 
     def setUp(self):
-        self.dir = tempfile.mkdtemp(prefix="chunk_")
+        self.dir = tempfile.mkdtemp(prefix="counts_")
         self.store = AttachmentStore(self.dir)
 
     def tearDown(self):
         self.store.close()
         shutil.rmtree(self.dir, ignore_errors=True)
-
-    def test_counts_resolve_beyond_one_chunk(self):
-        from src.attachments.store import _MAX_SQL_PARAMS
-
-        n = _MAX_SQL_PARAMS * 2 + 7  # spans three chunks, last one partial
-        shas = [
-            self.store.put(
-                f"blob-{i}".encode(),
-                message_id=f"m{i}",
-                thread_id=f"t{i}",
-                filename="a.png",
-                mime="image/png",
-                size=9,
-                source_type="eml",
-                source_ref="r",
-                inline=True,
-            )
-            for i in range(n)
-        ]
-        counts = self.store.thread_counts(sha256s=shas)
-        self.assertEqual(len(counts), n)
-        self.assertTrue(all(v == 1 for v in counts.values()))
 
     def test_subset_and_full_queries_agree(self):
         for i in range(5):
