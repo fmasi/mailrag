@@ -368,15 +368,18 @@ The server needs an already-indexed Qdrant collection — build one first with
 `./mailrag onboard` (see [`QUICKSTART.md`](QUICKSTART.md)). Then launch either way:
 
 ```bash
-# via the CLI verb (recommended)
+# via the CLI verb (recommended — resolves its own interpreter, and loads .env)
 ./mailrag mcp
 ./mailrag mcp --collection work-rag --qdrant-url http://localhost:6333
 
-# or as a module (equivalent — no installed console command)
+# or as a module — NOT equivalent: this path does not load .env, so every
+# setting it would have read (model, API key, corpus root) must be in the
+# environment already
 python -m src.mcp_server
 ```
 
-Run it in the `mailrag` conda env, and set `HF_HUB_OFFLINE=1` once the bge-m3
+The shim needs no activated environment; the module path must run in the
+`mailrag` conda env. Set `HF_HUB_OFFLINE=1` once the bge-m3
 weights are cached so `search_email` / `answer_question` embed the query from
 cache without contacting the Hub (see [`SETUP.md § 2`](SETUP.md#2-the-mailrag-environment)).
 `grep_email` uses no embeddings at all, so it works even before the weights are
@@ -384,49 +387,91 @@ cached. The process speaks MCP over stdio and blocks until the client disconnect
 
 ## Registering with an MCP client
 
-The repo-root `./mailrag` shim is a shell wrapper that relies on your shell's
-`python` and working directory, so it isn't a stable launch command for an MCP
-client — and there is **no *installed* console command** (Poetry stays
-`package-mode = false`). So point clients directly at the `mailrag` env's Python
-running the module, with `PYTHONPATH` set to the repo root so `src` is importable.
-Adjust the paths to your checkout.
+**Launch clients through the repo-root `./mailrag` shim.** It is self-locating:
+it resolves the repo, the interpreter (`$MAILRAG_PYTHON` → a repo `.venv` → a
+conda env named `mailrag` → `python`) and `PYTHONPATH` from its own path, so it
+works with no activated environment, no `PYTHONPATH`, and whatever working
+directory the client happens to use. There is no *installed* console command
+(Poetry stays `package-mode = false`), so this shim is the stable entry point.
 
-### Project scope (`.mcp.json`)
+Launching via the shim (`./mailrag mcp`) also runs `load_dotenv()`, which the
+bare `python -m src.mcp_server` module path does **not**. That is the difference
+between one line of client config and duplicating your whole `.env` — model,
+corpus root and API key included — into every client that wants the server.
+Secret references (`keychain:` / `env:` / `file:`) resolve too, so no client
+config need hold a plaintext key.
+
+### Project scope (`.mcp.json`) — recommended
 
 The repo ships a project-scoped [`.mcp.json`](../.mcp.json), so any MCP client
-that reads project config picks the server up with no per-machine setup. It holds
-no secrets — every value is an env lookup with a default:
+that reads project config picks the server up with no per-machine setup and no
+secrets in client config:
 
-| Variable | Default | Set it when |
-|----------|---------|-------------|
-| `MAILRAG_PYTHON` | `python` | Your interpreter is not on `PATH` (e.g. `/opt/miniconda3/envs/mailrag/bin/python`). |
-| `MAILRAG_HOME` | `.` | The client does not launch the server from the repo root. |
-| `MAILRAG_EML_ROOT` | `~/rag_eml` | Your raw `.eml` corpus lives elsewhere. |
-| `RAG_LLM_API_KEY` | *(empty)* | Your LLM endpoint enforces auth — inherited from your shell, never committed. |
+```jsonc
+{
+  "mcpServers": {
+    "mailrag": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/mailrag",
+      "args": ["mcp"],
+      "env": {
+        "MAILRAG_QDRANT_URL": "${MAILRAG_QDRANT_URL:-http://localhost:6333}",
+        "MAILRAG_EML_ROOT": "${MAILRAG_EML_ROOT:-~/rag_eml}",
+        "RAG_LLM_API_BASE": "${RAG_LLM_API_BASE:-http://localhost:1234/v1}"
+      }
+    }
+  }
+}
+```
 
-Per-user config (`claude mcp add`, below) still wins over it, so keep the machine
--specific values there and leave `.mcp.json` as the portable baseline.
+Only three settings appear here, and each is an env lookup with a default you can
+override from your shell. Everything else — collection, LLM model, API key —
+comes from `.env` via the shim, which is why there is nothing to keep in sync.
+
+The two `localhost` defaults are deliberate: a `.env` written for the container
+path points `QDRANT_URL` / `RAG_LLM_API_BASE` at `host.docker.internal`, which a
+host-side server cannot reach. `MAILRAG_QDRANT_URL` exists precisely to win that
+fight without editing `.env` (the [issue #29](https://github.com/fmasi/mailrag/issues/29)
+gotcha).
+
+Claude Code asks you to approve a project-scoped server the first time it sees
+it. Per-user config (`claude mcp add`, below) **overrides** `.mcp.json` entirely
+— so if you add a user-scope `mailrag` entry, that is what runs, and this file is
+ignored. Prefer one or the other, not both.
 
 ### Claude Code
 
+Working in the repo, you need nothing: `.mcp.json` is picked up on approval.
+Verify with:
+
+```bash
+claude mcp list
+# mailrag: ${CLAUDE_PROJECT_DIR:-.}/mailrag mcp - ✔ Connected
+```
+
+To reach the server from *outside* the repo, add it at user scope instead —
+noting that this then shadows `.mcp.json` everywhere:
+
 ```bash
 claude mcp add mailrag \
-  --env MAILRAG_COLLECTION=work-rag \
   --env MAILRAG_QDRANT_URL=http://localhost:6333 \
   --env MAILRAG_EML_ROOT=/Users/you/rag_eml \
   --env RAG_LLM_API_BASE=http://localhost:1234/v1 \
-  --env RAG_LLM_API_KEY=your-endpoint-key \
-  --env RAG_LLM_MODEL=your-chat-model-id \
-  --env PYTHONPATH=/Users/you/Git/mailrag \
-  -- /opt/miniconda3/envs/mailrag/bin/python -m src.mcp_server
+  -- /Users/you/Git/mailrag/mailrag mcp
 ```
 
-Everything after `--` is the launch command. `list_collections` then lets the agent
-discover corpora even if you leave `MAILRAG_COLLECTION` unset. **Set
-`RAG_LLM_API_KEY`** (and `RAG_LLM_MODEL`) if your LLM endpoint enforces auth —
-`answer_question` runs a startup healthcheck and fails loudly with a clear message
-naming these vars rather than a raw 401 (issue #83). `MAILRAG_EML_ROOT` points
-`grep_email` at the raw `.eml` corpus.
+Everything after `--` is the launch command; an absolute path to the shim works
+from any directory. `list_collections` lets the agent discover corpora even with
+`MAILRAG_COLLECTION` unset. If your LLM endpoint enforces auth, set
+`RAG_LLM_API_KEY` in `.env` (a `keychain:`/`env:`/`file:` reference keeps it out
+of plaintext) — `answer_question` runs a startup healthcheck and fails loudly
+naming that var rather than leaking a raw 401 (issue #83).
+
+> **A running client pins the code it started with.** The shim always launches
+> the current working tree, but a client that is already connected keeps the
+> server process — and the tool schemas — it loaded at startup. After changing
+> server code, reconnect (`/mcp` in Claude Code) or restart the client, or you
+> will be testing yesterday's build.
 
 ### opencode
 
@@ -438,18 +483,13 @@ Add a `local` MCP entry to `opencode.jsonc`:
     "mailrag": {
       "type": "local",
       "command": [
-        "/opt/miniconda3/envs/mailrag/bin/python",
-        "-m",
-        "src.mcp_server"
+        "/Users/you/Git/mailrag/mailrag",
+        "mcp"
       ],
       "environment": {
-        "PYTHONPATH": "/Users/you/Git/mailrag",
-        "MAILRAG_COLLECTION": "work-rag",
         "MAILRAG_QDRANT_URL": "http://localhost:6333",
         "MAILRAG_EML_ROOT": "/Users/you/rag_eml",
-        "RAG_LLM_API_BASE": "http://localhost:1234/v1",
-        "RAG_LLM_API_KEY": "your-endpoint-key",
-        "RAG_LLM_MODEL": "your-chat-model-id"
+        "RAG_LLM_API_BASE": "http://localhost:1234/v1"
       }
     }
   }
@@ -464,16 +504,12 @@ Add a `local` MCP entry to `opencode.jsonc`:
 {
   "mcpServers": {
     "mailrag": {
-      "command": "/opt/miniconda3/envs/mailrag/bin/python",
-      "args": ["-m", "src.mcp_server"],
+      "command": "/Users/you/Git/mailrag/mailrag",
+      "args": ["mcp"],
       "env": {
-        "PYTHONPATH": "/Users/you/Git/mailrag",
-        "MAILRAG_COLLECTION": "work-rag",
         "MAILRAG_QDRANT_URL": "http://localhost:6333",
         "MAILRAG_EML_ROOT": "/Users/you/rag_eml",
-        "RAG_LLM_API_BASE": "http://localhost:1234/v1",
-        "RAG_LLM_API_KEY": "your-endpoint-key",
-        "RAG_LLM_MODEL": "your-chat-model-id"
+        "RAG_LLM_API_BASE": "http://localhost:1234/v1"
       }
     }
   }

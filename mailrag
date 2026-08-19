@@ -1,3 +1,33 @@
 #!/usr/bin/env bash
 # Thin shim so `mailrag onboard ...` works without packaging (poetry package-mode=false).
-exec python -m src.cli "$@"
+#
+# Self-locating on purpose: this is also the launch command in .mcp.json, and an
+# MCP client starts the server with no shell, no activated conda env, and no
+# guarantee about the working directory. So resolve the repo and the interpreter
+# from the script's own path rather than inheriting them.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Interpreter: an explicit override wins, then the project's own environments,
+# then whatever `python` is on PATH. Bare `python` is the last resort because it
+# is usually a base conda/system interpreter without this project's deps — the
+# failure mode being "the MCP server silently never starts".
+resolve_python() {
+  if [[ -n "${MAILRAG_PYTHON:-}" ]]; then
+    echo "$MAILRAG_PYTHON"
+    return
+  fi
+  for candidate in \
+    "$REPO/.venv/bin/python" \
+    "${CONDA_EXE:+$(dirname "$(dirname "$CONDA_EXE")")/envs/mailrag/bin/python}" \
+    "$HOME/miniconda3/envs/mailrag/bin/python" \
+    "/opt/miniconda3/envs/mailrag/bin/python"; do
+    [[ -n "$candidate" && -x "$candidate" ]] && { echo "$candidate"; return; }
+  done
+  command -v python
+}
+
+PY="$(resolve_python)"
+export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PY" -m src.cli "$@"
