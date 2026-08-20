@@ -31,11 +31,22 @@ class TesseractOcr:
     def _image(self, data: bytes) -> OcrResult:
         try:
             import pytesseract
-            from PIL import Image
+            from PIL import Image, ImageFile
         except Exception:
             return OcrResult("", Status.OCR_UNAVAILABLE, _NAME)
+        # Real mail carries damaged images. PIL refuses a JPEG missing its last
+        # few bytes outright, which threw away whole photographs over 20 unread
+        # bytes; decoding what is there is strictly better than nothing, and the
+        # missing tail is the bottom edge of the picture.
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
         try:
-            return _ok(pytesseract.image_to_string(Image.open(io.BytesIO(data))))
+            with Image.open(io.BytesIO(data)) as im:
+                im.load()
+                # Normalise the mode before OCR. pytesseract rejects some modes
+                # outright with "Unsupported image format/type" — a 4032x3024
+                # photo in this corpus failed that way and yielded 562
+                # characters once converted.
+                return _ok(pytesseract.image_to_string(im.convert("RGB")))
         except Exception:
             return OcrResult("", Status.ERROR, _NAME)
 
