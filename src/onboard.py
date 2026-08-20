@@ -56,7 +56,39 @@ def filter_kept(emails, judgments, *, min_confidence=0.7):
     return kept, dropped
 
 
-MANIFEST_DIR = Path(os.path.expanduser("~/.mailrag"))
+# Resolved per call rather than at import so tests (and anyone with a
+# non-default home) can redirect it. A module-level constant meant the suite
+# wrote manifests into the developer's real ~/.mailrag.
+def manifest_dir() -> Path:
+    return Path(os.path.expanduser(os.environ.get("MAILRAG_HOME") or "~/.mailrag"))
+
+
+class _ManifestDirProxy:
+    """Backwards-compatible stand-in for the old module constant."""
+
+    def _p(self) -> Path:
+        return manifest_dir()
+
+    def mkdir(self, **kw):
+        return self._p().mkdir(**kw)
+
+    def is_dir(self) -> bool:
+        return self._p().is_dir()
+
+    def glob(self, pattern):
+        return self._p().glob(pattern)
+
+    def __truediv__(self, other):
+        return self._p() / other
+
+    def __fspath__(self):
+        return os.fspath(self._p())
+
+    def __repr__(self):
+        return repr(self._p())
+
+
+MANIFEST_DIR = _ManifestDirProxy()
 
 
 @dataclass
@@ -85,9 +117,18 @@ class OnboardReport:
         )
 
 
-def write_manifest(report, *, source, model):
+def write_manifest(report, *, source, model, profile_path=None):
     """Persist a reproducibility manifest to ``~/.mailrag/<collection>.json`` and
-    return its path."""
+    return its path.
+
+    ``profile_path`` records WHICH corpus profile produced this collection. That
+    mapping is load-bearing rather than informational: scoping a grep to a
+    collection means walking exactly the files that collection's profile
+    selects, and until now nothing recorded the link — it was recovered by
+    scanning ``*.profile.json`` in a directory and reading the ``collection``
+    each one names. That works until profiles move, get renamed, or two name the
+    same collection. Written here so the collection carries its own provenance.
+    """
     MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     path = MANIFEST_DIR / f"{report.collection}.json"
     data = asdict(report)
@@ -97,8 +138,58 @@ def write_manifest(report, *, source, model):
         created_at=datetime.now(timezone.utc).isoformat(),
         defaults={"fusion": "rrf", "sparse_weight": 1, "thread_aware": True, "reranker": False},
     )
+    if profile_path:
+        data["profile_path"] = os.path.abspath(os.path.expanduser(profile_path))
     path.write_text(json.dumps(data, indent=2))
     return str(path)
+
+
+def record_profile_for_collection(collection: str, profile_path: str) -> None:
+    """Record which corpus profile a collection was built from.
+
+    Written by the profile-driven commands (``index``, ``attachments build``)
+    because ``onboard`` is directory-driven and has no profile to name. Merges
+    into any existing manifest rather than replacing it, so registering the
+    mapping never costs the reproducibility record.
+
+    The mapping is load-bearing: scoping a grep to a collection means walking
+    exactly the files that collection's profile selects. Recovering it by
+    scanning a directory for ``*.profile.json`` works until a profile is moved,
+    renamed, or two of them name the same collection — so the collection should
+    carry its own provenance.
+    """
+    if not isinstance(collection, str) or not isinstance(profile_path, str):
+        return  # nothing useful to record (and nothing JSON-serialisable)
+    if not collection or not profile_path:
+        return
+    MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+    path = MANIFEST_DIR / f"{collection}.json"
+    data = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            data = {}
+    data["collection"] = collection
+    data["profile_path"] = os.path.abspath(os.path.expanduser(profile_path))
+    data["profile_recorded_at"] = datetime.now(timezone.utc).isoformat()
+    path.write_text(json.dumps(data, indent=2))
+
+
+def manifest_profile_paths() -> dict:
+    """``{collection: profile path}`` from manifests that recorded one."""
+    out: dict = {}
+    if not MANIFEST_DIR.is_dir():
+        return out
+    for f in sorted(MANIFEST_DIR.glob("*.json")):
+        try:
+            d = json.loads(f.read_text())
+        except Exception:
+            continue
+        coll, prof = d.get("collection"), d.get("profile_path")
+        if coll and prof and os.path.exists(os.path.expanduser(prof)):
+            out[coll] = os.path.expanduser(prof)
+    return out
 
 
 def latest_manifest_collection():
