@@ -889,7 +889,7 @@ describes layout, not purpose.
 
 Decoration recurs; content does not. True, but an image attached *once* and quoted down an
 18-message reply chain appears in 18 messages. Counting `message_id` read that as
-decoration and removed **237 of 659 blobs (36%)** wrongly, including a Samsung
+decoration and removed **237 of 659 blobs (36%)** wrongly, including a customer
 feature-request table and the lifecycle table above.
 
 Counting distinct **threads** fixes it — decoration is reused by unrelated conversations,

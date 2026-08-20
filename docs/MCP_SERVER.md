@@ -158,7 +158,7 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
       "date": "Wed, 30 Jul 2025 …", "message_id": "<a1b2c3@northwind.example>",
       "attachment_names": ["Q3 MBO targets partner team.xlsx"],
       "matches": ["…20% of the $210 million annual plan…"],
-      "path": "/Users/you/rag_eml/Inbox/Wind River/… .eml" }
+      "path": "/Users/you/rag_eml/Inbox/Acme Corp/… .eml" }
   ],
   "scanned": 1841, "corpus_files": 73219, "complete": false,
   "stop_reason": "max_matches", "elapsed_s": 4.4, "root": "/Users/you/rag_eml"

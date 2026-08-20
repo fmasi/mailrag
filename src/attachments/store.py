@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS text_cache (
 #   this corpus is a product-lifecycle table with EOL dates.
 # * Counting messages. A real image quoted down an 18-message reply chain
 #   appears in 18 messages of ONE thread. A message-based rule read 237 blobs
-#   (36% of everything it removed) as decoration that way — including a Samsung
+#   (36% of everything it removed) as decoration that way — including a customer
 #   feature-request table. Count distinct THREADS: decoration is reused by
 #   unrelated conversations, quoted content is not.
 #
