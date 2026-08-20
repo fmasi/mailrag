@@ -489,25 +489,28 @@ def list_attachments(
     if store is None:
         store = AttachmentStore(resolve_attach_store())
     try:
-        metas = store.list_for(
-            thread_id=thread_id, message_id=message_id, include_boilerplate=include_boilerplate
+        raw = store.list_for(thread_id=thread_id, message_id=message_id, include_boilerplate=True)
+        if not raw:
+            # Nothing here at all — the common case for most threads, and now a
+            # single query rather than two, since there is nothing to filter.
+            _require_populated_store(store)
+            return []
+        metas = (
+            raw
+            if include_boilerplate
+            else store.list_for(
+                thread_id=thread_id, message_id=message_id, include_boilerplate=False
+            )
         )
         if not metas:
-            _require_populated_store(store)
-            if not include_boilerplate:
-                # An empty result after filtering is a THIRD kind of nothing, and
-                # it must not read like the other two. "No attachments here" and
-                # "everything here was decoration" are different answers, and a
-                # caller told the first will stop looking.
-                raw = store.list_for(
-                    thread_id=thread_id, message_id=message_id, include_boilerplate=True
-                )
-                if raw:
-                    raise ValueError(
-                        f"all {len(raw)} attachment(s) here are decoration (signature "
-                        "images, disclaimer graphics, spacer pixels) — there is no document "
-                        "attached. Pass include_boilerplate=true to see them anyway."
-                    )
+            # Everything here was decoration: a THIRD kind of nothing, which must
+            # not read like "no attachments" or like "store never built". A
+            # caller told the wrong one stops looking.
+            raise ValueError(
+                f"all {len(raw)} attachment(s) here are decoration (signature "
+                "images, disclaimer graphics, spacer pixels) — there is no document "
+                "attached. Pass include_boilerplate=true to see them anyway."
+            )
         return [_meta_to_dict(m) for m in metas]
     finally:
         if owns:

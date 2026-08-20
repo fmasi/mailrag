@@ -283,8 +283,11 @@ def grep_email(
             ``$MAILRAG_EML_ROOT`` or ``~/rag_eml``.
         max_files: Stop after scanning this many messages (``None`` = no file
             bound; the deadline still applies).
-        max_seconds: Wall-clock budget, clamped to ``(0, 900]``. ``None``
-            disables the deadline -- only safe on a small corpus.
+        max_seconds: Wall-clock budget, clamped to ``(0, 900]``, measured from
+            entry -- so it covers the corpus walk as well as the scan, matching
+            ``elapsed_s`` and the time a caller actually waits. The walk is
+            ~0.25s over 73k files, so this only matters for very short budgets.
+            ``None`` disables the deadline -- only safe on a small corpus.
 
     Returns:
         ``{matches, scanned, corpus_files, complete, stop_reason, elapsed_s, root}``:

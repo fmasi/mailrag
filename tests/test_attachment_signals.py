@@ -284,8 +284,20 @@ class TestClassifyDefaultsToTesseract(unittest.TestCase):
 
         with mock.patch.object(classify, "measure_blob"):
             with mock.patch("src.attachments.extract.build_default_extractor") as build:
-                classify.classify_blobs(_EmptyStore(), extractor=None)
+                classify.classify_blobs(_OneBlobStore(), extractor=None)
         self.assertEqual(build.call_args.args[0], "tesseract")
+
+    def test_no_engine_is_built_when_there_is_nothing_to_measure(self):
+        # A re-run over an already-measured corpus should not depend on an OCR
+        # engine being installable, let alone installed.
+        from unittest import mock
+
+        import src.attachments.classify as classify
+
+        with mock.patch("src.attachments.extract.build_default_extractor") as build:
+            stats = classify.classify_blobs(_EmptyStore(), extractor=None)
+        build.assert_not_called()
+        self.assertEqual(stats.measured, 0)
 
     def test_env_can_override_the_classify_engine(self):
         import os
@@ -295,7 +307,7 @@ class TestClassifyDefaultsToTesseract(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"RAG_ATTACH_CLASSIFY_EXTRACTOR": "llm"}):
             with mock.patch("src.attachments.extract.build_default_extractor") as build:
-                classify.classify_blobs(_EmptyStore(), extractor=None)
+                classify.classify_blobs(_OneBlobStore(), extractor=None)
         self.assertEqual(build.call_args.args[0], "llm")
 
 
@@ -328,7 +340,51 @@ class TestBuildVerbWiring(unittest.TestCase):
         self.assertIsNone(classify.call_args.kwargs["extractor"])
         build.assert_not_called()
 
+    def test_an_explicit_extractor_flag_is_honoured(self):
+        """The complementary path: --extractor must still reach classify_blobs.
+
+        The fix guards against building an engine when none was asked for; it
+        must not also swallow one that was.
+        """
+        import argparse
+        from unittest import mock
+
+        import src.cli as cli
+
+        args = argparse.Namespace(
+            profile="p.json",
+            store="/tmp/s",
+            limit=None,
+            no_classify=False,
+            classify_max_size=100_000,
+            extractor="llm",
+        )
+        with (
+            mock.patch.object(cli, "CorpusProfile"),
+            mock.patch.object(cli, "resolve_index_files", return_value=([], None)),
+            mock.patch.object(cli, "AttachmentStore"),
+            mock.patch.object(cli, "ingest_eml", return_value={}),
+            mock.patch("src.attachments.classify.classify_blobs") as classify,
+            mock.patch("src.attachments.extract.build_default_extractor") as build,
+        ):
+            cli._cmd_attachments_build(args)
+        build.assert_called_once_with("llm")
+        self.assertIs(classify.call_args.kwargs["extractor"], build.return_value)
+
 
 class _EmptyStore:
+    """No work to do — classify must return before constructing an engine."""
+
     def unmeasured_blobs(self, **kw):
         return []
+
+
+class _OneBlobStore:
+    def unmeasured_blobs(self, **kw):
+        return [("sha", "image/png", "a.png", 100)]
+
+    def path_for(self, sha):
+        return "/nonexistent/blob"
+
+    def put_signals(self, *a, **k):
+        pass
