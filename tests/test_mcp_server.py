@@ -80,8 +80,12 @@ class TestResolveConfig(unittest.TestCase):
             self.assertEqual(server.resolve_collection(), "envcol")
 
     def test_collection_falls_back_to_manifest(self):
+        # Clear only MAILRAG_COLLECTION, not the whole environment: wiping it
+        # also drops the test-isolation vars, so resolution silently starts
+        # reading the developer's real profiles and the result depends on whose
+        # machine runs it.
         with (
-            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.dict("os.environ", {"MAILRAG_COLLECTION": ""}, clear=False),
             mock.patch(
                 "src.mcp_server.server.latest_manifest_collection", return_value="manifestcol"
             ),

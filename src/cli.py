@@ -335,6 +335,24 @@ def _configure_ask(p):
     p.add_argument("--k", type=int, default=3)
 
 
+def _cmd_usage(args):
+    """Report what the MCP tools are actually used for (see usage_report)."""
+    from src.mcp_server.usage import resolve_usage_log
+    from src.mcp_server.usage_report import load, render, summarise
+
+    path = args.log or resolve_usage_log()
+    if path is None:
+        print("usage logging is disabled (MAILRAG_MCP_USAGE_LOG)")
+        return 0
+    print(render(summarise(load(os.path.expanduser(path))), limit=args.limit))
+    return 0
+
+
+def _configure_usage(p):
+    p.add_argument("--log", default=None, help="usage log path (default: $MAILRAG_MCP_USAGE_LOG)")
+    p.add_argument("--limit", type=int, default=5, help="rows per detail section")
+
+
 def _cmd_mcp(args):
     """Run the stdio MCP server exposing search_email / answer_question.
 
@@ -896,6 +914,13 @@ def build_parser():
         _cmd_ask,
         aliases=["query"],
         help="ask a question against an indexed collection",
+    )
+    _add_verb(
+        sub,
+        "usage",
+        _configure_usage,
+        _cmd_usage,
+        help="report which MCP tools agents actually use, and what they cost",
     )
     _add_verb(
         sub,
