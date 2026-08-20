@@ -188,7 +188,38 @@ def _cmd_scope(args):
     select_stage.run(prof)
     prof.save(args.profile)
     print(f"selected {len(prof.selection_rules)} rule(s) -> {args.profile}")
+    # Report the consequence immediately. A skip and an oversight are
+    # indistinguishable once the profile is saved, and a real corpus lost 16% of
+    # its mail to choices nobody ever saw totalled up.
+    from src.ingest.coverage import coverage, render
+
+    print()
+    print(render(coverage([prof], prof.resolved_root()), limit=8))
     return 0
+
+
+def _cmd_coverage(args):
+    """Report how much mail the profiles claim, and what none of them do."""
+    from src.ingest.coverage import coverage, load_profiles, render
+
+    profiles = load_profiles(args.profile)
+    if not profiles:
+        print("no readable profiles given (--profile can be repeated)")
+        return 1
+    root = args.root or profiles[0].resolved_root()
+    print(render(coverage(profiles, root), limit=args.limit))
+    return 0
+
+
+def _configure_coverage(p):
+    p.add_argument(
+        "--profile",
+        action="append",
+        required=True,
+        help="corpus profile (repeat to check several against one root)",
+    )
+    p.add_argument("--root", default=None, help="corpus root (default: the first profile's)")
+    p.add_argument("--limit", type=int, default=12, help="unclaimed folders to list")
 
 
 def _cmd_scan(args):
@@ -918,6 +949,13 @@ def build_parser():
         _cmd_ask,
         aliases=["query"],
         help="ask a question against an indexed collection",
+    )
+    _add_verb(
+        sub,
+        "coverage",
+        _configure_coverage,
+        _cmd_coverage,
+        help="report mail that no profile selects (indexed and searchable nowhere)",
     )
     _add_verb(
         sub,

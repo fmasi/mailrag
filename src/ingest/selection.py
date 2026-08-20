@@ -13,6 +13,7 @@ A *selection rule* is a dict of one of three shapes:
 """
 
 import os
+from collections import Counter
 from typing import Dict, List, Tuple
 
 
@@ -44,7 +45,13 @@ def discover_structure(names) -> Tuple[Dict[str, dict], bool]:
     """Build a top-level + level-2 folder tree from ``/``-separated *names*.
 
     Returns ``(folder_tree, has_container_root_files)`` where each tree entry is
-    ``{"children": set[str], "has_direct_files": bool}``.
+    ``{"children": set[str], "has_direct_files": bool, "counts": Counter}``.
+
+    ``counts`` carries the number of messages behind each choice. Without it the
+    wizard asks "include or skip?" with no indication that skip means four
+    thousand messages, and a real corpus lost 16% of its mail that way — every
+    folder was offered and individually skipped, which afterwards is
+    indistinguishable from a deliberate exclusion.
     """
     folder_tree: Dict[str, dict] = {}
     has_container_root_files = False
@@ -54,11 +61,17 @@ def discover_structure(names) -> Tuple[Dict[str, dict], bool]:
             has_container_root_files = True
             continue
         root = f"{parts[0]}/"
-        entry = folder_tree.setdefault(root, {"children": set(), "has_direct_files": False})
+        entry = folder_tree.setdefault(
+            root, {"children": set(), "has_direct_files": False, "counts": Counter()}
+        )
+        entry["counts"]["_total"] += 1
         if len(parts) == 2:
             entry["has_direct_files"] = True
+            entry["counts"]["_direct"] += 1
             continue
-        entry["children"].add(f"{parts[0]}/{parts[1]}/")
+        child = f"{parts[0]}/{parts[1]}/"
+        entry["children"].add(child)
+        entry["counts"][child] += 1
     return folder_tree, has_container_root_files
 
 
@@ -122,9 +135,11 @@ def prompt_guided_selection(folder_tree, has_container_root_files, questionary=N
         entry = folder_tree[root]
         child_prefixes = sorted(entry["children"])
 
+        counts = entry.get("counts", {})
+        total = counts.get("_total", 0)
         if child_prefixes:
             action = q.select(
-                f"{root} - choose indexing scope",
+                f"{root} ({total} messages) - choose indexing scope",
                 choices=[
                     {"name": "Include this folder and all subfolders", "value": "all"},
                     {"name": "Skip this folder", "value": "skip"},
@@ -133,7 +148,7 @@ def prompt_guided_selection(folder_tree, has_container_root_files, questionary=N
             ).ask()
         else:
             action = q.select(
-                f"{root} - choose indexing scope",
+                f"{root} ({total} messages) - choose indexing scope",
                 choices=[
                     {"name": "Include this folder", "value": "all"},
                     {"name": "Skip this folder", "value": "skip"},
@@ -150,7 +165,7 @@ def prompt_guided_selection(folder_tree, has_container_root_files, questionary=N
 
         if entry["has_direct_files"]:
             include_direct = q.select(
-                f"{root} [direct files only] - choose indexing scope",
+                f"{root} [{counts.get('_direct', 0)} direct files] - choose indexing scope",
                 choices=[
                     {"name": "Include these direct files", "value": True},
                     {"name": "Skip these direct files", "value": False},
@@ -163,7 +178,7 @@ def prompt_guided_selection(folder_tree, has_container_root_files, questionary=N
 
         for child_prefix in child_prefixes:
             include_child = q.select(
-                f"{child_prefix} - choose indexing scope",
+                f"{child_prefix} ({counts.get(child_prefix, 0)} messages) - choose indexing scope",
                 choices=[
                     {"name": "Include this folder", "value": True},
                     {"name": "Skip this folder", "value": False},
