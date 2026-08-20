@@ -781,6 +781,10 @@ class TestGetAttachment(unittest.TestCase):
                 "size": 1024,
                 "text": "extracted body",
                 "text_status": "ok",
+                # Reported alongside the text so a caller can see how much of the
+                # document actually arrived (a 22MB deck can extract to 1.4k
+                # chars and still say "extracted").
+                "chars": 14,
             },
         )
         self.assertNotIn("path", out)  # no raw bytes / local path leaked

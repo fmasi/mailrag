@@ -37,6 +37,7 @@ configured through the usual ``RAG_*`` env vars (see ``src.llm.client``).
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from src.attachments.store import AttachmentStore
@@ -156,7 +157,68 @@ def _thread_snippet(text: str, query: str, max_chars: int) -> str:
     return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
 
 
-def _thread_meta(ctx) -> Dict[str, Any]:
+@contextmanager
+def _attachment_store():
+    """Yield an AttachmentStore for the duration of one tool call, or ``None``.
+
+    Never raises: retrieval must keep working when the attachment store is
+    absent, just without attachment names.
+    """
+    store = None
+    try:
+        store = AttachmentStore(resolve_attach_store())
+    except Exception:
+        store = None
+    try:
+        yield store
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _attachment_names(ctx, store=None) -> Optional[List[str]]:
+    """Real attachment filenames for a thread, or ``None`` when unknowable.
+
+    ``None`` — which callers render as an ABSENT key, never an empty list — is
+    the important case. This field used to read ``attachment_names`` off the
+    email objects, which never carry it: the indexed payload has a singular
+    ``attachment_name`` on attachment chunks only. So it was ``[]`` on every hit
+    of every query, forever.
+
+    That is worse than having no field. An agent builds its model of a corpus
+    from what search returns, and a field that is always empty does not read as
+    "not populated", it reads as "this corpus has no attachments" — which is a
+    confident negative, stated on every result, that stops anyone opening the
+    attachment tools at all. It cost a real session exactly that (field report,
+    2026-08-20). Absence and not-looked-at must not share a representation; this
+    is the same defect as the unbounded grep scan, wearing different clothes.
+
+    So: names when the store can answer, and no field at all when it cannot.
+    """
+    owns = store is None
+    try:
+        if store is None:
+            store = AttachmentStore(resolve_attach_store())
+        if store.count() == 0:
+            return None  # never ingested — say nothing rather than say "none"
+        message_ids = [getattr(e, "message_id", "") for e in getattr(ctx, "emails", []) or []]
+        return store.names_for(thread_id=getattr(ctx, "thread_id", None), message_ids=message_ids)
+    except Exception:
+        # The attachment store is an optional companion to retrieval; search must
+        # keep working when it is missing, just without this field.
+        return None
+    finally:
+        if owns and store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _thread_meta(ctx, store=None) -> Dict[str, Any]:
     """Envelope metadata for a thread's constituent emails (bounded output).
 
     Surfaces subject/date/from/to/message-id and attachment filenames so an
@@ -166,23 +228,21 @@ def _thread_meta(ctx) -> Dict[str, Any]:
     emails = list(getattr(ctx, "emails", []) or [])
     first = emails[0] if emails else None
     last = emails[-1] if emails else None
-    attachments: List[str] = []
-    for e in emails:
-        for name in getattr(e, "attachment_names", []) or []:
-            if name not in attachments:
-                attachments.append(name)
-    return {
+    meta: Dict[str, Any] = {
         "date": getattr(first, "date", "") if first else "",
         "last_date": getattr(last, "date", "") if last else "",
         "from": getattr(first, "sender", "") if first else "",
         "to": getattr(first, "to", "") if first else "",
         "message_ids": [getattr(e, "message_id", "") for e in emails],
-        "attachment_names": attachments,
     }
+    names = _attachment_names(ctx, store=store)
+    if names is not None:
+        meta["attachment_names"] = names
+    return meta
 
 
 def _thread_to_dict(
-    ctx, query: str = "", max_chars: int = DEFAULT_SEARCH_MAX_CHARS
+    ctx, query: str = "", max_chars: int = DEFAULT_SEARCH_MAX_CHARS, store=None
 ) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` into a **bounded** JSON result row.
 
@@ -196,11 +256,11 @@ def _thread_to_dict(
         "num_emails": len(ctx.emails),
         "snippet": _thread_snippet(ctx.text, query, max_chars),
     }
-    row.update(_thread_meta(ctx))
+    row.update(_thread_meta(ctx, store=store))
     return row
 
 
-def _thread_to_full_dict(ctx) -> Dict[str, Any]:
+def _thread_to_full_dict(ctx, store=None) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` with the **full** thread text (opt-in path)."""
     row = {
         "thread_id": ctx.thread_id,
@@ -208,7 +268,7 @@ def _thread_to_full_dict(ctx) -> Dict[str, Any]:
         "num_emails": len(ctx.emails),
         "text": ctx.text,
     }
-    row.update(_thread_meta(ctx))
+    row.update(_thread_meta(ctx, store=store))
     return row
 
 
@@ -291,9 +351,16 @@ def search_email(
     max_chars = min(max_chars, HARD_SEARCH_MAX_CHARS)
     searcher = searcher or get_searcher(collection, mode=mode)
     contexts = searcher.search_threads(query)
-    if full:
-        return [_thread_to_full_dict(c) for c in contexts[:top_k]]
-    return [_thread_to_dict(c, query=query, max_chars=max_chars) for c in contexts[:top_k]]
+    # One store handle for the whole result set: attachment names are a per-hit
+    # lookup, and opening a connection per row would make a 5-hit search pay for
+    # five of them.
+    with _attachment_store() as store:
+        if full:
+            return [_thread_to_full_dict(c, store=store) for c in contexts[:top_k]]
+        return [
+            _thread_to_dict(c, query=query, max_chars=max_chars, store=store)
+            for c in contexts[:top_k]
+        ]
 
 
 def get_thread(
@@ -338,7 +405,8 @@ def get_thread(
     context = searcher.thread_by_id(thread_id)
     if context is None:
         raise ValueError(f"unknown thread {thread_id!r}")
-    return _thread_to_full_dict(context)
+    with _attachment_store() as store:
+        return _thread_to_full_dict(context, store=store)
 
 
 def grep_email(
@@ -423,6 +491,46 @@ def answer_question(
     answer = answer_from_threads(query, contexts, k=k)
     sources = [{"thread_id": c.thread_id, "subject": c.subject} for c in contexts[:k]]
     return {"answer": answer, "sources": sources}
+
+
+# Below this density, extraction "succeeded" but the meaning is probably in the
+# pixels. Calibrated on the live corpus (2026-08-20): ten text-bearing PDFs
+# measured 99,000-225,000 chars/MB, while the two documents an agent actually
+# had to render measured 1,869 (a partner PDF whose key fact is a horseshoe
+# diagram of five names) and 66 (a 21 MB slide deck). A 50x margin either side,
+# so the cut is nowhere near either population.
+_SPARSE_TEXT_CHARS_PER_MB = 10_000
+# Below this size the ratio is noise: a 2 KB file with one line of text scores
+# enormously, and a 900-byte spacer scores zero, neither meaningfully.
+_SPARSE_TEXT_MIN_SIZE = 50_000
+
+
+def _text_coverage(text: str, size: int, mime: str) -> Dict[str, Any]:
+    """Describe how much text came out relative to the file's size.
+
+    ``text_status: "extracted"`` reads as success, and for a slide deck whose
+    argument lives in a diagram it is a success that returns nothing useful. An
+    agent told "extracted" stops looking; one told the text is sparse can go
+    render the pages. This does not attempt to judge the CONTENT — only to say
+    that little of it arrived, which is a fact the caller cannot otherwise see.
+    """
+    chars = len((text or "").strip())
+    out: Dict[str, Any] = {"chars": chars}
+    if not size or size < _SPARSE_TEXT_MIN_SIZE or mime.startswith("text/"):
+        return out
+    per_mb = chars / (size / 1_048_576)
+    out["chars_per_mb"] = round(per_mb)
+    if per_mb < _SPARSE_TEXT_CHARS_PER_MB:
+        out["text_coverage"] = "sparse"
+        out["note"] = (
+            "Extraction succeeded but returned little text for a file this size, so the "
+            "substance is probably pictorial — a diagram, a chart, a scan or an "
+            "image-based slide. Treat the text as incomplete rather than as the "
+            "document's content, and render the pages if the answer is not in it."
+        )
+    else:
+        out["text_coverage"] = "rich"
+    return out
 
 
 def _meta_to_dict(meta) -> Dict[str, Any]:
@@ -551,7 +659,7 @@ def get_attachment(
             except ValueError as empty:
                 raise empty from None
             raise ValueError(f"unknown attachment {sha256}") from exc
-        return {
+        row = {
             "sha256": fetched["sha256"],
             "filename": fetched["filename"],
             "mime": fetched["mime"],
@@ -559,6 +667,10 @@ def get_attachment(
             "text": fetched["text"],
             "text_status": fetched["text_status"],
         }
+        row.update(
+            _text_coverage(fetched["text"], fetched.get("size") or 0, fetched.get("mime") or "")
+        )
+        return row
     finally:
         if owns:
             store.close()

@@ -340,6 +340,39 @@ class AttachmentStore:
         )
         return threads >= needed
 
+    def names_for(
+        self, *, thread_id: Optional[str] = None, message_ids: Optional[List[str]] = None
+    ) -> List[str]:
+        """Attachment filenames for a thread, by thread id OR any of its messages.
+
+        Both keys are needed. The attachment store threads messages with the same
+        rule as the indexer, but the two can disagree on which conversation a
+        message belongs to, so a thread id alone misses attachments filed under a
+        sibling. Matching either recovers them.
+
+        Inline decoration is excluded: this feeds a search preview, and a hit
+        advertising four signature logos tells the reader nothing.
+        """
+        keys = [k for k in ([thread_id] if thread_id else []) if k]
+        # Stored message ids keep their angle brackets; callers usually have not.
+        raw_ids = [m for m in (message_ids or []) if m]
+        ids = {i for m in raw_ids for i in (m, m.strip("<>"), f"<{m.strip('<>')}>")}
+        clauses, params = [], []
+        if keys:
+            clauses.append("thread_id IN (%s)" % ",".join("?" * len(keys)))
+            params += keys
+        if ids:
+            clauses.append("message_id IN (%s)" % ",".join("?" * len(ids)))
+            params += sorted(ids)
+        if not clauses:
+            return []
+        rows = self._conn.execute(
+            "SELECT DISTINCT filename FROM attachments "
+            f"WHERE inline=0 AND filename != '' AND ({' OR '.join(clauses)})",
+            params,
+        )
+        return sorted({r[0] for r in rows})
+
     def get_bytes(self, sha256: str) -> bytes:
         blob = self.path_for(sha256)
         if not os.path.exists(blob):

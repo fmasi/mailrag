@@ -6,11 +6,16 @@ HTML), and matches ``pattern`` line-by-line. It bypasses Qdrant and embeddings
 entirely, so needle hunts — a number, an ID, an email address, an error string —
 hit exactly where dense/hybrid retrieval is blind (issue #82).
 
-This module is deliberately **self-contained**: it decodes MIME parts with the
-Python stdlib ``email`` package and an ``html.parser`` HTML-to-text pass, rather
-than importing the ingest loader — the loader is owned by another change and must
-not be modified. Decoding here mirrors the loader's approach (prefer ``text/plain``,
-fall back to stripped ``text/html``) closely enough for literal matching.
+Decoding mirrors the loader's approach (prefer ``text/plain``, fall back to
+stripped ``text/html``). It shares exactly one thing with the loader, and must:
+:meth:`MailArchiveXLoader._strip_mbox_preamble`. Exports in this corpus prepend
+an mbox ``From `` separator and a stray byte-count line before the RFC 2822
+headers, and Python's parser stops reading headers at the first line that is not
+``Name: value`` — so without stripping, EVERY message parses as headerless. This
+module previously kept its own copy of the parse for isolation reasons that no
+longer hold, and the result was that grep reported ``(no subject)`` with empty
+sender/date/message-id for 100% of a real corpus while its synthetic tests
+(preamble-free, hand-written) passed. One parser, one bug to fix.
 
 **Bounded by design:** the scan is capped by matches, by files and by wall
 clock, and every result reports ``scanned`` / ``corpus_files`` / ``complete`` so
@@ -201,6 +206,12 @@ def _parse(path: str):
     try:
         with open(path, "rb") as fh:
             raw = fh.read()
+        # Strip the mbox envelope first or every header is lost — see the module
+        # docstring. Imported from the loader rather than reimplemented so the
+        # two paths cannot drift apart again.
+        from src.data.loaders.mail_archive_x import MailArchiveXLoader
+
+        raw = MailArchiveXLoader._strip_mbox_preamble(raw)
         msg = email.message_from_bytes(raw, policy=policy.compat32)
     except Exception:
         return None
