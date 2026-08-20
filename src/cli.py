@@ -496,6 +496,28 @@ _DEFAULT_ATTACH_STORE = "~/.mailrag/attachments"
 _CLASSIFY_MAX_SIZE = 100_000
 
 
+def _attach_store_for(args, collection: str) -> str:
+    """Per-collection store path, unless --store was given explicitly.
+
+    Attachment stores are separate directories per corpus so that a work corpus
+    and a personal one cannot surface each other's files. The profile already
+    names its collection, so the build needs no extra flag.
+    """
+    from src.mcp_server.server import _safe_dirname
+
+    # An explicit --store is an escape hatch and wins outright: the caller has
+    # named a directory, so there is nothing left to infer.
+    explicit = getattr(args, "store", None)
+    if explicit and explicit != _DEFAULT_ATTACH_STORE:
+        return explicit
+    if not collection:
+        raise ValueError(
+            "this verb needs --collection: attachment stores are separate per corpus, "
+            "so there is no shared store to read from"
+        )
+    return os.path.join(os.path.expanduser(_DEFAULT_ATTACH_STORE), _safe_dirname(collection))
+
+
 def _cmd_attachments_build(args):
     prof = CorpusProfile.load(args.profile)
     kept, _ = resolve_index_files(
@@ -503,7 +525,7 @@ def _cmd_attachments_build(args):
     )
     if args.limit:
         kept = kept[: args.limit]
-    store = AttachmentStore(args.store)
+    store = AttachmentStore(_attach_store_for(args, prof.collection))
     try:
         counts = ingest_eml(kept, store, progress=True)
         print(f"attachments: {counts}")
@@ -534,7 +556,7 @@ def _cmd_attachments_build(args):
 
 
 def _cmd_attachments_list(args):
-    store = AttachmentStore(args.store)
+    store = AttachmentStore(_attach_store_for(args, args.collection))
     try:
         metas = store.list_for(thread_id=args.thread_id, message_id=args.message_id)
     finally:
@@ -546,7 +568,7 @@ def _cmd_attachments_list(args):
 
 
 def _cmd_attachments_get(args):
-    store = AttachmentStore(args.store)
+    store = AttachmentStore(_attach_store_for(args, args.collection))
     try:
         f = store.fetch(args.sha256, extractor=args.extractor, force=args.force)
         if args.out:
@@ -999,10 +1021,20 @@ def build_parser():
     atl.add_argument("--thread-id", default=None)
     atl.add_argument("--message-id", default=None)
     atl.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
+    atl.add_argument(
+        "--collection",
+        default=None,
+        help="corpus whose attachment store to read (stores are separate per collection)",
+    )
     atl.set_defaults(func=_cmd_attachments_list)
 
     atg = at_sub.add_parser("get", help="fetch an attachment by sha256")
     atg.add_argument("sha256")
+    atg.add_argument(
+        "--collection",
+        default=None,
+        help="corpus whose attachment store to read (stores are separate per collection)",
+    )
     atg.add_argument("--text", action="store_true", help="print extracted text")
     atg.add_argument("--out", default=None, help="write raw bytes to this path")
     atg.add_argument("--store", default=_DEFAULT_ATTACH_STORE)

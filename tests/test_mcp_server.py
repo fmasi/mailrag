@@ -165,7 +165,10 @@ class TestSearchEmail(unittest.TestCase):
         self.assertEqual(rows[0]["num_emails"], 2)
         self.assertEqual(rows[0]["snippet"], "thread one body")  # short body: verbatim
         self.assertNotIn("text", rows[0])  # full body is opt-in only
-        self.assertIn("attachment_names", rows[0])
+        # Absent, not empty, when no attachment store is available: an empty
+        # list reads as "this corpus has no attachments" and teaches an agent
+        # to stop looking. Presence is covered in test_attachment_surfacing.py.
+        self.assertNotIn("attachment_names", rows[0])
         self.assertIn("message_ids", rows[0])
         self.assertEqual(rows[1]["thread_id"], "t2")
 
@@ -235,7 +238,7 @@ class TestGetThread(unittest.TestCase):
         out = server.get_thread("t2", searcher=_FakeSearcher(threads))
         self.assertEqual(out["thread_id"], "t2")
         self.assertEqual(out["text"], "thread two body")
-        self.assertIn("attachment_names", out)
+        self.assertNotIn("attachment_names", out)  # see above: absent, not empty
 
     def test_resolves_a_thread_that_semantic_search_never_returns(self):
         """Issue #109: a thread_id is a key, not a query.
@@ -752,7 +755,7 @@ class TestListAttachments(unittest.TestCase):
     def test_builds_and_closes_store_when_not_injected(self):
         store = _FakeStore([])
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store) as ctor:
-            server.list_attachments(thread_id="t1")
+            server.list_attachments(thread_id="t1", collection="c1")
         ctor.assert_called_once()
         self.assertTrue(store.closed)
 
@@ -812,7 +815,7 @@ class TestGetAttachment(unittest.TestCase):
             }
         )
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
-            server.get_attachment("abc")
+            server.get_attachment("abc", collection="c1")
         self.assertTrue(store.closed)
 
 
@@ -858,7 +861,9 @@ class TestServerRegistration(unittest.TestCase):
         )
         self.assertEqual(
             set(by_name["get_attachment"].input_schema["properties"]),
-            {"sha256", "ocr"},
+            # `collection` scopes the store: content hashes are not capabilities,
+            # and stores are separate per corpus.
+            {"sha256", "ocr", "collection"},
         )
 
     def test_call_tool_dispatches_into_search_email(self):
@@ -901,7 +906,9 @@ class TestServerRegistration(unittest.TestCase):
         srv = server.build_server()
         store = _FakeStore([_FakeMeta("abc", "f.pdf", "application/pdf", 1, "t1", "m1")])
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
-            result = asyncio.run(srv.call_tool("list_attachments", {"thread_id": "t1"}))
+            result = asyncio.run(
+                srv.call_tool("list_attachments", {"thread_id": "t1", "collection": "c1"})
+            )
         self.assertEqual(result.structured_content["result"][0]["sha256"], "abc")
         self.assertFalse(result.is_error)
 
@@ -919,7 +926,9 @@ class TestServerRegistration(unittest.TestCase):
             }
         )
         with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store):
-            result = asyncio.run(srv.call_tool("get_attachment", {"sha256": "abc"}))
+            result = asyncio.run(
+                srv.call_tool("get_attachment", {"sha256": "abc", "collection": "c1"})
+            )
         self.assertEqual(result.structured_content["result"]["text"], "body")
         self.assertFalse(result.is_error)
 

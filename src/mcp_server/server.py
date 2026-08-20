@@ -37,6 +37,7 @@ configured through the usual ``RAG_*`` env vars (see ``src.llm.client``).
 from __future__ import annotations
 
 import os
+import re
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
@@ -95,14 +96,76 @@ def resolve_qdrant_url(qdrant_url: Optional[str] = None) -> str:
     ).strip() or DEFAULT_QDRANT_URL
 
 
-def resolve_attach_store(store: Optional[str] = None) -> str:
-    """Resolve the attachment store root.
+def resolve_attach_store(store: Optional[str] = None, collection: Optional[str] = None) -> str:
+    """Resolve the attachment store for one collection.
 
-    Precedence: explicit arg > ``$RAG_ATTACH_STORE`` > ``~/.mailrag/attachments``
-    (the same default as the CLI ``attachments`` verbs). The store is corpus-wide,
-    shared across all collections.
+    Precedence: explicit ``store`` > ``$RAG_ATTACH_STORE`` / ``~/.mailrag/attachments``,
+    **plus the collection name as a subdirectory**.
+
+    Stores are physically separate per collection rather than one store filtered
+    by a predicate. A shared store leaks in practice, not just in theory: with a
+    single index, four thread ids existed in both a work and a personal corpus,
+    so listing either returned the other's attachments — and ``get_attachment``
+    accepted any sha256 from any corpus with nothing to scope it. Filtering
+    would fix both, right up until the first query that forgets the predicate.
+    Separate directories cannot be un-separated by a missing ``WHERE`` clause,
+    which is the property worth having when the two corpora are someone's
+    employer and their private life.
     """
-    return store or os.environ.get("RAG_ATTACH_STORE") or DEFAULT_ATTACH_STORE
+    if store:
+        return store
+    root = os.environ.get("RAG_ATTACH_STORE") or DEFAULT_ATTACH_STORE
+    if not collection:
+        return root
+    return os.path.join(root, _safe_dirname(collection))
+
+
+def _attachment_collection(collection: Optional[str]) -> str:
+    """The collection whose attachment store to use, or a clear refusal.
+
+    Attachments cannot be served corpus-agnostically any more: the stores are
+    separate directories, so "which corpus" is part of the question, not a
+    label. Refusing beats guessing — guessing here means reading someone's
+    personal mail while they believe they are querying work.
+    """
+    try:
+        return resolve_collection(collection)
+    except ValueError as exc:
+        raise ValueError(
+            "attachment lookups need a collection: attachment stores are separate "
+            "per corpus, so there is no corpus-wide default to fall back on. Pass "
+            f"`collection`, or set MAILRAG_COLLECTION. ({exc})"
+        ) from None
+
+
+def _safe_dirname(collection: str) -> str:
+    """Reduce a collection name to one safe path segment.
+
+    Collection names come from config, so a name like ``../other`` must not be
+    able to walk out of the store root.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", collection).strip("-.") or "default"
+    return cleaned[:120]
+
+
+def assert_no_legacy_shared_store(root: Optional[str] = None) -> None:
+    """Refuse to run against a pre-split shared store.
+
+    A flat ``index.db`` at the root predates the split and holds every corpus in
+    one index. Reusing it for a single collection is exactly the leak this
+    removes, and it cannot be split after the fact — rows record the file they
+    came from, not the collection they were indexed into. So say so, and let the
+    (cheap) per-collection rebuild happen.
+    """
+    base = root or os.environ.get("RAG_ATTACH_STORE") or DEFAULT_ATTACH_STORE
+    legacy = os.path.join(os.path.expanduser(base), "index.db")
+    if os.path.exists(legacy):
+        raise ValueError(
+            f"found a pre-split shared attachment store at {legacy!r}, which mixes every "
+            "corpus in one index. Attachment stores are now per-collection. Rebuild each "
+            "corpus with `mailrag attachments build --profile <corpus.profile.json>` "
+            "(minutes), then remove the old index.db and blobs/."
+        )
 
 
 def get_searcher(
@@ -158,7 +221,7 @@ def _thread_snippet(text: str, query: str, max_chars: int) -> str:
 
 
 @contextmanager
-def _attachment_store():
+def _attachment_store(collection: Optional[str] = None):
     """Yield an AttachmentStore for the duration of one tool call, or ``None``.
 
     Never raises: retrieval must keep working when the attachment store is
@@ -166,7 +229,7 @@ def _attachment_store():
     """
     store = None
     try:
-        store = AttachmentStore(resolve_attach_store())
+        store = AttachmentStore(resolve_attach_store(collection=collection))
     except Exception:
         store = None
     try:
@@ -350,11 +413,20 @@ def search_email(
         raise ValueError("max_chars must be >= 1")
     max_chars = min(max_chars, HARD_SEARCH_MAX_CHARS)
     searcher = searcher or get_searcher(collection, mode=mode)
+    # Resolve once so the attachment lookup is scoped to the SAME corpus that
+    # was searched, never to whatever the server's default happens to be.
+    resolved_collection: Optional[str]
+    try:
+        resolved_collection = resolve_collection(collection)
+    except Exception:
+        # Search must still work without a resolvable collection; it just cannot
+        # scope an attachment lookup, so it will report no attachment names.
+        resolved_collection = collection
     contexts = searcher.search_threads(query)
     # One store handle for the whole result set: attachment names are a per-hit
     # lookup, and opening a connection per row would make a 5-hit search pay for
     # five of them.
-    with _attachment_store() as store:
+    with _attachment_store(resolved_collection) as store:
         if full:
             return [_thread_to_full_dict(c, store=store) for c in contexts[:top_k]]
         return [
@@ -405,7 +477,14 @@ def get_thread(
     context = searcher.thread_by_id(thread_id)
     if context is None:
         raise ValueError(f"unknown thread {thread_id!r}")
-    with _attachment_store() as store:
+    resolved_collection: Optional[str]
+    try:
+        resolved_collection = resolve_collection(collection)
+    except Exception:
+        # Search must still work without a resolvable collection; it just cannot
+        # scope an attachment lookup, so it will report no attachment names.
+        resolved_collection = collection
+    with _attachment_store(resolved_collection) as store:
         return _thread_to_full_dict(context, store=store)
 
 
@@ -586,8 +665,9 @@ def list_attachments(
     corpus they are 73% of all rows and would bury the actual documents.
     Returns a row per attachment
     (``sha256``, ``filename``, ``mime``, ``size``, ``thread_id``, ``message_id``,
-    ``inline``). The store is corpus-wide, so ``collection`` is accepted for API
-    symmetry but not required. ``store`` is injectable for tests.
+    ``inline``). ``collection`` selects which corpus's store to read; they are
+    physically separate directories, so a thread id from one corpus cannot
+    surface the other's attachments. ``store`` is injectable for tests.
 
     Raises ``ValueError`` when neither identifier is supplied.
     """
@@ -595,7 +675,8 @@ def list_attachments(
         raise ValueError("one of thread_id or message_id is required")
     owns = store is None
     if store is None:
-        store = AttachmentStore(resolve_attach_store())
+        assert_no_legacy_shared_store()
+        store = AttachmentStore(resolve_attach_store(collection=_attachment_collection(collection)))
     try:
         raw = store.list_for(thread_id=thread_id, message_id=message_id, include_boilerplate=True)
         if not raw:
@@ -628,6 +709,7 @@ def list_attachments(
 def get_attachment(
     sha256: str,
     ocr: Optional[str] = None,
+    collection: Optional[str] = None,
     *,
     store=None,
 ) -> Dict[str, Any]:
@@ -639,6 +721,10 @@ def get_attachment(
     | ``cloud``), like the CLI ``--extractor`` flag; defaults to
     ``$RAG_ATTACH_EXTRACTOR`` or ``llm``. Raw bytes are never returned over MCP.
 
+    ``collection`` scopes the lookup to that corpus's store. A content hash is
+    not a capability: without scoping, a sha256 belonging to a personal corpus
+    resolved just as happily while an agent was querying a work one.
+
     ``store`` is injectable for tests. Raises ``ValueError`` on empty ``sha256`` or
     an unknown attachment.
     """
@@ -646,7 +732,8 @@ def get_attachment(
         raise ValueError("sha256 must be a non-empty string")
     owns = store is None
     if store is None:
-        store = AttachmentStore(resolve_attach_store())
+        assert_no_legacy_shared_store()
+        store = AttachmentStore(resolve_attach_store(collection=_attachment_collection(collection)))
     try:
         try:
             fetched = store.fetch(sha256, extractor=ocr)
@@ -864,7 +951,8 @@ def build_server():
         Args:
             thread_id: Thread whose attachments to list (one of thread_id/message_id).
             message_id: Message whose attachments to list (one of thread_id/message_id).
-            collection: Accepted for symmetry; the attachment store is corpus-wide.
+            collection: Corpus to look in. Stores are physically separate per
+                collection, so this scopes the answer — it is not a label.
             include_boilerplate: Include recurring inline decoration (default False).
         """
         return list_attachments(
@@ -876,7 +964,9 @@ def build_server():
 
     @server.tool(name="get_attachment")
     @usage.instrument("get_attachment")
-    def _tool_get_attachment(sha256: str, ocr: Optional[str] = None) -> Dict[str, Any]:
+    def _tool_get_attachment(
+        sha256: str, ocr: Optional[str] = None, collection: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Read the extracted TEXT of one attachment — PDF, spreadsheet, doc, scan.
 
         The only way to see inside an emailed document. Extracts (or serves the
@@ -893,8 +983,9 @@ def build_server():
             sha256: Content hash of the attachment (from ``list_attachments``).
             ocr: Extraction backend — ``llm`` | ``tesseract`` | ``cloud``
                 (default: ``$RAG_ATTACH_EXTRACTOR`` or ``llm``).
+            collection: Corpus whose store holds it (default: server-resolved).
         """
-        return get_attachment(sha256, ocr=ocr)
+        return get_attachment(sha256, ocr=ocr, collection=collection)
 
     return server
 
