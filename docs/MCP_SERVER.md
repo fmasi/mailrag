@@ -32,6 +32,15 @@ All seven tools are registered on one server. Every query tool accepts an option
 `collection`; when omitted it falls back to the server's resolved default (see
 [Collection discovery & selection](#collection-discovery--selection)).
 
+> **Attachment names on hits.** Each hit carries `attachment_names` — the real
+> documents on that thread, inline decoration excluded — so an agent notices a
+> deck or a PDF without having to suspect it first. The key is **absent**, never
+> empty, when the attachment store has not been built: an always-empty list
+> reads as "this corpus has no attachments" rather than "not populated", and
+> that mis-taught a real session into never opening the attachment tools at all.
+> Populate it with `./mailrag attachments build` (see
+> [Noise signals](#noise-signals-attachments-build)).
+
 > **Bounded output.** `search_email` returns a **snippet window + metadata** per
 > hit, not the full thread body (a single call used to emit ~130 K chars). Pull a
 > full thread on demand with `get_thread` (or `search_email(..., full=True)`).
@@ -155,6 +164,14 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
   "stop_reason": "max_matches", "elapsed_s": 4.4, "root": "/Users/you/rag_eml"
 }
 ```
+
+> **Envelope handling.** These exports prepend an mbox `From ` separator and a
+> stray byte-count line before the RFC 2822 headers, and Python's parser stops
+> reading headers at the first line that is not `Name: value`. `grep_email`
+> strips that preamble via the same loader helper the indexer uses. It did not
+> always: for a period every hit came back as `(no subject)` with empty
+> sender/date/message-id, and the whole raw file — base64 attachment payloads
+> included — was treated as body text.
 
 #### Cost model — why the scan is bounded
 
@@ -293,9 +310,24 @@ when the file is a scan or an image. Raw bytes are **never** returned over MCP.
   - `sha256` (str, required) — content hash of the attachment (from `list_attachments`).
   - `ocr` (str, optional) — extraction backend: `llm` | `tesseract` | `cloud`
     (like the CLI `--extractor` flag). Defaults to `$RAG_ATTACH_EXTRACTOR` or `llm`.
-- **Returns:** `{sha256, filename, mime, size, text, text_status}`. Always check
-  `text_status` (e.g. `ok`, `ocr_unavailable`): it reports when extraction failed,
-  so an empty `text` is **not** evidence that the document is blank.
+- **Returns:** `{sha256, filename, mime, size, text, text_status, chars}`, plus
+  `chars_per_mb` and `text_coverage` (`rich` | `sparse`) for documents above
+  50 KB. Always check `text_status` (e.g. `ok`, `ocr_unavailable`): it reports
+  when extraction failed, so an empty `text` is **not** evidence that the
+  document is blank.
+
+> **`text_coverage: "sparse"` means the substance is probably in the pixels.**
+> Extraction can succeed and still return almost nothing — a slide deck whose
+> argument is a diagram, a scanned page, a chart. In one real case the decisive
+> fact was five partner names arranged round a horseshoe graphic, with no
+> sentence anywhere saying "five"; text extraction would have returned the
+> surrounding boilerplate and looked like success. When this flag is set, treat
+> the text as incomplete and render the pages rather than concluding the
+> document does not contain the answer.
+>
+> Calibrated on a real corpus: ten text-bearing PDFs measured 99,000–225,000
+> chars/MB, against 1,869 for that diagram PDF and 66 for a 21 MB deck. The cut
+> sits at 10,000 — a 50× margin from either population.
 - **Errors:** `ValueError` on a blank `sha256` or an unknown attachment.
 
 ```jsonc
