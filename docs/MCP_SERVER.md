@@ -367,7 +367,7 @@ Config mirrors `./mailrag ask` and is resolved from flags/environment:
 |---------|---------------------------------------|-------|
 | Collection | `collection` arg → `$MAILRAG_COLLECTION` → latest onboarding manifest | Per-call `collection` overrides the env default. |
 | Qdrant URL | `--qdrant-url` (CLI) → `$MAILRAG_QDRANT_URL` → `$QDRANT_URL` → `http://localhost:6333` | `MAILRAG_QDRANT_URL` lets a host server target `localhost` without inheriting a container-oriented `QDRANT_URL` from `.env` (the [issue #29](https://github.com/fmasi/mailrag/issues/29) gotcha). |
-| Attachment store | `$RAG_ATTACH_STORE` → `~/.mailrag/attachments` | Same default and store the CLI `attachments` verbs use; corpus-wide. |
+| Attachment store | `$RAG_ATTACH_STORE` → `~/.mailrag/attachments`, **plus the collection name as a subdirectory** | One store per collection, physically separate. See [Attachment store isolation](#attachment-store-isolation). |
 | Answer LLM endpoint | `$RAG_LLM_API_BASE` (alias `$RAG_LLM_BASE_URL`) → `http://localhost:1234/v1` | Used only by `answer_question`. See [`BACKENDS.md`](BACKENDS.md). |
 | Answer LLM key | `$RAG_LLM_API_KEY` → `lm-studio` placeholder | **Set this in the MCP server config if your endpoint enforces auth** — the `lm-studio` placeholder is for auth-less local servers and is rejected with a 401 otherwise (issue #83). The startup healthcheck names it on failure. |
 | Answer LLM model | `$RAG_LLM_MODEL` | Required for `answer_question`; the healthcheck names it when unset. |
@@ -438,6 +438,52 @@ reporting-deadline table sits at 15 threads, a disclaimer at 18. The cut errs
 toward keeping, so some signature images survive rather than one real table being
 hidden. Splitting that band properly needs a content rule (disclaimer phrasing,
 contact-detail patterns), not a bigger threshold.
+
+## Attachment store isolation
+
+Attachment stores are **separate directories per collection**, not one store
+filtered by a predicate:
+
+```
+~/.mailrag/attachments/
+  work-rag-ctx-threadaware-v2/   index.db  blobs/
+  personal-rag/                  index.db  blobs/
+```
+
+This is a privacy boundary, not housekeeping. On a real machine with a single
+shared store, **four thread ids existed in both a work corpus and a personal
+one**, so `list_attachments` on any of them returned the other's attachments —
+and `get_attachment` accepted any sha256 from any corpus, because a content hash
+carries no corpus with it. A `WHERE collection = ?` would close both holes right
+up until the first query that forgets it. Separate directories cannot be
+un-separated by an omission, which is the property worth having when the two
+corpora are an employer's mail and a private life.
+
+Consequences:
+
+- `list_attachments` and `get_attachment` take a **`collection`**, and **refuse
+  rather than guess** when none resolves. Guessing means reading personal mail
+  while the caller believes they are querying work.
+- `./mailrag attachments build --profile <p>` derives the store from the
+  profile's own `collection` field, so no extra flag is needed. `attachments
+  list` / `get` take `--collection`. An explicit `--store` overrides everything.
+- Collection names are reduced to one safe path segment, so a name containing
+  separators cannot walk out of the store root.
+- The same document legitimately appearing in both corpora — a PDF mailed to a
+  work and a personal address — is stored once per corpus. That is duplication,
+  not leakage.
+
+**Upgrading from a pre-split store.** A flat `index.db` at the store root mixes
+every corpus in one index and is **refused with instructions** rather than
+silently reused. It is not migrated automatically: rows record the file they came
+from, not the collection they were indexed into, so there is no sound way to
+split one after the fact. Rebuild each corpus (minutes) and delete the old
+directory:
+
+```bash
+./mailrag attachments build --profile ~/work.profile.json
+./mailrag attachments build --profile ~/personal.profile.json
+```
 
 ## Usage logging
 
