@@ -18,14 +18,28 @@ resolve_python() {
     echo "$MAILRAG_PYTHON"
     return
   fi
-  for candidate in \
-    "$REPO/.venv/bin/python" \
-    "${CONDA_EXE:+$(dirname "$(dirname "$CONDA_EXE")")/envs/mailrag/bin/python}" \
-    "$HOME/miniconda3/envs/mailrag/bin/python" \
-    "/opt/miniconda3/envs/mailrag/bin/python"; do
-    [[ -n "$candidate" && -x "$candidate" ]] && { echo "$candidate"; return; }
+  local roots=(
+    "${CONDA_EXE:+$(dirname "$(dirname "$CONDA_EXE")")}"
+    "$HOME/miniconda3" "/opt/miniconda3"
+    "$HOME/miniforge3" "/opt/miniforge3"
+    "$HOME/mambaforge" "/opt/homebrew/Caskroom/miniforge/base"
+    "$HOME/anaconda3" "/opt/anaconda3"
+  )
+  [[ -x "$REPO/.venv/bin/python" ]] && { echo "$REPO/.venv/bin/python"; return; }
+  local root
+  for root in "${roots[@]}"; do
+    [[ -n "$root" && -x "$root/envs/mailrag/bin/python" ]] && {
+      echo "$root/envs/mailrag/bin/python"; return
+    }
   done
-  command -v python
+  # Last resort. If even this is missing, say so: an MCP client starting this
+  # shim gets no shell and no diagnostics, and a bare non-zero exit reproduces
+  # exactly the "server silently never starts" failure this shim exists to fix.
+  command -v python || {
+    echo "mailrag: no Python found. Set MAILRAG_PYTHON=/path/to/python, create" >&2
+    echo "  a .venv in $REPO, or create the 'mailrag' conda env (see docs/SETUP.md)." >&2
+    return 1
+  }
 }
 
 PY="$(resolve_python)"

@@ -49,8 +49,11 @@ Within the repo, [`docs/INDEX.md`](docs/INDEX.md) is the canonical map and readi
 order: README → INDEX → guides → deep dives → the evidence tier
 (`CLAIMS` / `BENCHMARK` / `CASE_STUDY` / `EXPERIMENTS`). Route new material to the
 file whose job it is rather than appending where it happens to fit — mechanics to
-the subsystem doc, findings and dead ends to `EXPERIMENTS.md`, and **every
-published number to `CLAIMS.md`** with its source, corpus and date.
+the subsystem doc, findings and dead ends to [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md),
+and **every published number to [`docs/CLAIMS.md`](docs/CLAIMS.md)** with its source, corpus and date.
 
-Keep `README.md` short. It is the front door, not the manual: it points at
-`docs/INDEX.md` instead of repeating it.
+Keep `README.md` short — it is the front door, not the manual, and should point
+at `docs/INDEX.md` rather than repeat it. Note this is a target, not a
+description: the README is currently well past that and carries an architecture
+sketch, benchmark numbers and design rationale that `INDEX.md` already claims it
+delegates. Trimming it is outstanding work; do not add to it in the meantime.

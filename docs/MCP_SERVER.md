@@ -509,15 +509,20 @@ secrets in client config:
       "env": {
         "MAILRAG_QDRANT_URL": "${MAILRAG_QDRANT_URL:-http://localhost:6333}",
         "MAILRAG_EML_ROOT": "${MAILRAG_EML_ROOT:-~/rag_eml}",
-        "RAG_LLM_API_BASE": "${RAG_LLM_API_BASE:-http://localhost:1234/v1}"
+        "RAG_LLM_API_BASE": "${RAG_LLM_API_BASE:-http://localhost:1234/v1}",
+        "HF_HUB_OFFLINE": "${HF_HUB_OFFLINE:-1}",
+        "TRANSFORMERS_OFFLINE": "${TRANSFORMERS_OFFLINE:-1}"
       }
     }
   }
 }
 ```
 
-Only three settings appear here, and each is an env lookup with a default you can
-override from your shell. Everything else — collection, LLM model, API key —
+Each is an env lookup with a default you can override from your shell. The two
+offline flags are defaulted **on** deliberately: once the bge-m3 weights are
+cached, a stale global `HF_TOKEN` makes model load fail with a 401 against the
+Hub, and a server that cannot embed is a server that cannot search. Set them to
+`0` in your shell if you genuinely need to fetch weights. Everything else — collection, LLM model, API key —
 comes from `.env` via the shim, which is why there is nothing to keep in sync.
 
 The two `localhost` defaults are deliberate: a `.env` written for the container

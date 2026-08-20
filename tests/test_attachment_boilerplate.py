@@ -141,3 +141,43 @@ class TestBoilerplateFilter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestThreadCounts(unittest.TestCase):
+    """Batched blob counts must agree with the per-blob answer.
+
+    (An earlier revision chunked this query to dodge SQLite's bound-parameter
+    cap. Dropped: that cap has defaulted to 32,766 since SQLite 3.32 in 2020 and
+    pyproject requires Python >=3.11 from 2022, so no supported interpreter can
+    reach the historical 999 limit. Defending against it was complexity for a
+    state the project's own constraints exclude.)
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="counts_")
+        self.store = AttachmentStore(self.dir)
+
+    def tearDown(self):
+        self.store.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_subset_and_full_queries_agree(self):
+        for i in range(5):
+            self.store.put(
+                b"same-blob",
+                message_id=f"m{i}",
+                thread_id=f"t{i}",
+                filename="logo.png",
+                mime="image/png",
+                size=9,
+                source_type="eml",
+                source_ref="r",
+                inline=True,
+            )
+        full = self.store.thread_counts()
+        subset = self.store.thread_counts(sha256s=list(full))
+        self.assertEqual(full, subset)
+        self.assertEqual(list(full.values()), [5])
+
+    def test_empty_request_short_circuits(self):
+        self.assertEqual(self.store.thread_counts(sha256s=[]), {})

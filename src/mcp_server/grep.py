@@ -283,8 +283,11 @@ def grep_email(
             ``$MAILRAG_EML_ROOT`` or ``~/rag_eml``.
         max_files: Stop after scanning this many messages (``None`` = no file
             bound; the deadline still applies).
-        max_seconds: Wall-clock budget, clamped to ``(0, 900]``. ``None``
-            disables the deadline -- only safe on a small corpus.
+        max_seconds: Wall-clock budget, clamped to ``(0, 900]``, measured from
+            entry -- so it covers the corpus walk as well as the scan, matching
+            ``elapsed_s`` and the time a caller actually waits. The walk is
+            ~0.25s over 73k files, so this only matters for very short budgets.
+            ``None`` disables the deadline -- only safe on a small corpus.
 
     Returns:
         ``{matches, scanned, corpus_files, complete, stop_reason, elapsed_s, root}``:
@@ -309,7 +312,15 @@ def grep_email(
     if not pattern or not pattern.strip():
         raise ValueError("pattern must be a non-empty string")
     limit = max(1, min(int(max_matches), _HARD_MAX_MATCHES))
-    file_budget = max(1, int(max_files)) if max_files is not None else None
+    if max_files is None:
+        file_budget = None
+    else:
+        file_budget = int(max_files)
+        if file_budget <= 0:
+            # Rejected rather than clamped to 1, to match max_seconds: a caller
+            # passing 0 means "none", and silently scanning one file instead
+            # would answer a question they did not ask.
+            raise ValueError("max_files must be > 0 (or None for no file bound)")
     if max_seconds is None:
         budget_s = None
     else:
@@ -322,8 +333,9 @@ def grep_email(
     # Materialise the file list first: the walk is cheap next to parsing (~0.25s
     # for 73k files) and it buys the caller a denominator, so a partial scan can
     # be reported as "3,000 of 73,251" rather than an unqualified empty result.
-    paths = list(_discover_eml(corpus))
+    # The clock starts before it, so elapsed_s is the wall time the CALLER waited.
     started = time.monotonic()
+    paths = list(_discover_eml(corpus))
     deadline = started + budget_s if budget_s is not None else None
 
     results: List[Dict[str, Any]] = []

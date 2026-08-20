@@ -475,7 +475,8 @@ def list_attachments(
     Parity with the CLI ``attachments list``: at least one of ``thread_id`` /
     ``message_id`` must be given. Recurring small inline images (signature logos,
     spacer pixels) are excluded unless ``include_boilerplate=True`` — on a real
-    corpus they are 73% of all rows and would bury the actual documents. Returns a row per attachment
+    corpus they are 73% of all rows and would bury the actual documents.
+    Returns a row per attachment
     (``sha256``, ``filename``, ``mime``, ``size``, ``thread_id``, ``message_id``,
     ``inline``). The store is corpus-wide, so ``collection`` is accepted for API
     symmetry but not required. ``store`` is injectable for tests.
@@ -488,11 +489,28 @@ def list_attachments(
     if store is None:
         store = AttachmentStore(resolve_attach_store())
     try:
-        metas = store.list_for(
-            thread_id=thread_id, message_id=message_id, include_boilerplate=include_boilerplate
+        raw = store.list_for(thread_id=thread_id, message_id=message_id, include_boilerplate=True)
+        if not raw:
+            # Nothing here at all — the common case for most threads, and now a
+            # single query rather than two, since there is nothing to filter.
+            _require_populated_store(store)
+            return []
+        metas = (
+            raw
+            if include_boilerplate
+            else store.list_for(
+                thread_id=thread_id, message_id=message_id, include_boilerplate=False
+            )
         )
         if not metas:
-            _require_populated_store(store)
+            # Everything here was decoration: a THIRD kind of nothing, which must
+            # not read like "no attachments" or like "store never built". A
+            # caller told the wrong one stops looking.
+            raise ValueError(
+                f"all {len(raw)} attachment(s) here are decoration (signature "
+                "images, disclaimer graphics, spacer pixels) — there is no document "
+                "attached. Pass include_boilerplate=true to see them anyway."
+            )
         return [_meta_to_dict(m) for m in metas]
     finally:
         if owns:
@@ -525,7 +543,13 @@ def get_attachment(
         try:
             fetched = store.fetch(sha256, extractor=ocr)
         except KeyError as exc:
-            _require_populated_store(store)
+            # `from None` on the store-empty path: the KeyError is noise once we
+            # know the real cause is an un-ingested store, and chaining it buries
+            # the actionable message under "another exception occurred".
+            try:
+                _require_populated_store(store)
+            except ValueError as empty:
+                raise empty from None
             raise ValueError(f"unknown attachment {sha256}") from exc
         return {
             "sha256": fetched["sha256"],

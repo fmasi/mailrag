@@ -57,6 +57,16 @@ def classify_blobs(
     corpus does nothing. Failures are counted, not raised — one unreadable image
     must not abort a bulk pass.
     """
+    todo = store.unmeasured_blobs(max_size=max_size, images_only=images_only)
+    if limit is not None:
+        todo = todo[:limit]
+    if not todo:
+        # Nothing to measure: return before constructing an engine. Tesseract
+        # surfaces a missing binary as OCR_UNAVAILABLE per blob rather than
+        # raising here, but a re-run over an already-measured corpus should not
+        # depend on that being true of every future provider.
+        return ClassifyStats()
+
     if extractor is None:
         from src.attachments.extract import build_default_extractor
 
@@ -67,10 +77,6 @@ def classify_blobs(
         extractor = build_default_extractor(
             os.environ.get("RAG_ATTACH_CLASSIFY_EXTRACTOR", "tesseract")
         )
-
-    todo = store.unmeasured_blobs(max_size=max_size, images_only=images_only)
-    if limit:
-        todo = todo[:limit]
 
     bar = None
     if progress:

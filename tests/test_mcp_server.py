@@ -355,14 +355,57 @@ class TestListAttachmentsBoilerplateDefault(unittest.TestCase):
             [_FakeMeta("a", "d.pdf", "application/pdf", 9, "t1", "m1", inline=False)]
         )
         server.list_attachments(thread_id="t1", store=store)
-        self.assertEqual(store.boilerplate_calls, [False])
+        # Raw first (cheap exit when a thread has nothing), then the filtered
+        # view only if there was something to filter.
+        self.assertEqual(store.boilerplate_calls, [True, False])
 
     def test_tool_can_request_the_raw_list(self):
         store = _FakeStore(
             [_FakeMeta("a", "d.pdf", "application/pdf", 9, "t1", "m1", inline=False)]
         )
         server.list_attachments(thread_id="t1", include_boilerplate=True, store=store)
-        self.assertEqual(store.boilerplate_calls, [True])
+        self.assertEqual(store.boilerplate_calls, [True])  # raw request needs no second pass
+
+
+class TestAllDecorationIsNotNoAttachments(unittest.TestCase):
+    """A third kind of nothing, which must not read like the other two.
+
+    "No attachments here", "the store was never built" and "everything here was
+    decoration" are different answers. A caller told the first will stop
+    looking, which is the whole failure this work exists to remove.
+    """
+
+    class _Store:
+        root = "/tmp/attachments"
+
+        def __init__(self, raw):
+            self._raw = raw
+
+        def count(self):
+            return 12
+
+        def list_for(self, *, thread_id=None, message_id=None, include_boilerplate=True):
+            return self._raw if include_boilerplate else []
+
+        def close(self):
+            pass
+
+    def test_all_decoration_raises_rather_than_returning_empty(self):
+        store = self._Store([_FakeMeta("a", "logo.png", "image/png", 900, "t1", "m1", inline=True)])
+        with self.assertRaises(ValueError) as ctx:
+            server.list_attachments(thread_id="t1", store=store)
+        msg = str(ctx.exception)
+        self.assertIn("decoration", msg)
+        self.assertIn("include_boilerplate", msg)
+
+    def test_thread_with_genuinely_no_attachments_returns_empty(self):
+        # Nothing raw either — so the honest answer really is "nothing here".
+        self.assertEqual(server.list_attachments(thread_id="t1", store=self._Store([])), [])
+
+    def test_include_boilerplate_true_never_raises(self):
+        store = self._Store([_FakeMeta("a", "logo.png", "image/png", 900, "t1", "m1", inline=True)])
+        rows = server.list_attachments(thread_id="t1", include_boilerplate=True, store=store)
+        self.assertEqual([r["filename"] for r in rows], ["logo.png"])
 
 
 class TestAttachmentStoreNeverBuilt(unittest.TestCase):
@@ -677,7 +720,9 @@ class TestListAttachments(unittest.TestCase):
             [_FakeMeta("abc", "report.pdf", "application/pdf", 1024, "t1", "m1", inline=False)]
         )
         rows = server.list_attachments(thread_id="t1", store=store)
-        self.assertEqual(store.list_calls, [("t1", None)])
+        # Raw read, then the filtered view: the second only happens because this
+        # thread has attachments to filter.
+        self.assertEqual(store.list_calls, [("t1", None), ("t1", None)])
         self.assertEqual(
             rows,
             [
@@ -696,6 +741,8 @@ class TestListAttachments(unittest.TestCase):
     def test_message_id_passthrough(self):
         store = _FakeStore([])
         server.list_attachments(message_id="m9", store=store)
+        # One call: the raw read came back empty, so there was nothing to filter
+        # and no second query.
         self.assertEqual(store.list_calls, [(None, "m9")])
 
     def test_requires_an_identifier(self):

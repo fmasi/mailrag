@@ -190,14 +190,27 @@ class AttachmentStore:
         sql += " GROUP BY a.sha256"
         return self._conn.execute(sql, params).fetchall()
 
-    def thread_counts(self) -> dict:
-        """sha256 -> number of distinct threads carrying it (the recurrence signal)."""
-        return {
-            r[0]: r[1]
-            for r in self._conn.execute(
-                "SELECT sha256, COUNT(DISTINCT thread_id) FROM attachments GROUP BY sha256"
-            )
-        }
+    def thread_counts(self, sha256s: Optional[List[str]] = None) -> dict:
+        """sha256 -> number of distinct threads carrying it (the recurrence signal).
+
+        Pass ``sha256s`` to resolve just those blobs in a single query; omit it
+        for the whole store.
+        """
+        sql = "SELECT sha256, COUNT(DISTINCT thread_id) FROM attachments"
+        params: List[Any] = []
+        if sha256s is not None:
+            unique = sorted(set(sha256s))
+            if not unique:
+                return {}
+            # One bound parameter per blob. SQLite caps them, but not within
+            # reach here: the cap has defaulted to 32,766 since SQLite 3.32
+            # (2020) and is 250,000 on the build this runs, while pyproject
+            # requires Python >=3.11 (2022) — no supported interpreter links a
+            # SQLite old enough for the historical 999 limit to apply.
+            sql += " WHERE sha256 IN (%s)" % ",".join("?" * len(unique))
+            params = list(unique)
+        sql += " GROUP BY sha256"
+        return {r[0]: r[1] for r in self._conn.execute(sql, params)}
 
     def path_for(self, sha256: str) -> str:
         return os.path.join(self._blobs, sha256[:2], sha256)
@@ -280,9 +293,14 @@ class AttachmentStore:
         metas = [self._row_to_meta(r) for r in rows]
         if include_boilerplate:
             return metas
-        return [m for m in metas if not self._is_boilerplate(m)]
+        # Resolve every thread count in ONE query rather than one per row: a
+        # per-attachment lookup made list_for cost 2N+1 round-trips, which is
+        # invisible for a 3-attachment thread and pathological for a whole-store
+        # listing (45k rows).
+        counts = self.thread_counts(sha256s=[m.sha256 for m in metas])
+        return [m for m in metas if not self._is_boilerplate(m, counts.get(m.sha256, 0))]
 
-    def _is_boilerplate(self, meta) -> bool:
+    def _is_boilerplate(self, meta, thread_count: Optional[int] = None) -> bool:
         """Decide one attachment, preferring measured signals over the heuristic.
 
         Measured OCR signals win when they have an opinion, because the
@@ -296,7 +314,7 @@ class AttachmentStore:
         """
         from src.attachments.signals import is_decoration
 
-        threads = self._thread_count(meta.sha256)
+        threads = self._thread_count(meta.sha256) if thread_count is None else thread_count
         verdict = is_decoration(self.get_signals(meta.sha256), threads, meta.inline)
         if verdict is not None:
             return verdict

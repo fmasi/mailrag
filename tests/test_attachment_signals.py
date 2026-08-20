@@ -15,6 +15,7 @@ import unittest
 
 from src.attachments.classify import classify_blobs
 from src.attachments.signals import (
+    UBIQUITOUS_THREADS,
     BlobSignals,
     is_decoration,
     measure_blob,
@@ -130,10 +131,16 @@ class TestIsDecoration(unittest.TestCase):
         self.assertIs(is_decoration(_sig(748), thread_count=829, inline=True), True)
         self.assertIs(is_decoration(_sig(195), thread_count=61, inline=True), True)
 
-    def test_content_below_the_ubiquity_ceiling_survives(self):
-        # The Q1-Q4 reporting-deadline table: 209 chars across 15 threads, which
-        # is heavy reuse for a real document but under the ceiling.
-        self.assertIs(is_decoration(_sig(209), thread_count=15, inline=True), False)
+    def test_content_just_below_the_ubiquity_ceiling_survives(self):
+        # Pinned at the boundary itself rather than at 15 (already covered by
+        # test_text_rich_beats_the_recurrence_heuristic): one thread lower must
+        # still be content, or the ceiling is off by one.
+        self.assertIs(
+            is_decoration(_sig(209), thread_count=UBIQUITOUS_THREADS - 1, inline=True), False
+        )
+
+    def test_content_at_the_ubiquity_ceiling_is_decoration(self):
+        self.assertIs(is_decoration(_sig(209), thread_count=UBIQUITOUS_THREADS, inline=True), True)
 
     def test_ubiquity_ceiling_does_not_apply_to_real_enclosures(self):
         # A boilerplate PDF sent to hundreds of threads is still a document.
@@ -257,3 +264,127 @@ class TestMeasureBlob(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClassifyDefaultsToTesseract(unittest.TestCase):
+    """The CLI must not silently upgrade the cheap pass to the vision LLM.
+
+    Regression: `attachments build` passed `args.extractor` straight into
+    `build_default_extractor()`. With no `--extractor` that is `None`, which
+    resolves `$RAG_ATTACH_EXTRACTOR` and falls back to `llm` — bypassing the
+    tesseract default that makes bulk measurement affordable. Measured on the
+    same images, the LLM path is 16-20x slower, so the whole pass would have
+    gone from minutes to hours without saying so.
+    """
+
+    def test_classify_uses_tesseract_when_no_extractor_is_requested(self):
+        from unittest import mock
+
+        import src.attachments.classify as classify
+
+        with mock.patch.object(classify, "measure_blob"):
+            with mock.patch("src.attachments.extract.build_default_extractor") as build:
+                classify.classify_blobs(_OneBlobStore(), extractor=None)
+        self.assertEqual(build.call_args.args[0], "tesseract")
+
+    def test_no_engine_is_built_when_there_is_nothing_to_measure(self):
+        # A re-run over an already-measured corpus should not depend on an OCR
+        # engine being installable, let alone installed.
+        from unittest import mock
+
+        import src.attachments.classify as classify
+
+        with mock.patch("src.attachments.extract.build_default_extractor") as build:
+            stats = classify.classify_blobs(_EmptyStore(), extractor=None)
+        build.assert_not_called()
+        self.assertEqual(stats.measured, 0)
+
+    def test_env_can_override_the_classify_engine(self):
+        import os
+        from unittest import mock
+
+        import src.attachments.classify as classify
+
+        with mock.patch.dict(os.environ, {"RAG_ATTACH_CLASSIFY_EXTRACTOR": "llm"}):
+            with mock.patch("src.attachments.extract.build_default_extractor") as build:
+                classify.classify_blobs(_OneBlobStore(), extractor=None)
+        self.assertEqual(build.call_args.args[0], "llm")
+
+
+class TestBuildVerbWiring(unittest.TestCase):
+    """`attachments build` must leave the engine choice to classify_blobs."""
+
+    def test_no_extractor_flag_means_no_extractor_is_constructed(self):
+        import argparse
+        from unittest import mock
+
+        import src.cli as cli
+
+        args = argparse.Namespace(
+            profile="p.json",
+            store="/tmp/s",
+            limit=None,
+            no_classify=False,
+            classify_max_size=100_000,
+            extractor=None,
+        )
+        with (
+            mock.patch.object(cli, "CorpusProfile"),
+            mock.patch.object(cli, "resolve_index_files", return_value=([], None)),
+            mock.patch.object(cli, "AttachmentStore"),
+            mock.patch.object(cli, "ingest_eml", return_value={}),
+            mock.patch("src.attachments.classify.classify_blobs") as classify,
+            mock.patch("src.attachments.extract.build_default_extractor") as build,
+        ):
+            cli._cmd_attachments_build(args)
+        self.assertIsNone(classify.call_args.kwargs["extractor"])
+        build.assert_not_called()
+
+    def test_an_explicit_extractor_flag_is_honoured(self):
+        """The complementary path: --extractor must still reach classify_blobs.
+
+        The fix guards against building an engine when none was asked for; it
+        must not also swallow one that was.
+        """
+        import argparse
+        from unittest import mock
+
+        import src.cli as cli
+
+        args = argparse.Namespace(
+            profile="p.json",
+            store="/tmp/s",
+            limit=None,
+            no_classify=False,
+            classify_max_size=100_000,
+            extractor="llm",
+        )
+        with (
+            mock.patch.object(cli, "CorpusProfile"),
+            mock.patch.object(cli, "resolve_index_files", return_value=([], None)),
+            mock.patch.object(cli, "AttachmentStore"),
+            mock.patch.object(cli, "ingest_eml", return_value={}),
+            mock.patch("src.attachments.classify.classify_blobs") as classify,
+            mock.patch("src.attachments.extract.build_default_extractor") as build,
+        ):
+            cli._cmd_attachments_build(args)
+        build.assert_called_once_with("llm")
+        self.assertIs(classify.call_args.kwargs["extractor"], build.return_value)
+
+
+class _EmptyStore:
+    """No work to do — classify must return before constructing an engine."""
+
+    def unmeasured_blobs(self, **kw):
+        return []
+
+
+class _OneBlobStore:
+    def unmeasured_blobs(self, **kw):
+        return [("sha", "image/png", "a.png", 100)]
+
+    def path_for(self, sha):
+        return "/nonexistent/blob"
+
+    def put_signals(self, *a, **k):
+        pass
