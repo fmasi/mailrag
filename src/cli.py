@@ -91,7 +91,7 @@ def _cmd_summarize(args):
             file=sys.stderr,
         )
         return 2
-    counts = pass2_stage.run(prof, model=args.model, workers=args.workers)
+    counts = pass2_stage.run(prof, model=args.model, workers=args.workers, limit=args.limit)
     print(f"summarize: {counts}")
     return 0
 
@@ -441,6 +441,16 @@ def _configure_index(p):
 
 
 def _configure_summarize(p):
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "stop after this many UNCACHED emails (cached ones are free and do not "
+            "count) — bounds a paid run, since the sweep is resumable and the "
+            "remainder can finish on another endpoint"
+        ),
+    )
     _add_profile_arg(p)
     p.add_argument("--model", required=True)
     p.add_argument("--workers", type=int, default=1)

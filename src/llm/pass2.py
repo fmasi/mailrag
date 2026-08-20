@@ -149,7 +149,22 @@ def run_pass(
 
     paths = list(paths)
     if limit is not None:
-        paths = paths[:limit]
+        # Bound the WORK, not the file list. Slicing paths[:limit] caps how many
+        # files are considered, which on a mostly-cached corpus means a "limit
+        # 1500" run does nothing at all — the first 1,500 files are already
+        # done. The reason to bound this sweep is that the remainder costs money
+        # or hours, so the limit has to count the emails that actually incur it.
+        bounded, remaining = [], limit
+        for path in paths:
+            if remaining <= 0:
+                break
+            bounded.append(path)
+            try:
+                if not cache.has(file_sha256(path)):
+                    remaining -= 1
+            except OSError:
+                remaining -= 1  # an unreadable file still consumes an attempt
+        paths = bounded
 
     bar = None
     if progress:

@@ -148,6 +148,7 @@ class _LLMClient:
                     # the scheduled run simply retries on the next tick.
                     timeout=_request_timeout(),
                     max_retries=_max_retries(),
+                    **_tier_kwargs(self.base_url),
                 )
                 self._cache[key] = inst
             return inst
@@ -157,6 +158,31 @@ class _LLMClient:
         from openai import OpenAI  # noqa: PLC0415
 
         return OpenAI(base_url=self.base_url, api_key=self.api_key)
+
+
+def service_tier(base_url: str = "") -> str:
+    """The billing tier to request, or ``""`` to send none.
+
+    ``$RAG_LLM_SERVICE_TIER`` (e.g. ``flex``) is honoured **only** against hosts
+    that price by tier. The host check is the guard, not politeness: a local
+    LM Studio or Ollama endpoint given an unknown ``service_tier`` can reject the
+    whole request, so a variable set for a paid run must not break every local
+    one afterwards.
+
+    DeepInfra bills ``flex`` at exactly 20% below standard, which is the same
+    discount as their Batch API — and the two do not stack.
+    """
+    tier = (os.environ.get("RAG_LLM_SERVICE_TIER") or "").strip().lower()
+    if not tier:
+        return ""
+    host = (base_url or "").split("://", 1)[-1].split("/", 1)[0].lower()
+    return tier if "deepinfra" in host else ""
+
+
+def _tier_kwargs(base_url: str) -> dict:
+    """``additional_kwargs`` carrying the service tier, when one applies."""
+    tier = service_tier(base_url)
+    return {"additional_kwargs": {"service_tier": tier}} if tier else {}
 
 
 def make_client() -> _LLMClient:
