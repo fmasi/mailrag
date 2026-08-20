@@ -178,7 +178,7 @@ def record_profile_for_collection(collection: str, profile_path: str) -> None:
 
 def manifest_profile_paths() -> dict:
     """``{collection: profile path}`` from manifests that recorded one."""
-    out = {}
+    out: dict = {}
     if not MANIFEST_DIR.is_dir():
         return out
     for f in sorted(MANIFEST_DIR.glob("*.json")):
