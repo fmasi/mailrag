@@ -11,7 +11,6 @@ nothing, verifying nothing.
 """
 
 import unittest
-
 from unittest import mock
 
 from src.llm.pass2 import run_pass
