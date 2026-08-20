@@ -65,13 +65,42 @@ _SEARCHER_CACHE: dict = {}
 
 
 def resolve_collection(collection: Optional[str] = None) -> str:
-    """Resolve the Qdrant collection to query.
+    """Resolve the collection to query.
 
-    Precedence: explicit arg > ``$MAILRAG_COLLECTION`` > latest onboarding
-    manifest. Raises ``ValueError`` with an actionable message when none is
-    available (so the MCP client sees a clear error rather than a crash).
+    Precedence: explicit arg > ``$MAILRAG_COLLECTION`` > the single corpus on
+    this machine.
+
+    There is deliberately **no silent fallback when more than one corpus
+    exists**. The old behaviour picked whichever onboarding manifest was written
+    last, which is fine with one corpus and dangerous with several: an agent
+    researching work would be answered from personal mail with nothing said. So
+    ambiguity refuses and names the options — the caller then chooses once, and
+    passes it on every call. Asking for two corpora deliberately is still fine;
+    being given one by accident is not.
     """
-    coll = collection or os.environ.get("MAILRAG_COLLECTION") or latest_manifest_collection()
+    coll = collection or os.environ.get("MAILRAG_COLLECTION")
+    if coll:
+        return coll
+
+    try:
+        from src.mcp_server.scoping import collection_profiles
+
+        known = sorted(collection_profiles())
+    except Exception:
+        known = []
+
+    if len(known) == 1:
+        return known[0]
+    if len(known) > 1:
+        raise ValueError(
+            "more than one corpus is configured on this machine "
+            f"({', '.join(known)}), so there is no safe default: answering from "
+            "the wrong one would mix corpora silently. Pass `collection` "
+            "explicitly, or set MAILRAG_COLLECTION. Use list_collections() to see "
+            "what is indexed."
+        )
+
+    coll = latest_manifest_collection()
     if not coll:
         raise ValueError(
             "no email collection configured: set MAILRAG_COLLECTION or run "
@@ -305,7 +334,11 @@ def _thread_meta(ctx, store=None) -> Dict[str, Any]:
 
 
 def _thread_to_dict(
-    ctx, query: str = "", max_chars: int = DEFAULT_SEARCH_MAX_CHARS, store=None
+    ctx,
+    query: str = "",
+    max_chars: int = DEFAULT_SEARCH_MAX_CHARS,
+    store=None,
+    collection: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` into a **bounded** JSON result row.
 
@@ -319,11 +352,16 @@ def _thread_to_dict(
         "num_emails": len(ctx.emails),
         "snippet": _thread_snippet(ctx.text, query, max_chars),
     }
+    if collection:
+        # Every result says which corpus answered it. Cross-corpus bleed is then
+        # visible in the output rather than inferred from what a caller assumes
+        # the default was — the same reason `complete` and `text_coverage` exist.
+        row["collection"] = collection
     row.update(_thread_meta(ctx, store=store))
     return row
 
 
-def _thread_to_full_dict(ctx, store=None) -> Dict[str, Any]:
+def _thread_to_full_dict(ctx, store=None, collection: Optional[str] = None) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` with the **full** thread text (opt-in path)."""
     row = {
         "thread_id": ctx.thread_id,
@@ -331,6 +369,8 @@ def _thread_to_full_dict(ctx, store=None) -> Dict[str, Any]:
         "num_emails": len(ctx.emails),
         "text": ctx.text,
     }
+    if collection:
+        row["collection"] = collection
     row.update(_thread_meta(ctx, store=store))
     return row
 
@@ -428,9 +468,18 @@ def search_email(
     # five of them.
     with _attachment_store(resolved_collection) as store:
         if full:
-            return [_thread_to_full_dict(c, store=store) for c in contexts[:top_k]]
+            return [
+                _thread_to_full_dict(c, store=store, collection=resolved_collection)
+                for c in contexts[:top_k]
+            ]
         return [
-            _thread_to_dict(c, query=query, max_chars=max_chars, store=store)
+            _thread_to_dict(
+                c,
+                query=query,
+                max_chars=max_chars,
+                store=store,
+                collection=resolved_collection,
+            )
             for c in contexts[:top_k]
         ]
 
@@ -485,7 +534,7 @@ def get_thread(
         # scope an attachment lookup, so it will report no attachment names.
         resolved_collection = collection
     with _attachment_store(resolved_collection) as store:
-        return _thread_to_full_dict(context, store=store)
+        return _thread_to_full_dict(context, store=store, collection=resolved_collection)
 
 
 def grep_email(
