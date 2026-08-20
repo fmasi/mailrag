@@ -543,6 +543,10 @@ def _cmd_attachments_build(args):
     )
     if args.limit:
         kept = kept[: args.limit]
+    from src.onboard import record_profile_for_collection
+
+    # Register the collection -> profile mapping that grep scoping relies on.
+    record_profile_for_collection(prof.collection, args.profile)
     store = AttachmentStore(_attach_store_for(args, prof.collection))
     try:
         counts = ingest_eml(kept, store, progress=True)

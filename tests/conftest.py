@@ -17,6 +17,7 @@ def _isolate_local_state(tmp_path_factory, monkeypatch):
     """
     monkeypatch.setenv("RAG_ATTACH_STORE", str(tmp_path_factory.mktemp("attach_store_isolated")))
     monkeypatch.setenv("MAILRAG_PROFILE_DIR", str(tmp_path_factory.mktemp("profiles_isolated")))
+    monkeypatch.setenv("MAILRAG_HOME", str(tmp_path_factory.mktemp("mailrag_home_isolated")))
 
     from src.mcp_server import scoping
 

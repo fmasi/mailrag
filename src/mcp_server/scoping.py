@@ -56,13 +56,22 @@ def collection_profiles() -> Dict[str, str]:
 
     from src.profile import CorpusProfile
 
+    # Recorded mappings win: a manifest states which profile built a collection,
+    # while directory scanning only infers it from whatever files happen to sit
+    # in one place under whatever names.
     found: Dict[str, str] = {}
+    try:
+        from src.onboard import manifest_profile_paths
+
+        found.update(manifest_profile_paths())
+    except Exception:
+        pass
     for path in paths:
         try:
             prof = CorpusProfile.load(path)
         except Exception:
             continue  # an unreadable profile must not break scoping for the others
-        if getattr(prof, "collection", None):
+        if getattr(prof, "collection", None) and prof.collection not in found:
             found[prof.collection] = path
     _PROFILE_CACHE[key] = found
     return found

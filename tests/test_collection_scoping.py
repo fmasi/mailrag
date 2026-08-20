@@ -118,3 +118,65 @@ class TestGrepRefusesWhenItCannotScope(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestManifestProfileMapping(unittest.TestCase):
+    """The collection→profile mapping should be recorded, not re-derived.
+
+    Scoping a grep means walking the files a collection's profile selects, so
+    that link is load-bearing. Inferring it by scanning a directory for
+    `*.profile.json` works until a profile moves, is renamed, or two of them
+    name the same collection — so the collection records its own provenance.
+    """
+
+    def setUp(self):
+        scoping.clear_cache()
+
+    def test_a_recorded_mapping_is_found(self):
+        from src.onboard import manifest_profile_paths, record_profile_for_collection
+
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        path = _write_profile(d, "w", "work-rag", "/tmp/root")
+        record_profile_for_collection("work-rag", path)
+        self.assertEqual(manifest_profile_paths().get("work-rag"), path)
+
+    def test_a_recorded_mapping_wins_over_directory_scanning(self):
+        from src.onboard import record_profile_for_collection
+
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        scanned = _write_profile(d, "scanned", "dual-rag", "/tmp/root")
+        recorded = _write_profile(d, "recorded", "dual-rag", "/tmp/root")
+        record_profile_for_collection("dual-rag", recorded)
+        scoping.clear_cache()
+        self.assertEqual(scoping.collection_profiles()["dual-rag"], recorded)
+        self.assertNotEqual(scoping.collection_profiles()["dual-rag"], scanned)
+
+    def test_recording_merges_rather_than_clobbering_a_manifest(self):
+        import json as _json
+
+        from src.onboard import manifest_dir, record_profile_for_collection
+
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        path = _write_profile(d, "w", "keep-rag", "/tmp/root")
+        m = manifest_dir()
+        m.mkdir(parents=True, exist_ok=True)
+        (m / "keep-rag.json").write_text(_json.dumps({"collection": "keep-rag", "chunks": 42}))
+        record_profile_for_collection("keep-rag", path)
+        data = _json.loads((m / "keep-rag.json").read_text())
+        self.assertEqual(data["chunks"], 42)  # reproducibility record survives
+        self.assertEqual(data["profile_path"], path)
+
+    def test_a_stale_mapping_to_a_missing_profile_is_ignored(self):
+        from src.onboard import manifest_profile_paths, record_profile_for_collection
+
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        path = _write_profile(d, "gone", "gone-rag", "/tmp/root")
+        record_profile_for_collection("gone-rag", path)
+        os.unlink(path)
+        self.assertNotIn("gone-rag", manifest_profile_paths())
+
+    def test_non_string_inputs_are_ignored(self):
+        from src.onboard import manifest_profile_paths, record_profile_for_collection
+
+        record_profile_for_collection(object(), object())
+        self.assertEqual(manifest_profile_paths(), {})
