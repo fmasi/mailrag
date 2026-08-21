@@ -10,6 +10,7 @@ not happen is being handed the wrong one silently. Three mechanisms:
 
 import json
 import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -103,6 +104,66 @@ class TestGrepRefusesWhenItCannotScope(unittest.TestCase):
         msg = str(ctx.exception)
         self.assertIn("not-a-known-corpus", msg)
         self.assertIn("whole raw corpus", msg)
+
+    def test_the_refusal_survives_a_missing_default_corpus_root(self):
+        """A scoping refusal must not be masked by an unrelated config error.
+
+        ``$MAILRAG_EML_ROOT`` is irrelevant to a scoped grep — the files come
+        from the profile — but grep used to resolve it first, so on any machine
+        without the default root (CI, a fresh checkout) naming an unknown
+        collection reported "corpus not found" and the caller never learned that
+        scoping was what actually failed.
+        """
+        from src.mcp_server.grep import grep_email
+
+        scoping.clear_cache()
+        with mock.patch.dict(os.environ, {"MAILRAG_EML_ROOT": "/nonexistent/corpus/root"}):
+            with self.assertRaises(ValueError) as ctx:
+                grep_email("anything", collection="not-a-known-corpus")
+        msg = str(ctx.exception)
+        self.assertIn("not-a-known-corpus", msg)
+        self.assertIn("whole raw corpus", msg)
+        self.assertNotIn("corpus not found", msg)
+
+    def test_a_scoped_grep_ignores_a_missing_default_root(self):
+        """Scoping supplies the files, so the default root need not exist.
+
+        Profiles may point anywhere; requiring ``$MAILRAG_EML_ROOT`` to be a real
+        directory broke scoped greps that were never going to read it.
+        """
+        from src.mcp_server.grep import grep_email
+
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        with tempfile.TemporaryDirectory() as corpus:
+            with open(os.path.join(corpus, "m1.eml"), "w") as fh:
+                fh.write("Subject: Greeting\nFrom: a@b.c\n\nthe needle is here\n")
+            path = os.path.join(d, "scoped.profile.json")
+            with open(path, "w") as fh:
+                json.dump(
+                    {
+                        "collection": "scoped-rag",
+                        "root": corpus,
+                        "selection_rules": [{"type": "container-root"}],
+                    },
+                    fh,
+                )
+            scoping.clear_cache()
+            with mock.patch.dict(os.environ, {"MAILRAG_EML_ROOT": "/nonexistent/corpus/root"}):
+                res = grep_email("needle", collection="scoped-rag")
+            self.assertTrue(res["scoped"])
+            self.assertEqual(len(res["matches"]), 1)
+            self.assertEqual(res["matches"][0]["subject"], "Greeting")
+            # The reported root is the one actually walked, not the default.
+            self.assertEqual(os.path.realpath(res["root"]), os.path.realpath(corpus))
+
+    def test_an_unscoped_grep_still_reports_a_missing_root(self):
+        """Removing the eager check must not swallow the genuine config error."""
+        from src.mcp_server.grep import grep_email
+
+        with mock.patch.dict(os.environ, {"MAILRAG_EML_ROOT": "/nonexistent/corpus/root"}):
+            with self.assertRaises(ValueError) as ctx:
+                grep_email("anything")
+        self.assertIn("MAILRAG_EML_ROOT", str(ctx.exception))
 
     def test_an_explicit_root_bypasses_scoping(self):
         # The escape hatch: a caller naming a directory has said what it wants.

@@ -311,9 +311,11 @@ def grep_email(
     Args:
         pattern: The string (or regex, when ``regex=True``) to find. Matching is
             case-insensitive and covers subject + decoded body text.
-        collection: Accepted for API symmetry with the other MCP tools; grep is
-            corpus-directory based, so it is used only to scope the root when a
-            per-collection mapping is wired up (currently a no-op label).
+        collection: Restrict the walk to the files this collection's profile
+            selects, so a session scoped to one corpus cannot read another. When
+            no profile names it this raises rather than scanning everything. An
+            explicit ``root`` overrides scoping entirely. When scoping applies,
+            ``$MAILRAG_EML_ROOT`` is not consulted at all.
         max_matches: Maximum matching **messages** to return. Clamped to
             ``[1, 500]`` (hard cap) so a broad pattern can never flood output.
             Set to 1 for an existence check -- it returns on the first hit.
@@ -368,8 +370,21 @@ def grep_email(
         if budget_s <= 0:
             raise ValueError("max_seconds must be > 0 (or None to disable the deadline)")
     rx = _compile(pattern, regex)
-    corpus = resolve_eml_root(root)
+    # Scope BEFORE resolving the default root, because scoping decides whether
+    # that root is needed at all. A scoped walk takes its files from the
+    # profile's own root (see ``scoping.files_for_collection``), so requiring
+    # ``$MAILRAG_EML_ROOT`` to exist first failed two ways: a perfectly valid
+    # scoped grep died on a default root it was never going to read, and naming
+    # an unscopable collection reported "corpus not found" instead of the
+    # refusal that actually applied — hiding a scoping error behind a config one.
     scoped_files = _scoped_files(collection, root)
+    if scoped_files is None:
+        corpus = resolve_eml_root(root)
+    else:
+        # Report the root the scan really covered, not the default it ignored.
+        from src.mcp_server.scoping import root_for_collection
+
+        corpus = root_for_collection(collection) or ""
 
     # Materialise the file list first: the walk is cheap next to parsing (~0.25s
     # for 73k files) and it buys the caller a denominator, so a partial scan can
