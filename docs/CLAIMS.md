@@ -100,6 +100,9 @@ because these figures appear in `MCP_SERVER.md`, `ARCHITECTURE.md` and `EXPERIME
 > the noise was already removed. Both are chunk-weighted, not per-email. Recorded because
 > the raw pair is easy to misread.
 
+| A9 | Text density separates pictorial from text-bearing documents by ~50x: 10 text PDFs at **99,000-225,000 chars/MB** against **1,869** (diagram PDF) and **66** (21 MB deck) | ad-hoc extraction over store blobs, tesseract | private work corpus | Author-reported | 2026-08-20 |
+| A10 | **100%** of a 4,000-file sample of this corpus begins with an mbox `From ` envelope, which silently voids every header if not stripped | byte inspection over `_discover_eml` sample | private work corpus | Author-reported | 2026-08-20 |
+
 > **A5 rests on three images.** Enough to choose the cheap engine by an order of magnitude,
 > not enough to publish a per-image latency figure. What A6 establishes — that the two
 > engines' character counts are not comparable without normalisation — does not depend on n.

@@ -37,6 +37,8 @@ configured through the usual ``RAG_*`` env vars (see ``src.llm.client``).
 from __future__ import annotations
 
 import os
+import re
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from src.attachments.store import AttachmentStore
@@ -63,13 +65,42 @@ _SEARCHER_CACHE: dict = {}
 
 
 def resolve_collection(collection: Optional[str] = None) -> str:
-    """Resolve the Qdrant collection to query.
+    """Resolve the collection to query.
 
-    Precedence: explicit arg > ``$MAILRAG_COLLECTION`` > latest onboarding
-    manifest. Raises ``ValueError`` with an actionable message when none is
-    available (so the MCP client sees a clear error rather than a crash).
+    Precedence: explicit arg > ``$MAILRAG_COLLECTION`` > the single corpus on
+    this machine.
+
+    There is deliberately **no silent fallback when more than one corpus
+    exists**. The old behaviour picked whichever onboarding manifest was written
+    last, which is fine with one corpus and dangerous with several: an agent
+    researching work would be answered from personal mail with nothing said. So
+    ambiguity refuses and names the options — the caller then chooses once, and
+    passes it on every call. Asking for two corpora deliberately is still fine;
+    being given one by accident is not.
     """
-    coll = collection or os.environ.get("MAILRAG_COLLECTION") or latest_manifest_collection()
+    coll = collection or os.environ.get("MAILRAG_COLLECTION")
+    if coll:
+        return coll
+
+    try:
+        from src.mcp_server.scoping import collection_profiles
+
+        known = sorted(collection_profiles())
+    except Exception:
+        known = []
+
+    if len(known) == 1:
+        return known[0]
+    if len(known) > 1:
+        raise ValueError(
+            "more than one corpus is configured on this machine "
+            f"({', '.join(known)}), so there is no safe default: answering from "
+            "the wrong one would mix corpora silently. Pass `collection` "
+            "explicitly, or set MAILRAG_COLLECTION. Use list_collections() to see "
+            "what is indexed."
+        )
+
+    coll = latest_manifest_collection()
     if not coll:
         raise ValueError(
             "no email collection configured: set MAILRAG_COLLECTION or run "
@@ -94,14 +125,76 @@ def resolve_qdrant_url(qdrant_url: Optional[str] = None) -> str:
     ).strip() or DEFAULT_QDRANT_URL
 
 
-def resolve_attach_store(store: Optional[str] = None) -> str:
-    """Resolve the attachment store root.
+def resolve_attach_store(store: Optional[str] = None, collection: Optional[str] = None) -> str:
+    """Resolve the attachment store for one collection.
 
-    Precedence: explicit arg > ``$RAG_ATTACH_STORE`` > ``~/.mailrag/attachments``
-    (the same default as the CLI ``attachments`` verbs). The store is corpus-wide,
-    shared across all collections.
+    Precedence: explicit ``store`` > ``$RAG_ATTACH_STORE`` / ``~/.mailrag/attachments``,
+    **plus the collection name as a subdirectory**.
+
+    Stores are physically separate per collection rather than one store filtered
+    by a predicate. A shared store leaks in practice, not just in theory: with a
+    single index, four thread ids existed in both a work and a personal corpus,
+    so listing either returned the other's attachments — and ``get_attachment``
+    accepted any sha256 from any corpus with nothing to scope it. Filtering
+    would fix both, right up until the first query that forgets the predicate.
+    Separate directories cannot be un-separated by a missing ``WHERE`` clause,
+    which is the property worth having when the two corpora are someone's
+    employer and their private life.
     """
-    return store or os.environ.get("RAG_ATTACH_STORE") or DEFAULT_ATTACH_STORE
+    if store:
+        return store
+    root = os.environ.get("RAG_ATTACH_STORE") or DEFAULT_ATTACH_STORE
+    if not collection:
+        return root
+    return os.path.join(root, _safe_dirname(collection))
+
+
+def _attachment_collection(collection: Optional[str]) -> str:
+    """The collection whose attachment store to use, or a clear refusal.
+
+    Attachments cannot be served corpus-agnostically any more: the stores are
+    separate directories, so "which corpus" is part of the question, not a
+    label. Refusing beats guessing — guessing here means reading someone's
+    personal mail while they believe they are querying work.
+    """
+    try:
+        return resolve_collection(collection)
+    except ValueError as exc:
+        raise ValueError(
+            "attachment lookups need a collection: attachment stores are separate "
+            "per corpus, so there is no corpus-wide default to fall back on. Pass "
+            f"`collection`, or set MAILRAG_COLLECTION. ({exc})"
+        ) from None
+
+
+def _safe_dirname(collection: str) -> str:
+    """Reduce a collection name to one safe path segment.
+
+    Collection names come from config, so a name like ``../other`` must not be
+    able to walk out of the store root.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", collection).strip("-.") or "default"
+    return cleaned[:120]
+
+
+def assert_no_legacy_shared_store(root: Optional[str] = None) -> None:
+    """Refuse to run against a pre-split shared store.
+
+    A flat ``index.db`` at the root predates the split and holds every corpus in
+    one index. Reusing it for a single collection is exactly the leak this
+    removes, and it cannot be split after the fact — rows record the file they
+    came from, not the collection they were indexed into. So say so, and let the
+    (cheap) per-collection rebuild happen.
+    """
+    base = root or os.environ.get("RAG_ATTACH_STORE") or DEFAULT_ATTACH_STORE
+    legacy = os.path.join(os.path.expanduser(base), "index.db")
+    if os.path.exists(legacy):
+        raise ValueError(
+            f"found a pre-split shared attachment store at {legacy!r}, which mixes every "
+            "corpus in one index. Attachment stores are now per-collection. Rebuild each "
+            "corpus with `mailrag attachments build --profile <corpus.profile.json>` "
+            "(minutes), then remove the old index.db and blobs/."
+        )
 
 
 def get_searcher(
@@ -156,7 +249,68 @@ def _thread_snippet(text: str, query: str, max_chars: int) -> str:
     return ("…" if start else "") + text[start:end] + ("…" if end < len(text) else "")
 
 
-def _thread_meta(ctx) -> Dict[str, Any]:
+@contextmanager
+def _attachment_store(collection: Optional[str] = None):
+    """Yield an AttachmentStore for the duration of one tool call, or ``None``.
+
+    Never raises: retrieval must keep working when the attachment store is
+    absent, just without attachment names.
+    """
+    store = None
+    try:
+        store = AttachmentStore(resolve_attach_store(collection=collection))
+    except Exception:
+        store = None
+    try:
+        yield store
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _attachment_names(ctx, store=None) -> Optional[List[str]]:
+    """Real attachment filenames for a thread, or ``None`` when unknowable.
+
+    ``None`` — which callers render as an ABSENT key, never an empty list — is
+    the important case. This field used to read ``attachment_names`` off the
+    email objects, which never carry it: the indexed payload has a singular
+    ``attachment_name`` on attachment chunks only. So it was ``[]`` on every hit
+    of every query, forever.
+
+    That is worse than having no field. An agent builds its model of a corpus
+    from what search returns, and a field that is always empty does not read as
+    "not populated", it reads as "this corpus has no attachments" — which is a
+    confident negative, stated on every result, that stops anyone opening the
+    attachment tools at all. It cost a real session exactly that (field report,
+    2026-08-20). Absence and not-looked-at must not share a representation; this
+    is the same defect as the unbounded grep scan, wearing different clothes.
+
+    So: names when the store can answer, and no field at all when it cannot.
+    """
+    owns = store is None
+    try:
+        if store is None:
+            store = AttachmentStore(resolve_attach_store())
+        if store.count() == 0:
+            return None  # never ingested — say nothing rather than say "none"
+        message_ids = [getattr(e, "message_id", "") for e in getattr(ctx, "emails", []) or []]
+        return store.names_for(thread_id=getattr(ctx, "thread_id", None), message_ids=message_ids)
+    except Exception:
+        # The attachment store is an optional companion to retrieval; search must
+        # keep working when it is missing, just without this field.
+        return None
+    finally:
+        if owns and store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _thread_meta(ctx, store=None) -> Dict[str, Any]:
     """Envelope metadata for a thread's constituent emails (bounded output).
 
     Surfaces subject/date/from/to/message-id and attachment filenames so an
@@ -166,23 +320,25 @@ def _thread_meta(ctx) -> Dict[str, Any]:
     emails = list(getattr(ctx, "emails", []) or [])
     first = emails[0] if emails else None
     last = emails[-1] if emails else None
-    attachments: List[str] = []
-    for e in emails:
-        for name in getattr(e, "attachment_names", []) or []:
-            if name not in attachments:
-                attachments.append(name)
-    return {
+    meta: Dict[str, Any] = {
         "date": getattr(first, "date", "") if first else "",
         "last_date": getattr(last, "date", "") if last else "",
         "from": getattr(first, "sender", "") if first else "",
         "to": getattr(first, "to", "") if first else "",
         "message_ids": [getattr(e, "message_id", "") for e in emails],
-        "attachment_names": attachments,
     }
+    names = _attachment_names(ctx, store=store)
+    if names is not None:
+        meta["attachment_names"] = names
+    return meta
 
 
 def _thread_to_dict(
-    ctx, query: str = "", max_chars: int = DEFAULT_SEARCH_MAX_CHARS
+    ctx,
+    query: str = "",
+    max_chars: int = DEFAULT_SEARCH_MAX_CHARS,
+    store=None,
+    collection: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` into a **bounded** JSON result row.
 
@@ -196,11 +352,16 @@ def _thread_to_dict(
         "num_emails": len(ctx.emails),
         "snippet": _thread_snippet(ctx.text, query, max_chars),
     }
-    row.update(_thread_meta(ctx))
+    if collection:
+        # Every result says which corpus answered it. Cross-corpus bleed is then
+        # visible in the output rather than inferred from what a caller assumes
+        # the default was — the same reason `complete` and `text_coverage` exist.
+        row["collection"] = collection
+    row.update(_thread_meta(ctx, store=store))
     return row
 
 
-def _thread_to_full_dict(ctx) -> Dict[str, Any]:
+def _thread_to_full_dict(ctx, store=None, collection: Optional[str] = None) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` with the **full** thread text (opt-in path)."""
     row = {
         "thread_id": ctx.thread_id,
@@ -208,7 +369,9 @@ def _thread_to_full_dict(ctx) -> Dict[str, Any]:
         "num_emails": len(ctx.emails),
         "text": ctx.text,
     }
-    row.update(_thread_meta(ctx))
+    if collection:
+        row["collection"] = collection
+    row.update(_thread_meta(ctx, store=store))
     return row
 
 
@@ -290,10 +453,35 @@ def search_email(
         raise ValueError("max_chars must be >= 1")
     max_chars = min(max_chars, HARD_SEARCH_MAX_CHARS)
     searcher = searcher or get_searcher(collection, mode=mode)
+    # Resolve once so the attachment lookup is scoped to the SAME corpus that
+    # was searched, never to whatever the server's default happens to be.
+    resolved_collection: Optional[str]
+    try:
+        resolved_collection = resolve_collection(collection)
+    except Exception:
+        # Search must still work without a resolvable collection; it just cannot
+        # scope an attachment lookup, so it will report no attachment names.
+        resolved_collection = collection
     contexts = searcher.search_threads(query)
-    if full:
-        return [_thread_to_full_dict(c) for c in contexts[:top_k]]
-    return [_thread_to_dict(c, query=query, max_chars=max_chars) for c in contexts[:top_k]]
+    # One store handle for the whole result set: attachment names are a per-hit
+    # lookup, and opening a connection per row would make a 5-hit search pay for
+    # five of them.
+    with _attachment_store(resolved_collection) as store:
+        if full:
+            return [
+                _thread_to_full_dict(c, store=store, collection=resolved_collection)
+                for c in contexts[:top_k]
+            ]
+        return [
+            _thread_to_dict(
+                c,
+                query=query,
+                max_chars=max_chars,
+                store=store,
+                collection=resolved_collection,
+            )
+            for c in contexts[:top_k]
+        ]
 
 
 def get_thread(
@@ -338,7 +526,15 @@ def get_thread(
     context = searcher.thread_by_id(thread_id)
     if context is None:
         raise ValueError(f"unknown thread {thread_id!r}")
-    return _thread_to_full_dict(context)
+    resolved_collection: Optional[str]
+    try:
+        resolved_collection = resolve_collection(collection)
+    except Exception:
+        # Search must still work without a resolvable collection; it just cannot
+        # scope an attachment lookup, so it will report no attachment names.
+        resolved_collection = collection
+    with _attachment_store(resolved_collection) as store:
+        return _thread_to_full_dict(context, store=store, collection=resolved_collection)
 
 
 def grep_email(
@@ -425,6 +621,46 @@ def answer_question(
     return {"answer": answer, "sources": sources}
 
 
+# Below this density, extraction "succeeded" but the meaning is probably in the
+# pixels. Calibrated on the live corpus (2026-08-20): ten text-bearing PDFs
+# measured 99,000-225,000 chars/MB, while the two documents an agent actually
+# had to render measured 1,869 (a partner PDF whose key fact is a horseshoe
+# diagram of five names) and 66 (a 21 MB slide deck). A 50x margin either side,
+# so the cut is nowhere near either population.
+_SPARSE_TEXT_CHARS_PER_MB = 10_000
+# Below this size the ratio is noise: a 2 KB file with one line of text scores
+# enormously, and a 900-byte spacer scores zero, neither meaningfully.
+_SPARSE_TEXT_MIN_SIZE = 50_000
+
+
+def _text_coverage(text: str, size: int, mime: str) -> Dict[str, Any]:
+    """Describe how much text came out relative to the file's size.
+
+    ``text_status: "extracted"`` reads as success, and for a slide deck whose
+    argument lives in a diagram it is a success that returns nothing useful. An
+    agent told "extracted" stops looking; one told the text is sparse can go
+    render the pages. This does not attempt to judge the CONTENT — only to say
+    that little of it arrived, which is a fact the caller cannot otherwise see.
+    """
+    chars = len((text or "").strip())
+    out: Dict[str, Any] = {"chars": chars}
+    if not size or size < _SPARSE_TEXT_MIN_SIZE or mime.startswith("text/"):
+        return out
+    per_mb = chars / (size / 1_048_576)
+    out["chars_per_mb"] = round(per_mb)
+    if per_mb < _SPARSE_TEXT_CHARS_PER_MB:
+        out["text_coverage"] = "sparse"
+        out["note"] = (
+            "Extraction succeeded but returned little text for a file this size, so the "
+            "substance is probably pictorial — a diagram, a chart, a scan or an "
+            "image-based slide. Treat the text as incomplete rather than as the "
+            "document's content, and render the pages if the answer is not in it."
+        )
+    else:
+        out["text_coverage"] = "rich"
+    return out
+
+
 def _meta_to_dict(meta) -> Dict[str, Any]:
     """Serialize an ``AttachmentMeta`` into a JSON-friendly result row."""
     return {
@@ -478,8 +714,9 @@ def list_attachments(
     corpus they are 73% of all rows and would bury the actual documents.
     Returns a row per attachment
     (``sha256``, ``filename``, ``mime``, ``size``, ``thread_id``, ``message_id``,
-    ``inline``). The store is corpus-wide, so ``collection`` is accepted for API
-    symmetry but not required. ``store`` is injectable for tests.
+    ``inline``). ``collection`` selects which corpus's store to read; they are
+    physically separate directories, so a thread id from one corpus cannot
+    surface the other's attachments. ``store`` is injectable for tests.
 
     Raises ``ValueError`` when neither identifier is supplied.
     """
@@ -487,7 +724,8 @@ def list_attachments(
         raise ValueError("one of thread_id or message_id is required")
     owns = store is None
     if store is None:
-        store = AttachmentStore(resolve_attach_store())
+        assert_no_legacy_shared_store()
+        store = AttachmentStore(resolve_attach_store(collection=_attachment_collection(collection)))
     try:
         raw = store.list_for(thread_id=thread_id, message_id=message_id, include_boilerplate=True)
         if not raw:
@@ -520,6 +758,7 @@ def list_attachments(
 def get_attachment(
     sha256: str,
     ocr: Optional[str] = None,
+    collection: Optional[str] = None,
     *,
     store=None,
 ) -> Dict[str, Any]:
@@ -531,6 +770,10 @@ def get_attachment(
     | ``cloud``), like the CLI ``--extractor`` flag; defaults to
     ``$RAG_ATTACH_EXTRACTOR`` or ``llm``. Raw bytes are never returned over MCP.
 
+    ``collection`` scopes the lookup to that corpus's store. A content hash is
+    not a capability: without scoping, a sha256 belonging to a personal corpus
+    resolved just as happily while an agent was querying a work one.
+
     ``store`` is injectable for tests. Raises ``ValueError`` on empty ``sha256`` or
     an unknown attachment.
     """
@@ -538,7 +781,8 @@ def get_attachment(
         raise ValueError("sha256 must be a non-empty string")
     owns = store is None
     if store is None:
-        store = AttachmentStore(resolve_attach_store())
+        assert_no_legacy_shared_store()
+        store = AttachmentStore(resolve_attach_store(collection=_attachment_collection(collection)))
     try:
         try:
             fetched = store.fetch(sha256, extractor=ocr)
@@ -551,7 +795,7 @@ def get_attachment(
             except ValueError as empty:
                 raise empty from None
             raise ValueError(f"unknown attachment {sha256}") from exc
-        return {
+        row = {
             "sha256": fetched["sha256"],
             "filename": fetched["filename"],
             "mime": fetched["mime"],
@@ -559,6 +803,10 @@ def get_attachment(
             "text": fetched["text"],
             "text_status": fetched["text_status"],
         }
+        row.update(
+            _text_coverage(fetched["text"], fetched.get("size") or 0, fetched.get("mime") or "")
+        )
+        return row
     finally:
         if owns:
             store.close()
@@ -752,7 +1000,8 @@ def build_server():
         Args:
             thread_id: Thread whose attachments to list (one of thread_id/message_id).
             message_id: Message whose attachments to list (one of thread_id/message_id).
-            collection: Accepted for symmetry; the attachment store is corpus-wide.
+            collection: Corpus to look in. Stores are physically separate per
+                collection, so this scopes the answer — it is not a label.
             include_boilerplate: Include recurring inline decoration (default False).
         """
         return list_attachments(
@@ -764,7 +1013,9 @@ def build_server():
 
     @server.tool(name="get_attachment")
     @usage.instrument("get_attachment")
-    def _tool_get_attachment(sha256: str, ocr: Optional[str] = None) -> Dict[str, Any]:
+    def _tool_get_attachment(
+        sha256: str, ocr: Optional[str] = None, collection: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Read the extracted TEXT of one attachment — PDF, spreadsheet, doc, scan.
 
         The only way to see inside an emailed document. Extracts (or serves the
@@ -781,8 +1032,9 @@ def build_server():
             sha256: Content hash of the attachment (from ``list_attachments``).
             ocr: Extraction backend — ``llm`` | ``tesseract`` | ``cloud``
                 (default: ``$RAG_ATTACH_EXTRACTOR`` or ``llm``).
+            collection: Corpus whose store holds it (default: server-resolved).
         """
-        return get_attachment(sha256, ocr=ocr)
+        return get_attachment(sha256, ocr=ocr, collection=collection)
 
     return server
 

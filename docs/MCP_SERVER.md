@@ -32,6 +32,15 @@ All seven tools are registered on one server. Every query tool accepts an option
 `collection`; when omitted it falls back to the server's resolved default (see
 [Collection discovery & selection](#collection-discovery--selection)).
 
+> **Attachment names on hits.** Each hit carries `attachment_names` — the real
+> documents on that thread, inline decoration excluded — so an agent notices a
+> deck or a PDF without having to suspect it first. The key is **absent**, never
+> empty, when the attachment store has not been built: an always-empty list
+> reads as "this corpus has no attachments" rather than "not populated", and
+> that mis-taught a real session into never opening the attachment tools at all.
+> Populate it with `./mailrag attachments build` (see
+> [Noise signals](#noise-signals-attachments-build)).
+
 > **Bounded output.** `search_email` returns a **snippet window + metadata** per
 > hit, not the full thread body (a single call used to emit ~130 K chars). Pull a
 > full thread on demand with `get_thread` (or `search_email(..., full=True)`).
@@ -149,12 +158,20 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
       "date": "Wed, 30 Jul 2025 …", "message_id": "<a1b2c3@northwind.example>",
       "attachment_names": ["Q3 MBO targets partner team.xlsx"],
       "matches": ["…20% of the $210 million annual plan…"],
-      "path": "/Users/you/rag_eml/Inbox/Wind River/… .eml" }
+      "path": "/Users/you/rag_eml/Inbox/Acme Corp/… .eml" }
   ],
   "scanned": 1841, "corpus_files": 73219, "complete": false,
   "stop_reason": "max_matches", "elapsed_s": 4.4, "root": "/Users/you/rag_eml"
 }
 ```
+
+> **Envelope handling.** These exports prepend an mbox `From ` separator and a
+> stray byte-count line before the RFC 2822 headers, and Python's parser stops
+> reading headers at the first line that is not `Name: value`. `grep_email`
+> strips that preamble via the same loader helper the indexer uses. It did not
+> always: for a period every hit came back as `(no subject)` with empty
+> sender/date/message-id, and the whole raw file — base64 attachment payloads
+> included — was treated as body text.
 
 #### Cost model — why the scan is bounded
 
@@ -293,9 +310,24 @@ when the file is a scan or an image. Raw bytes are **never** returned over MCP.
   - `sha256` (str, required) — content hash of the attachment (from `list_attachments`).
   - `ocr` (str, optional) — extraction backend: `llm` | `tesseract` | `cloud`
     (like the CLI `--extractor` flag). Defaults to `$RAG_ATTACH_EXTRACTOR` or `llm`.
-- **Returns:** `{sha256, filename, mime, size, text, text_status}`. Always check
-  `text_status` (e.g. `ok`, `ocr_unavailable`): it reports when extraction failed,
-  so an empty `text` is **not** evidence that the document is blank.
+- **Returns:** `{sha256, filename, mime, size, text, text_status, chars}`, plus
+  `chars_per_mb` and `text_coverage` (`rich` | `sparse`) for documents above
+  50 KB. Always check `text_status` (e.g. `ok`, `ocr_unavailable`): it reports
+  when extraction failed, so an empty `text` is **not** evidence that the
+  document is blank.
+
+> **`text_coverage: "sparse"` means the substance is probably in the pixels.**
+> Extraction can succeed and still return almost nothing — a slide deck whose
+> argument is a diagram, a scanned page, a chart. In one real case the decisive
+> fact was five partner names arranged round a horseshoe graphic, with no
+> sentence anywhere saying "five"; text extraction would have returned the
+> surrounding boilerplate and looked like success. When this flag is set, treat
+> the text as incomplete and render the pages rather than concluding the
+> document does not contain the answer.
+>
+> Calibrated on a real corpus: ten text-bearing PDFs measured 99,000–225,000
+> chars/MB, against 1,869 for that diagram PDF and 66 for a 21 MB deck. The cut
+> sits at 10,000 — a 50× margin from either population.
 - **Errors:** `ValueError` on a blank `sha256` or an unknown attachment.
 
 ```jsonc
@@ -335,7 +367,7 @@ Config mirrors `./mailrag ask` and is resolved from flags/environment:
 |---------|---------------------------------------|-------|
 | Collection | `collection` arg → `$MAILRAG_COLLECTION` → latest onboarding manifest | Per-call `collection` overrides the env default. |
 | Qdrant URL | `--qdrant-url` (CLI) → `$MAILRAG_QDRANT_URL` → `$QDRANT_URL` → `http://localhost:6333` | `MAILRAG_QDRANT_URL` lets a host server target `localhost` without inheriting a container-oriented `QDRANT_URL` from `.env` (the [issue #29](https://github.com/fmasi/mailrag/issues/29) gotcha). |
-| Attachment store | `$RAG_ATTACH_STORE` → `~/.mailrag/attachments` | Same default and store the CLI `attachments` verbs use; corpus-wide. |
+| Attachment store | `$RAG_ATTACH_STORE` → `~/.mailrag/attachments`, **plus the collection name as a subdirectory** | One store per collection, physically separate. See [Attachment store isolation](#attachment-store-isolation). |
 | Answer LLM endpoint | `$RAG_LLM_API_BASE` (alias `$RAG_LLM_BASE_URL`) → `http://localhost:1234/v1` | Used only by `answer_question`. See [`BACKENDS.md`](BACKENDS.md). |
 | Answer LLM key | `$RAG_LLM_API_KEY` → `lm-studio` placeholder | **Set this in the MCP server config if your endpoint enforces auth** — the `lm-studio` placeholder is for auth-less local servers and is rejected with a 401 otherwise (issue #83). The startup healthcheck names it on failure. |
 | Answer LLM model | `$RAG_LLM_MODEL` | Required for `answer_question`; the healthcheck names it when unset. |
@@ -406,6 +438,52 @@ reporting-deadline table sits at 15 threads, a disclaimer at 18. The cut errs
 toward keeping, so some signature images survive rather than one real table being
 hidden. Splitting that band properly needs a content rule (disclaimer phrasing,
 contact-detail patterns), not a bigger threshold.
+
+## Attachment store isolation
+
+Attachment stores are **separate directories per collection**, not one store
+filtered by a predicate:
+
+```
+~/.mailrag/attachments/
+  work-rag-ctx-threadaware-v2/   index.db  blobs/
+  personal-rag/                  index.db  blobs/
+```
+
+This is a privacy boundary, not housekeeping. On a real machine with a single
+shared store, **four thread ids existed in both a work corpus and a personal
+one**, so `list_attachments` on any of them returned the other's attachments —
+and `get_attachment` accepted any sha256 from any corpus, because a content hash
+carries no corpus with it. A `WHERE collection = ?` would close both holes right
+up until the first query that forgets it. Separate directories cannot be
+un-separated by an omission, which is the property worth having when the two
+corpora are an employer's mail and a private life.
+
+Consequences:
+
+- `list_attachments` and `get_attachment` take a **`collection`**, and **refuse
+  rather than guess** when none resolves. Guessing means reading personal mail
+  while the caller believes they are querying work.
+- `./mailrag attachments build --profile <p>` derives the store from the
+  profile's own `collection` field, so no extra flag is needed. `attachments
+  list` / `get` take `--collection`. An explicit `--store` overrides everything.
+- Collection names are reduced to one safe path segment, so a name containing
+  separators cannot walk out of the store root.
+- The same document legitimately appearing in both corpora — a PDF mailed to a
+  work and a personal address — is stored once per corpus. That is duplication,
+  not leakage.
+
+**Upgrading from a pre-split store.** A flat `index.db` at the store root mixes
+every corpus in one index and is **refused with instructions** rather than
+silently reused. It is not migrated automatically: rows record the file they came
+from, not the collection they were indexed into, so there is no sound way to
+split one after the fact. Rebuild each corpus (minutes) and delete the old
+directory:
+
+```bash
+./mailrag attachments build --profile ~/work.profile.json
+./mailrag attachments build --profile ~/personal.profile.json
+```
 
 ## Usage logging
 

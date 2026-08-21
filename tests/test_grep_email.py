@@ -19,9 +19,22 @@ import unittest
 from src.mcp_server import grep
 
 
-def _write(path, text):
+# Real Mail Archive X exports prepend an mbox "From " separator AND a stray
+# byte-count line before the RFC 2822 headers. Every file in the live corpus has
+# one. The original fixtures here were hand-written without it, so the suite
+# passed while grep reported "(no subject)" and empty sender/date for 100% of
+# real mail. Fixtures now carry the preamble by default: a test corpus that is
+# cleaner than the real one tests the wrong program.
+def _mbox_preamble(body_len=1234):
+    return f"From <sender@example.com> Tue Aug 11 16:33:18 2025\r\n{body_len}     \r\n"
+
+
+def _write(path, text, *, preamble=True):
+    raw = text.encode("utf-8") if isinstance(text, str) else text
+    if preamble:
+        raw = _mbox_preamble(len(raw)).encode("ascii") + raw
     with open(path, "wb") as fh:
-        fh.write(text.encode("utf-8") if isinstance(text, str) else text)
+        fh.write(raw)
 
 
 def _plain_eml(subject, sender, to, date, mid, body):
@@ -119,6 +132,20 @@ class _Corpus:
             _html_eml("<html><body><p>Revenue <b>210,000,000</b> plan</p></body></html>"),
         )
         _write(os.path.join(self.dir, "mbo.eml"), _attach_eml())
+        # One plain RFC 2822 file with no envelope, so stripping cannot regress
+        # the non-mbox case.
+        _write(
+            os.path.join(self.dir, "nopreamble.eml"),
+            _plain_eml(
+                "Bare RFC822",
+                "carol@x.com",
+                "dan@y.com",
+                "Tue, 2 Jan 2025 10:00:00 +0000",
+                "<bare1>",
+                "no mbox envelope here, token BARE-7788",
+            ),
+            preamble=False,
+        )
         return self.dir
 
     def __exit__(self, *a):
@@ -226,10 +253,49 @@ class TestGrepEmail(unittest.TestCase):
                 self.assertEqual(grep.resolve_eml_root(), root)
 
 
+class TestMboxPreamble(unittest.TestCase):
+    """Headers must survive the mbox envelope every real export carries.
+
+    Without stripping it, Python's parser stops at the first non-header line and
+    silently loses every header — subject, sender, date, message-id — while the
+    entire raw file, base64 attachment payloads included, becomes "body". That
+    was the live behaviour for 100% of a real corpus.
+    """
+
+    def test_headers_survive_the_envelope(self):
+        with _Corpus() as root:
+            rows = _matches("4021", root=root)
+        hit = next(r for r in rows if "Invoice" in r["subject"])
+        self.assertEqual(hit["from"], "alice@x.com")
+        self.assertEqual(hit["message_id"], "<inv1>")
+        self.assertIn("2025", hit["date"])
+
+    def test_subject_is_not_lost_to_the_envelope(self):
+        with _Corpus() as root:
+            rows = _matches("MBO targets", root=root)
+        self.assertTrue(any(r["subject"].startswith("Q3 MBO") for r in rows))
+
+    def test_body_is_decoded_not_raw_bytes(self):
+        # The giveaway of a failed parse: MIME headers leaking into the body,
+        # which is how grep appeared to be "finding attachments" in the field.
+        with _Corpus() as root:
+            rows = _matches("4021", root=root)
+        hit = next(r for r in rows if "Invoice" in r["subject"])
+        joined = " ".join(hit["matches"])
+        self.assertNotIn("Content-Type:", joined)
+        self.assertNotIn("Received:", joined)
+
+    def test_files_without_an_envelope_still_parse(self):
+        with _Corpus() as root:
+            rows = _matches("BARE-7788", root=root)
+        self.assertEqual([r["subject"] for r in rows], ["Bare RFC822"])
+        self.assertEqual(rows[0]["from"], "carol@x.com")
+
+
 class TestGrepScanBounds(unittest.TestCase):
     """The scan report, and the three ways a scan can stop early."""
 
-    CORPUS_FILES = 5  # .eml files written by _Corpus
+    CORPUS_FILES = 6  # .eml files written by _Corpus
 
     def test_full_scan_reports_complete(self):
         with _Corpus() as root:

@@ -6,11 +6,16 @@ HTML), and matches ``pattern`` line-by-line. It bypasses Qdrant and embeddings
 entirely, so needle hunts — a number, an ID, an email address, an error string —
 hit exactly where dense/hybrid retrieval is blind (issue #82).
 
-This module is deliberately **self-contained**: it decodes MIME parts with the
-Python stdlib ``email`` package and an ``html.parser`` HTML-to-text pass, rather
-than importing the ingest loader — the loader is owned by another change and must
-not be modified. Decoding here mirrors the loader's approach (prefer ``text/plain``,
-fall back to stripped ``text/html``) closely enough for literal matching.
+Decoding mirrors the loader's approach (prefer ``text/plain``, fall back to
+stripped ``text/html``). It shares exactly one thing with the loader, and must:
+:meth:`MailArchiveXLoader._strip_mbox_preamble`. Exports in this corpus prepend
+an mbox ``From `` separator and a stray byte-count line before the RFC 2822
+headers, and Python's parser stops reading headers at the first line that is not
+``Name: value`` — so without stripping, EVERY message parses as headerless. This
+module previously kept its own copy of the parse for isolation reasons that no
+longer hold, and the result was that grep reported ``(no subject)`` with empty
+sender/date/message-id for 100% of a real corpus while its synthetic tests
+(preamble-free, hand-written) passed. One parser, one bug to fix.
 
 **Bounded by design:** the scan is capped by matches, by files and by wall
 clock, and every result reports ``scanned`` / ``corpus_files`` / ``complete`` so
@@ -188,6 +193,35 @@ def _attachment_names(msg: email.message.Message) -> List[str]:
     return names
 
 
+def _scoped_files(collection: Optional[str], root: Optional[str]):
+    """Files belonging to ``collection``, or ``None`` to walk the whole root.
+
+    Corpora on one machine share a root and differ only by selection rules, so an
+    unscoped walk crosses them: a work-scoped session greps a string and reads
+    personal mail. When a collection is named we walk exactly the files its
+    profile selects — the same set indexing used.
+
+    Refusing matters as much as scoping. If a collection is named but no profile
+    claims it, falling back to the full root would quietly do the very thing the
+    caller asked to avoid, so this raises instead. An explicit ``root`` is an
+    override and skips all of it.
+    """
+    if root or not collection:
+        return None
+    from src.mcp_server.scoping import collection_profiles, files_for_collection
+
+    files = files_for_collection(collection)
+    if files is None:
+        known = ", ".join(sorted(collection_profiles())) or "none found"
+        raise ValueError(
+            f"cannot scope a grep to collection {collection!r}: no corpus profile names it "
+            f"(profiles found: {known}). Scanning the whole raw corpus instead would read "
+            "every collection on this machine, which is what scoping exists to prevent. "
+            "Point MAILRAG_PROFILE_DIR at your profiles, or pass an explicit root."
+        )
+    return files
+
+
 def _discover_eml(root: str):
     """Yield every ``.eml`` path under ``root`` (recursive), in sorted order."""
     for dirpath, _dirnames, filenames in os.walk(root):
@@ -201,6 +235,12 @@ def _parse(path: str):
     try:
         with open(path, "rb") as fh:
             raw = fh.read()
+        # Strip the mbox envelope first or every header is lost — see the module
+        # docstring. Imported from the loader rather than reimplemented so the
+        # two paths cannot drift apart again.
+        from src.data.loaders.mail_archive_x import MailArchiveXLoader
+
+        raw = MailArchiveXLoader._strip_mbox_preamble(raw)
         msg = email.message_from_bytes(raw, policy=policy.compat32)
     except Exception:
         return None
@@ -329,13 +369,14 @@ def grep_email(
             raise ValueError("max_seconds must be > 0 (or None to disable the deadline)")
     rx = _compile(pattern, regex)
     corpus = resolve_eml_root(root)
+    scoped_files = _scoped_files(collection, root)
 
     # Materialise the file list first: the walk is cheap next to parsing (~0.25s
     # for 73k files) and it buys the caller a denominator, so a partial scan can
     # be reported as "3,000 of 73,251" rather than an unqualified empty result.
     # The clock starts before it, so elapsed_s is the wall time the CALLER waited.
     started = time.monotonic()
-    paths = list(_discover_eml(corpus))
+    paths = list(_discover_eml(corpus)) if scoped_files is None else scoped_files
     deadline = started + budget_s if budget_s is not None else None
 
     results: List[Dict[str, Any]] = []
@@ -359,6 +400,15 @@ def grep_email(
         if not matches and rx.search(haystack_extra):
             matches = [f"[subject] {haystack_extra.strip()}"]
         if not matches:
+            # Attachment filenames are searchable too. They were, accidentally,
+            # while the mbox envelope bug left raw MIME headers in the body text
+            # — and the usage log shows callers relying on it to find documents
+            # by name. Fixing the parse removed that; matching the decoded
+            # filenames gives it back deliberately, without the base64 noise.
+            named = [n for n in meta["attachment_names"] if rx.search(n)]
+            if named:
+                matches = [f"[attachment] {n}" for n in named]
+        if not matches:
             continue
         row = dict(meta)
         row["matches"] = matches[:20]  # cap per-message snippets too
@@ -374,4 +424,8 @@ def grep_email(
         "stop_reason": stop_reason,
         "elapsed_s": round(time.monotonic() - started, 3),
         "root": corpus,
+        # Which corpus answered, echoed back so a caller can see the scope it
+        # actually got rather than the one it assumed.
+        "collection": collection,
+        "scoped": scoped_files is not None,
     }

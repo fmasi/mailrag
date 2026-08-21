@@ -31,6 +31,17 @@ class CorpusProfile:
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def save(self, path: str) -> None:
+        """Write the profile, stamping ``updated_at``.
+
+        The field existed but nothing ever set it, so every profile on disk
+        reported ``None`` — a provenance field carrying no provenance. Selection
+        rules are a point-in-time snapshot of an interactive choice, and mail
+        arrives continuously, so "when was this last decided" is exactly the
+        question a stale profile needs to answer.
+        """
+        from datetime import datetime, timezone
+
+        self.updated_at = datetime.now(timezone.utc).isoformat()
         with open(os.path.expanduser(path), "w", encoding="utf-8") as fh:
             json.dump(asdict(self), fh, indent=2)
 

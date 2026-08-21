@@ -91,7 +91,7 @@ def _cmd_summarize(args):
             file=sys.stderr,
         )
         return 2
-    counts = pass2_stage.run(prof, model=args.model, workers=args.workers)
+    counts = pass2_stage.run(prof, model=args.model, workers=args.workers, limit=args.limit)
     print(f"summarize: {counts}")
     return 0
 
@@ -188,7 +188,38 @@ def _cmd_scope(args):
     select_stage.run(prof)
     prof.save(args.profile)
     print(f"selected {len(prof.selection_rules)} rule(s) -> {args.profile}")
+    # Report the consequence immediately. A skip and an oversight are
+    # indistinguishable once the profile is saved, and a real corpus lost 16% of
+    # its mail to choices nobody ever saw totalled up.
+    from src.ingest.coverage import coverage, render
+
+    print()
+    print(render(coverage([prof], prof.resolved_root()), limit=8))
     return 0
+
+
+def _cmd_coverage(args):
+    """Report how much mail the profiles claim, and what none of them do."""
+    from src.ingest.coverage import coverage, load_profiles, render
+
+    profiles = load_profiles(args.profile)
+    if not profiles:
+        print("no readable profiles given (--profile can be repeated)")
+        return 1
+    root = args.root or profiles[0].resolved_root()
+    print(render(coverage(profiles, root), limit=args.limit))
+    return 0
+
+
+def _configure_coverage(p):
+    p.add_argument(
+        "--profile",
+        action="append",
+        required=True,
+        help="corpus profile (repeat to check several against one root)",
+    )
+    p.add_argument("--root", default=None, help="corpus root (default: the first profile's)")
+    p.add_argument("--limit", type=int, default=12, help="unclaimed folders to list")
 
 
 def _cmd_scan(args):
@@ -335,6 +366,24 @@ def _configure_ask(p):
     p.add_argument("--k", type=int, default=3)
 
 
+def _cmd_usage(args):
+    """Report what the MCP tools are actually used for (see usage_report)."""
+    from src.mcp_server.usage import resolve_usage_log
+    from src.mcp_server.usage_report import load, render, summarise
+
+    path = args.log or resolve_usage_log()
+    if path is None:
+        print("usage logging is disabled (MAILRAG_MCP_USAGE_LOG)")
+        return 0
+    print(render(summarise(load(os.path.expanduser(path))), limit=args.limit))
+    return 0
+
+
+def _configure_usage(p):
+    p.add_argument("--log", default=None, help="usage log path (default: $MAILRAG_MCP_USAGE_LOG)")
+    p.add_argument("--limit", type=int, default=5, help="rows per detail section")
+
+
 def _cmd_mcp(args):
     """Run the stdio MCP server exposing search_email / answer_question.
 
@@ -392,6 +441,16 @@ def _configure_index(p):
 
 
 def _configure_summarize(p):
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "stop after this many UNCACHED emails (cached ones are free and do not "
+            "count) — bounds a paid run, since the sweep is resumable and the "
+            "remainder can finish on another endpoint"
+        ),
+    )
     _add_profile_arg(p)
     p.add_argument("--model", required=True)
     p.add_argument("--workers", type=int, default=1)
@@ -496,6 +555,28 @@ _DEFAULT_ATTACH_STORE = "~/.mailrag/attachments"
 _CLASSIFY_MAX_SIZE = 100_000
 
 
+def _attach_store_for(args, collection: str) -> str:
+    """Per-collection store path, unless --store was given explicitly.
+
+    Attachment stores are separate directories per corpus so that a work corpus
+    and a personal one cannot surface each other's files. The profile already
+    names its collection, so the build needs no extra flag.
+    """
+    from src.mcp_server.server import _safe_dirname
+
+    # An explicit --store is an escape hatch and wins outright: the caller has
+    # named a directory, so there is nothing left to infer.
+    explicit = getattr(args, "store", None)
+    if explicit and explicit != _DEFAULT_ATTACH_STORE:
+        return explicit
+    if not collection:
+        raise ValueError(
+            "this verb needs --collection: attachment stores are separate per corpus, "
+            "so there is no shared store to read from"
+        )
+    return os.path.join(os.path.expanduser(_DEFAULT_ATTACH_STORE), _safe_dirname(collection))
+
+
 def _cmd_attachments_build(args):
     prof = CorpusProfile.load(args.profile)
     kept, _ = resolve_index_files(
@@ -503,7 +584,11 @@ def _cmd_attachments_build(args):
     )
     if args.limit:
         kept = kept[: args.limit]
-    store = AttachmentStore(args.store)
+    from src.onboard import record_profile_for_collection
+
+    # Register the collection -> profile mapping that grep scoping relies on.
+    record_profile_for_collection(prof.collection, args.profile)
+    store = AttachmentStore(_attach_store_for(args, prof.collection))
     try:
         counts = ingest_eml(kept, store, progress=True)
         print(f"attachments: {counts}")
@@ -534,7 +619,7 @@ def _cmd_attachments_build(args):
 
 
 def _cmd_attachments_list(args):
-    store = AttachmentStore(args.store)
+    store = AttachmentStore(_attach_store_for(args, args.collection))
     try:
         metas = store.list_for(thread_id=args.thread_id, message_id=args.message_id)
     finally:
@@ -546,7 +631,7 @@ def _cmd_attachments_list(args):
 
 
 def _cmd_attachments_get(args):
-    store = AttachmentStore(args.store)
+    store = AttachmentStore(_attach_store_for(args, args.collection))
     try:
         f = store.fetch(args.sha256, extractor=args.extractor, force=args.force)
         if args.out:
@@ -877,6 +962,20 @@ def build_parser():
     )
     _add_verb(
         sub,
+        "coverage",
+        _configure_coverage,
+        _cmd_coverage,
+        help="report mail that no profile selects (indexed and searchable nowhere)",
+    )
+    _add_verb(
+        sub,
+        "usage",
+        _configure_usage,
+        _cmd_usage,
+        help="report which MCP tools agents actually use, and what they cost",
+    )
+    _add_verb(
+        sub,
         "mcp",
         _configure_mcp,
         _cmd_mcp,
@@ -999,10 +1098,20 @@ def build_parser():
     atl.add_argument("--thread-id", default=None)
     atl.add_argument("--message-id", default=None)
     atl.add_argument("--store", default=_DEFAULT_ATTACH_STORE)
+    atl.add_argument(
+        "--collection",
+        default=None,
+        help="corpus whose attachment store to read (stores are separate per collection)",
+    )
     atl.set_defaults(func=_cmd_attachments_list)
 
     atg = at_sub.add_parser("get", help="fetch an attachment by sha256")
     atg.add_argument("sha256")
+    atg.add_argument(
+        "--collection",
+        default=None,
+        help="corpus whose attachment store to read (stores are separate per collection)",
+    )
     atg.add_argument("--text", action="store_true", help="print extracted text")
     atg.add_argument("--out", default=None, help="write raw bytes to this path")
     atg.add_argument("--store", default=_DEFAULT_ATTACH_STORE)

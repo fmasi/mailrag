@@ -889,7 +889,7 @@ describes layout, not purpose.
 
 Decoration recurs; content does not. True, but an image attached *once* and quoted down an
 18-message reply chain appears in 18 messages. Counting `message_id` read that as
-decoration and removed **237 of 659 blobs (36%)** wrongly, including a Samsung
+decoration and removed **237 of 659 blobs (36%)** wrongly, including a customer
 feature-request table and the lifecycle table above.
 
 Counting distinct **threads** fixes it — decoration is reused by unrelated conversations,
@@ -961,6 +961,80 @@ the Pass-1 header rule against personal mail's 7%. So the store keeps `chars`, `
 `unique_words`, `digits`, dimensions, status and extractor per blob, and computes the
 verdict at read time. Re-calibrating against another corpus is a SQL query rather than
 re-OCRing thousands of blobs — the mistake §14 already paid for once with the LLM rubric.
+
+## 17. A tool can be broken for a whole corpus and still pass its tests (2026-08-20)
+
+Two failures found the same day, from the same cause: **the test fixtures were
+cleaner than reality, and the interface reported absence as fact.**
+
+### 17.1 grep lost every header on every message
+
+Mail Archive X exports prepend an mbox `From ` separator and a stray byte-count
+line before the RFC 2822 headers. Python's parser stops reading headers at the
+first line that is not `Name: value`, so without stripping that preamble every
+header is silently lost. **100% of this corpus carries one.**
+
+`grep_email` therefore reported `(no subject)` with empty sender, date and
+message-id for every hit, and treated the entire raw file — headers, base64
+attachment payloads and all — as body text. The loader had stripped this since
+it was written; grep kept a separate parse for isolation reasons that had since
+lapsed, and the two drifted.
+
+Its test suite passed throughout, because the fixtures were hand-written `.eml`
+strings with no envelope. A test corpus that is tidier than the real one tests a
+different program. Fixtures now carry the preamble by default: 11 tests fail
+without the fix, **5 of which previously passed**.
+
+There is a second-order lesson in how the bug hid. A field report praised grep
+for "doing attachment discovery better than the attachment tools", because
+searching for a filename matched `filename="…"` in raw MIME headers. That
+capability was the bug — headers leaking into body text — and it read as a
+feature.
+
+### 17.2 An always-empty field is worse than a missing one
+
+`search_email` returned `attachment_names: []` on every hit of every query,
+because it read a field the email objects never carry (the payload has a
+singular `attachment_name`, on attachment chunks only).
+
+The consequence was not a missing feature but a **false belief**. From the field
+report, verbatim: *"an always-empty field doesn't read as 'unpopulated', it reads
+as 'this corpus has no attachments.'"* The agent ran four retrieval passes over a
+corpus containing a 22 MB deck and a partner PDF and never once called
+`list_attachments` — partly because a stale note said those tools were broken,
+and partly because every search result confirmed it.
+
+This is the same defect as the unbounded grep scan (§16 and `MCP_SERVER.md`):
+absence and not-looked-at sharing one representation. The fix is the same shape —
+the key is now **absent** when the store cannot answer, and `[]` only when the
+thread genuinely has nothing.
+
+### 17.3 "Extracted" is not the same as "you have the content"
+
+The decisive fact in that investigation was that a partner slide showed exactly
+five names — five labels around a horseshoe diagram. No sentence in the corpus
+says "five partners". `get_attachment` would have returned the surrounding
+boilerplate with `text_status: "extracted"`, and the honest-looking conclusion
+would have been that the claim was uncorroborated. The reporter got it by
+rendering the PDF pages as images.
+
+Text density separates these cleanly. Ten text-bearing PDFs measured
+99,000–225,000 chars/MB; the diagram PDF measured **1,869** and a 21 MB deck
+**66**. A cut at 10,000 has a 50× margin either side, so `get_attachment` now
+returns `text_coverage: sparse` with a note to go look at the pixels.
+
+### 17.4 Good retrieval suppresses tool diversity
+
+The most useful observation in the report is not a bug at all:
+
+> `search_email` is the path of least resistance and it is good. It answers
+> "what happened" well enough that I stopped there repeatedly. Nothing pushed me
+> to widen.
+
+Hybrid search being strong is what makes the other tools easy to never reach.
+That is an argument for the surfaces themselves advertising what they cannot
+answer — which is what `attachment_names`, `complete` and `text_coverage` all
+now do — rather than for expecting the caller to remember.
 
 ## Open threads / next experiments
 
