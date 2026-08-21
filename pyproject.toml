@@ -30,7 +30,12 @@ llama-index-postprocessor-flag-embedding-reranker = "^0.5.0"
 # and src/query/hybrid.py; install with `poetry install --extras nvidia`.
 llama-index-embeddings-nvidia = {version = "^0.5.1", optional = true}
 llama-index-postprocessor-nvidia-rerank = {version = "^0.6.0", optional = true}
-datasets = "^4.5.0"
+# 5.x, not 4.x: PYSEC-2026-3716 affects datasets < 5.0.1 and there is no 4.x
+# backport. The only 5.0.0 breaking change is IterableDataset.shuffle() now
+# sharding its input buffer; we never stream and never call it — every use here
+# is load_dataset(name, split=, cache_dir=) plus select/len/iterate/to_list,
+# all unchanged across the major.
+datasets = "^5.0.1"
 huggingface-hub = "^1.4.1"
 python-dotenv = "^1.2.1"
 pydantic = "^2.12.5"
