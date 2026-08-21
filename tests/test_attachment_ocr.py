@@ -1,3 +1,4 @@
+import io
 import os
 import unittest
 from unittest import mock
@@ -94,6 +95,65 @@ class TestTesseractOcr(unittest.TestCase):
         with mock.patch.dict("sys.modules", {"pytesseract": fake_pt, "PIL": fake_pil}):
             out = TesseractOcr().read(b"\x89PNG...", "image/png", "x.png")
         self.assertEqual(out.status, Status.ERROR)
+
+    @staticmethod
+    def _jpeg():
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 30), "white").save(buf, format="JPEG")
+        return buf.getvalue()
+
+    def test_a_missing_tesseract_binary_is_unavailable_not_error(self):
+        """The engine being absent is an ENVIRONMENT verdict, not a bad attachment.
+
+        ``pytesseract`` imports fine without the ``tesseract`` binary and only
+        fails when it shells out, so the import probe above cannot catch this.
+        Classifying it as ERROR poisons the cache: ``AttachmentStore`` refuses to
+        cache OCR_UNAVAILABLE precisely so a later run with a working PATH
+        retries, but it caches ERROR forever (GH #37). A scheduled sync inherits
+        no PATH, which is exactly when this fires.
+        """
+        with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            out = TesseractOcr().read(self._jpeg(), "image/jpeg", "x.jpg")
+        self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
+        self.assertEqual(out.provider, "tesseract")
+
+    def test_a_missing_engine_is_told_apart_from_a_corrupt_image(self):
+        """Both arrive as OSError, so the two must not be separated by type alone.
+
+        ``TesseractNotFoundError`` subclasses ``OSError`` and so does Pillow's
+        "image file is truncated" — catching ``OSError`` would collapse them.
+        """
+
+        class TesseractNotFoundError(OSError):
+            pass
+
+        fake_pt = mock.MagicMock()
+        fake_pt.image_to_string.side_effect = TesseractNotFoundError("not installed")
+        fake_pil = mock.MagicMock()
+        with mock.patch.dict("sys.modules", {"pytesseract": fake_pt, "PIL": fake_pil}):
+            out = TesseractOcr().read(b"\x89PNG...", "image/png", "x.png")
+        self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
+
+        # A same-typed failure that is NOT the engine going missing stays ERROR.
+        fake_pt.image_to_string.side_effect = OSError("image file is truncated")
+        with mock.patch.dict("sys.modules", {"pytesseract": fake_pt, "PIL": fake_pil}):
+            out = TesseractOcr().read(b"\x89PNG...", "image/png", "x.png")
+        self.assertEqual(out.status, Status.ERROR)
+
+    def test_a_missing_poppler_is_unavailable_not_error(self):
+        """Same contract on the PDF path — ``render_pdf_pages`` documents it."""
+
+        class PopplerNotInstalledError(Exception):
+            pass
+
+        fake_p2i = mock.MagicMock()
+        fake_p2i.convert_from_bytes.side_effect = PopplerNotInstalledError("poppler missing")
+        fake_pt = mock.MagicMock()
+        with mock.patch.dict("sys.modules", {"pdf2image": fake_p2i, "pytesseract": fake_pt}):
+            out = TesseractOcr().read(b"%PDF-1.4", "application/pdf", "x.pdf")
+        self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
 
     def test_pdf_unavailable_when_pdf2image_missing(self):
         with mock.patch.dict("sys.modules", {"pdf2image": None, "pytesseract": None}):

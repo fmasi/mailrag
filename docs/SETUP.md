@@ -207,3 +207,12 @@ Plus system packages for OCR: **tesseract** and **poppler**
 Without these, extraction degrades gracefully: unsupported types are stored with
 status `binary` or `ocr_unavailable`, and the raw attachment file is always
 served regardless.
+
+Note that the Python packages and the system binaries fail *differently*.
+`pytesseract` imports happily with no `tesseract` on `PATH` and only fails when it
+shells out, so a missing binary is caught at OCR time rather than at import. Both
+cases report `ocr_unavailable`, which matters because that status is deliberately
+**not cached** — a later run with a working `PATH` retries instead of inheriting a
+stale verdict. `error` means the attachment itself could not be read, and *is*
+cached. If a scheduled sync reports `ocr_unavailable` for everything, check the
+`PATH` it inherits (launchd jobs get a minimal one) before suspecting the files.
