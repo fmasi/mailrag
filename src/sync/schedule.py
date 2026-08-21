@@ -101,10 +101,14 @@ def scheduler_environment(overrides: Optional[dict] = None) -> dict:
         "RAG_LLM_API_BASE": "http://localhost:1234/v1",
         "QDRANT_URL": "http://localhost:6333",
         # PATH matters as much as the endpoints: attachment OCR shells out to
-        # `tesseract`, which lives in a Homebrew prefix that a scheduled job does
-        # NOT have on its path. Without this, scanned attachments extract as
-        # `ocr_unavailable` — and that status is cached, so a later supervised run
-        # does not heal them (GH #37's failure shape, re-triggered by launchd).
+        # `tesseract` and `poppler`, which live in a Homebrew prefix that a
+        # scheduled job does NOT have on its path. Without this, every scanned
+        # attachment extracts as `ocr_unavailable`. That status is deliberately
+        # NOT cached, so a later supervised run does heal them — but only by
+        # re-OCR'ing the whole backlog every tick until the PATH is fixed, and
+        # only so long as the verdict stays `ocr_unavailable`. Classifying a
+        # missing binary as `error` instead is what freezes it, because `error`
+        # IS cached permanently (GH #37; see extract/ocr/tesseract.py).
         "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     }
     env.update(overrides or {})
