@@ -155,6 +155,71 @@ class TestTesseractOcr(unittest.TestCase):
             out = TesseractOcr().read(b"%PDF-1.4", "application/pdf", "x.pdf")
         self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
 
+    def _pdf_status(self, side_effect):
+        """Classify a PDF-render failure with poppler's own exceptions mocked out.
+
+        ``pdfinfo`` is made to succeed so the failure can only come from the
+        pdftoppm/pdftocairo half of poppler — the partial-install shape.
+        """
+        fake_p2i = mock.MagicMock()
+        fake_p2i.pdfinfo_from_bytes.return_value = {"Pages": 1}
+        fake_p2i.convert_from_bytes.side_effect = side_effect
+        fake_pt = mock.MagicMock()
+        with mock.patch.dict("sys.modules", {"pdf2image": fake_p2i, "pytesseract": fake_pt}):
+            return TesseractOcr().read(b"%PDF-1.4", "application/pdf", "x.pdf")
+
+    def test_a_partial_poppler_install_is_unavailable_not_error(self):
+        """pdfinfo present but pdftoppm absent raises a BARE ``FileNotFoundError``.
+
+        pdf2image guards only its ``pdfinfo`` call (OSError ->
+        PDFInfoNotInstalledError). The ``pdftoppm``/``pdftocairo`` version probe
+        inside ``convert_from_path`` is an unguarded ``Popen``, so a half-installed
+        poppler escapes every name in ``_ENGINE_MISSING`` and used to be cached as
+        ERROR forever — GH #37's exact failure, reached by a narrower path.
+        """
+        out = self._pdf_status(FileNotFoundError(2, "No such file or directory", "pdftoppm"))
+        self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
+        self.assertEqual(out.provider, "tesseract")
+
+    def test_a_missing_pdftocairo_is_unavailable_too(self):
+        """pdf2image probes pdftocairo instead for transparent/PNG-ish formats."""
+        out = self._pdf_status(FileNotFoundError(2, "No such file or directory", "pdftocairo"))
+        self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
+
+    def test_a_poppler_binary_missing_from_an_explicit_prefix_is_unavailable(self):
+        """``poppler_path`` makes the failed executable an absolute path, not a name."""
+        out = self._pdf_status(
+            FileNotFoundError(2, "No such file or directory", "/opt/poppler/bin/pdftoppm")
+        )
+        self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
+
+    def test_a_missing_binary_wrapped_by_another_error_is_still_unavailable(self):
+        """The cause/context walk must see through a re-raise."""
+
+        def boom(*_a, **_k):
+            try:
+                raise FileNotFoundError(2, "No such file or directory", "pdftoppm")
+            except FileNotFoundError as exc:
+                raise RuntimeError("render failed") from exc
+
+        out = self._pdf_status(boom)
+        self.assertEqual(out.status, Status.OCR_UNAVAILABLE)
+
+    def test_a_missing_data_file_stays_error_not_unavailable(self):
+        """Precision guard: not every ``FileNotFoundError`` is a missing engine.
+
+        Calling a genuinely unreadable input "environment issue, retry later"
+        would be the same misclassification in reverse — the attachment would be
+        re-OCR'd on every run and never settle.
+        """
+        out = self._pdf_status(FileNotFoundError(2, "No such file or directory", "/tmp/scan.pdf"))
+        self.assertEqual(out.status, Status.ERROR)
+
+    def test_a_filenameless_missing_file_stays_error(self):
+        """No ``filename`` means no evidence it was poppler; default to ERROR."""
+        out = self._pdf_status(FileNotFoundError("something went missing"))
+        self.assertEqual(out.status, Status.ERROR)
+
     def test_pdf_unavailable_when_pdf2image_missing(self):
         with mock.patch.dict("sys.modules", {"pdf2image": None, "pytesseract": None}):
             out = TesseractOcr().read(b"%PDF-1.4", "application/pdf", "x.pdf")

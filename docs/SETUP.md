@@ -216,3 +216,8 @@ cases report `ocr_unavailable`, which matters because that status is deliberatel
 stale verdict. `error` means the attachment itself could not be read, and *is*
 cached. If a scheduled sync reports `ocr_unavailable` for everything, check the
 `PATH` it inherits (launchd jobs get a minimal one) before suspecting the files.
+
+Poppler can also go missing in *halves* — `pdfinfo` installed but `pdftoppm` not,
+which is what a minimal container image or an interrupted `brew install` leaves
+behind. Scanned PDFs still report `ocr_unavailable` in that case, so installing
+the missing binary and re-running is enough; nothing needs clearing by hand.

@@ -13,11 +13,16 @@ as ERROR is not cosmetic — :class:`AttachmentStore` deliberately does not cach
 OCR_UNAVAILABLE so that a later run with a working PATH retries, while ERROR is
 cached permanently. A scheduled sync inherits no PATH, so misclassifying here
 froze "unreadable" onto attachments that were merely unread.
+
+Nor can the binary case be caught by exception type alone: poppler is missing in
+*halves*, and pdf2image names an exception for only one of them. See
+:data:`_POPPLER_BINARIES`.
 """
 
 from __future__ import annotations
 
 import io
+import os
 
 from src.attachments.extract.mime import is_pdf
 from src.attachments.extract.ocr.base import OcrResult
@@ -39,6 +44,32 @@ _ENGINE_MISSING = frozenset(
     }
 )
 
+# Not every missing binary gets a named exception. pdf2image guards only its
+# `pdfinfo` call (OSError -> PDFInfoNotInstalledError); the `pdftoppm`/
+# `pdftocairo` version probe and the render itself are unguarded `Popen` calls.
+# So a PARTIAL poppler install — pdfinfo present, pdftoppm absent, the shape a
+# minimal container or a half-finished `brew install` produces — surfaces as a
+# bare FileNotFoundError that no exception NAME can identify.
+_POPPLER_BINARIES = frozenset({"pdfinfo", "pdftoppm", "pdftocairo"})
+
+
+def _is_missing_binary(exc: BaseException) -> bool:
+    """True when *exc* is ``Popen`` failing to exec one of poppler's binaries.
+
+    Matched on the *executable* that failed, not on the exception type: a bare
+    FileNotFoundError is equally what an unreadable input file raises, and
+    calling that "environment issue, retry later" would be the same
+    misclassification in reverse — the attachment would be re-OCR'd forever and
+    never settle. ``Popen`` sets ``filename`` to argv[0], which is the bare
+    command name, or an absolute path when ``poppler_path`` is configured.
+    """
+    name = getattr(exc, "filename", None)
+    return (
+        isinstance(exc, FileNotFoundError)
+        and bool(name)
+        and (os.path.basename(str(name)) in _POPPLER_BINARIES)
+    )
+
 
 def _is_engine_missing(exc: BaseException) -> bool:
     """True when *exc* means "the OCR engine is not installed here".
@@ -49,7 +80,7 @@ def _is_engine_missing(exc: BaseException) -> bool:
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if type(current).__name__ in _ENGINE_MISSING:
+        if type(current).__name__ in _ENGINE_MISSING or _is_missing_binary(current):
             return True
         current = current.__cause__ or current.__context__
     return False
