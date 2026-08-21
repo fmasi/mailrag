@@ -28,6 +28,16 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      # pytesseract/pdf2image are Python shims around BINARIES that the runner
+      # image does not carry. Without these the whole OCR path ran degraded in
+      # CI — every attachment-OCR test that did not mock `sys.modules` exercised
+      # the "engine missing" branch instead of real OCR, so image and scanned-PDF
+      # extraction was effectively untested here. The missing-binary branch is
+      # still covered: those tests strip PATH explicitly rather than relying on
+      # the runner happening to lack tesseract.
+      - name: Install OCR binaries
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils
+
       - name: Install Poetry
         run: python -m pip install --upgrade pip poetry
 
