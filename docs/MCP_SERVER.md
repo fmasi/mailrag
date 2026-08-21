@@ -133,8 +133,11 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
 
 - **Args:**
   - `pattern` (str, required) — the string to find (literal by default).
-  - `collection` (str, optional) — accepted for API symmetry; grep is
-    corpus-directory based (see the `MAILRAG_EML_ROOT` config below).
+  - `collection` (str, optional) — restrict the walk to the files this
+    collection's corpus profile selects, so a session scoped to one corpus
+    cannot read another. Naming a collection no profile knows is an **error**,
+    not a full-corpus scan. When scoping applies the files come from the
+    profile's own root and `MAILRAG_EML_ROOT` is not consulted at all.
   - `max_matches` (int, default 50) — maximum matching **messages** to return.
     Clamped to a hard cap of **500**. Set it to `1` for an existence check.
   - `regex` (bool, default `false`) — treat `pattern` as a Python regex.
@@ -146,8 +149,9 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
   `{subject, from, to, date, message_id, attachment_names, matches, path}`, where
   the inner `matches` is a list of matched-line snippets.
 - **Errors:** `ValueError` on a blank `pattern`, an invalid regex, a non-positive
-  `max_seconds`, or a missing corpus (`MAILRAG_EML_ROOT` unset and `~/rag_eml`
-  absent).
+  `max_seconds`, a `collection` no corpus profile names, or a missing corpus
+  (`MAILRAG_EML_ROOT` unset and `~/rag_eml` absent). The missing-corpus error
+  applies only to an **unscoped** walk — a scoped one never reads that root.
 
 ```jsonc
 // grep_email("210,000,000")
