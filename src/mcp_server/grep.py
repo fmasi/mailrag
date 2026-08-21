@@ -193,13 +193,17 @@ def _attachment_names(msg: email.message.Message) -> List[str]:
     return names
 
 
-def _scoped_files(collection: Optional[str], root: Optional[str]):
-    """Files belonging to ``collection``, or ``None`` to walk the whole root.
+def _scoped_walk(collection: Optional[str], root: Optional[str]):
+    """The scope to walk for ``collection``, or ``None`` to walk the whole root.
 
     Corpora on one machine share a root and differ only by selection rules, so an
     unscoped walk crosses them: a work-scoped session greps a string and reads
     personal mail. When a collection is named we walk exactly the files its
     profile selects — the same set indexing used.
+
+    Returns a :class:`~src.mcp_server.scoping.CorpusScope` — files *and* the root
+    they came from, from one read of one profile. Asking for the two separately
+    is what let a warm file-list cache be reported under a freshly-read root.
 
     Refusing matters as much as scoping. If a collection is named but no profile
     claims it, falling back to the full root would quietly do the very thing the
@@ -208,10 +212,10 @@ def _scoped_files(collection: Optional[str], root: Optional[str]):
     """
     if root or not collection:
         return None
-    from src.mcp_server.scoping import collection_profiles, files_for_collection
+    from src.mcp_server.scoping import collection_profiles, scope_for_collection
 
-    files = files_for_collection(collection)
-    if files is None:
+    scope = scope_for_collection(collection)
+    if scope is None:
         known = ", ".join(sorted(collection_profiles())) or "none found"
         raise ValueError(
             f"cannot scope a grep to collection {collection!r}: no corpus profile names it "
@@ -219,7 +223,7 @@ def _scoped_files(collection: Optional[str], root: Optional[str]):
             "every collection on this machine, which is what scoping exists to prevent. "
             "Point MAILRAG_PROFILE_DIR at your profiles, or pass an explicit root."
         )
-    return files
+    return scope
 
 
 def _discover_eml(root: str):
@@ -311,9 +315,11 @@ def grep_email(
     Args:
         pattern: The string (or regex, when ``regex=True``) to find. Matching is
             case-insensitive and covers subject + decoded body text.
-        collection: Accepted for API symmetry with the other MCP tools; grep is
-            corpus-directory based, so it is used only to scope the root when a
-            per-collection mapping is wired up (currently a no-op label).
+        collection: Restrict the walk to the files this collection's profile
+            selects, so a session scoped to one corpus cannot read another. When
+            no profile names it this raises rather than scanning everything. An
+            explicit ``root`` overrides scoping entirely. When scoping applies,
+            ``$MAILRAG_EML_ROOT`` is not consulted at all.
         max_matches: Maximum matching **messages** to return. Clamped to
             ``[1, 500]`` (hard cap) so a broad pattern can never flood output.
             Set to 1 for an existence check -- it returns on the first hit.
@@ -347,7 +353,9 @@ def grep_email(
           ``deadline``.
 
     Raises:
-        ValueError: on a blank ``pattern``, an invalid regex, or a missing corpus.
+        ValueError: on a blank ``pattern``, an invalid regex, a missing corpus,
+            or a ``collection`` that cannot be scoped (no profile names it, or
+            the profile that does cannot be read).
     """
     if not pattern or not pattern.strip():
         raise ValueError("pattern must be a non-empty string")
@@ -368,15 +376,25 @@ def grep_email(
         if budget_s <= 0:
             raise ValueError("max_seconds must be > 0 (or None to disable the deadline)")
     rx = _compile(pattern, regex)
-    corpus = resolve_eml_root(root)
-    scoped_files = _scoped_files(collection, root)
+    # Scope BEFORE resolving the default root, because scoping decides whether
+    # that root is needed at all. A scoped walk takes its files from the
+    # profile's own root (see ``scoping.scope_for_collection``), so requiring
+    # ``$MAILRAG_EML_ROOT`` to exist first failed two ways: a perfectly valid
+    # scoped grep died on a default root it was never going to read, and naming
+    # an unscopable collection reported "corpus not found" instead of the
+    # refusal that actually applied — hiding a scoping error behind a config one.
+    scope = _scoped_walk(collection, root)
+    # The reported root is the one the scan really covered. It comes back with
+    # the file list from a single profile read, so ``root`` always describes the
+    # files in ``matches`` — it cannot name one corpus while the walk reads another.
+    corpus = resolve_eml_root(root) if scope is None else scope.root
 
     # Materialise the file list first: the walk is cheap next to parsing (~0.25s
     # for 73k files) and it buys the caller a denominator, so a partial scan can
     # be reported as "3,000 of 73,251" rather than an unqualified empty result.
     # The clock starts before it, so elapsed_s is the wall time the CALLER waited.
     started = time.monotonic()
-    paths = list(_discover_eml(corpus)) if scoped_files is None else scoped_files
+    paths = list(_discover_eml(corpus)) if scope is None else scope.files
     deadline = started + budget_s if budget_s is not None else None
 
     results: List[Dict[str, Any]] = []
@@ -427,5 +445,5 @@ def grep_email(
         # Which corpus answered, echoed back so a caller can see the scope it
         # actually got rather than the one it assumed.
         "collection": collection,
-        "scoped": scoped_files is not None,
+        "scoped": scope is not None,
     }

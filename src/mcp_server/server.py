@@ -933,7 +933,8 @@ def build_server():
 
         Args:
             pattern: Literal string, or a regex when ``regex=True``.
-            collection: Accepted for symmetry (grep is corpus-directory based).
+            collection: Restrict the search to this corpus's files. Naming a
+                collection no profile knows is an error, not a full-corpus scan.
             max_matches: Max matching messages (default 50, hard cap 500).
             regex: Treat ``pattern`` as a Python regex (default False = literal).
             max_files: Stop after scanning this many messages (default: no limit).
