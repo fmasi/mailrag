@@ -138,20 +138,28 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
     cannot read another. Naming a collection no profile knows is an **error**,
     not a full-corpus scan. When scoping applies the files come from the
     profile's own root and `MAILRAG_EML_ROOT` is not consulted at all.
+    The file list and the reported `root` are resolved together from one read of
+    that profile, so `root` always names the corpus the files in `matches`
+    actually came from. Re-onboarding a collection while the server is running
+    rewrites its profile, and the next call picks that up (the resolution is
+    cached per profile and invalidated by the profile's mtime).
   - `max_matches` (int, default 50) — maximum matching **messages** to return.
     Clamped to a hard cap of **500**. Set it to `1` for an existence check.
   - `regex` (bool, default `false`) — treat `pattern` as a Python regex.
   - `max_files` (int, optional) — stop after scanning this many messages.
   - `max_seconds` (float, default 60, hard cap 900) — wall-clock budget for the
     scan. `null` disables the deadline, which is only safe on a small corpus.
-- **Returns:** `{matches, scanned, corpus_files, complete, stop_reason, elapsed_s, root}`.
-  `matches` holds up to `max_matches` rows
+- **Returns:** `{matches, scanned, corpus_files, complete, stop_reason, elapsed_s,
+  root, collection, scoped}`. `matches` holds up to `max_matches` rows
   `{subject, from, to, date, message_id, attachment_names, matches, path}`, where
-  the inner `matches` is a list of matched-line snippets.
+  the inner `matches` is a list of matched-line snippets. `collection` and
+  `scoped` echo back the scope that answered, so a caller can see what it got
+  rather than what it assumed.
 - **Errors:** `ValueError` on a blank `pattern`, an invalid regex, a non-positive
-  `max_seconds`, a `collection` no corpus profile names, or a missing corpus
-  (`MAILRAG_EML_ROOT` unset and `~/rag_eml` absent). The missing-corpus error
-  applies only to an **unscoped** walk — a scoped one never reads that root.
+  `max_seconds`, a `collection` no corpus profile names (or whose profile cannot
+  be read), or a missing corpus (`MAILRAG_EML_ROOT` unset and `~/rag_eml`
+  absent). The missing-corpus error applies only to an **unscoped** walk — a
+  scoped one never reads that root.
 
 ```jsonc
 // grep_email("210,000,000")
@@ -165,7 +173,8 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
       "path": "/Users/you/rag_eml/Inbox/Acme Corp/… .eml" }
   ],
   "scanned": 1841, "corpus_files": 73219, "complete": false,
-  "stop_reason": "max_matches", "elapsed_s": 4.4, "root": "/Users/you/rag_eml"
+  "stop_reason": "max_matches", "elapsed_s": 4.4, "root": "/Users/you/rag_eml",
+  "collection": null, "scoped": false
 }
 ```
 

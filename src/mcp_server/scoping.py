@@ -11,39 +11,59 @@ Scoping therefore means applying the corpus profile's own selection rules to the
 walk, which is exactly what indexing does. Resolution is cheap (~0.2s for 73k
 files) and the two profiles here select disjoint sets.
 
-Profiles are discovered by reading ``*.profile.json`` under
-``$MAILRAG_PROFILE_DIR`` (default ``~``) and indexing them by the ``collection``
-they name, because nothing else records that mapping — onboarding manifests carry
-the collection but not the profile that produced it.
+A collection's profile is found from the onboarding manifest that recorded it,
+falling back to scanning ``*.profile.json`` under ``$MAILRAG_PROFILE_DIR``
+(default ``~``) and indexing them by the ``collection`` they name.
+
+Both lookups are memoised, and both invalidate on the profile's mtime, because
+the MCP server outlives the profiles it reads: re-onboarding a collection
+rewrites its profile underneath a running process, and nothing on that path
+clears these caches.
 """
 
 from __future__ import annotations
 
 import glob
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 DEFAULT_PROFILE_DIR = "~"
 
 # (profile-dir, mtime-signature) -> {collection: profile path}
 _PROFILE_CACHE: Dict[tuple, Dict[str, str]] = {}
-# profile path -> selected files
-_FILES_CACHE: Dict[str, List[str]] = {}
+# profile path -> (profile mtime when resolved, selected files, corpus root)
+_SCOPE_CACHE: Dict[str, Tuple[float, List[str], str]] = {}
+
+
+class CorpusScope(NamedTuple):
+    """One collection's walk: the files to read and the root they came from.
+
+    Deliberately one value rather than two lookups. The files and the root are
+    the same fact read from the same profile, and resolving them separately let
+    them disagree: a long-running server answered from a cached file list while
+    reporting a freshly-read root, so a re-onboarded collection was grepped in
+    its old corpus under its new corpus's name.
+    """
+
+    files: List[str]
+    root: str
 
 
 def profile_dir() -> str:
     return os.path.expanduser(os.environ.get("MAILRAG_PROFILE_DIR") or DEFAULT_PROFILE_DIR)
 
 
+def _mtime(path: str) -> float:
+    """``path``'s mtime, or ``0.0`` when it cannot be stat'ed."""
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
 def _signature(paths: List[str]) -> tuple:
     """Cache key that changes when a profile is edited or added."""
-    out = []
-    for p in paths:
-        try:
-            out.append((p, os.path.getmtime(p)))
-        except OSError:
-            out.append((p, 0.0))
-    return tuple(out)
+    return tuple((p, _mtime(p)) for p in paths)
 
 
 def collection_profiles() -> Dict[str, str]:
@@ -77,52 +97,57 @@ def collection_profiles() -> Dict[str, str]:
     return found
 
 
-def files_for_collection(collection: str) -> Optional[List[str]]:
-    """The ``.eml`` files belonging to ``collection``, or ``None`` if unknown.
+def scope_for_collection(collection: Optional[str]) -> Optional[CorpusScope]:
+    """The files ``collection`` selects and the root they came from, or ``None``.
 
     ``None`` means "no profile names this collection", which the caller must
-    treat as a refusal to scope rather than a licence to scan everything.
-    """
-    path = collection_profiles().get(collection)
-    if path is None:
-        return None
-    cached = _FILES_CACHE.get(path)
-    if cached is not None:
-        return cached
+    treat as a refusal to scope rather than a licence to scan everything. A
+    falsy ``collection`` is the same refusal in advance: nothing to scope to.
 
-    from src.ingest.local_source import resolve_index_files
-    from src.profile import CorpusProfile
-
-    prof = CorpusProfile.load(path)
-    kept, _ = resolve_index_files(
-        prof.resolved_root(), prof.selection_rules, getattr(prof, "blacklist", None)
-    )
-    files = sorted(kept)
-    _FILES_CACHE[path] = files
-    return files
-
-
-def root_for_collection(collection: Optional[str]) -> Optional[str]:
-    """The corpus root ``collection``'s profile selects from, or ``None`` if unknown.
-
-    A scoped walk reads the profile's own root, which need not be
+    The walk reads the profile's own root, which need not be
     ``$MAILRAG_EML_ROOT`` — so a caller reporting "which corpus answered this"
-    must ask the profile rather than re-resolve the default.
+    reads the root off the scope it walked, never by re-resolving the default.
+
+    Resolution is memoised per profile and invalidated by the profile's mtime.
+    That matters because the server is long-lived: re-onboarding a collection
+    rewrites its profile while the process keeps running, and a cache with no
+    invalidation would go on grepping the previous corpus. Nothing in the
+    onboarding path calls :func:`clear_cache`, so the mtime is what makes a
+    warm cache safe.
+
+    Raises:
+        ValueError: when a profile is named but cannot be read. Scoping has
+            failed, and both alternatives are worse than saying so — scanning
+            everything defeats the point, and reporting "unknown collection"
+            would send the caller looking for a profile that is right there.
     """
     if not collection:
         return None
     path = collection_profiles().get(collection)
     if path is None:
         return None
+    stamp = _mtime(path)
+    cached = _SCOPE_CACHE.get(path)
+    if cached is not None and cached[0] == stamp:
+        return CorpusScope(cached[1], cached[2])
+
+    from src.ingest.local_source import resolve_index_files
     from src.profile import CorpusProfile
 
     try:
-        return CorpusProfile.load(path).resolved_root()
-    except Exception:
-        return None
+        prof = CorpusProfile.load(path)
+    except Exception as exc:
+        raise ValueError(
+            f"corpus profile for collection {collection!r} at {path!r} could not be read: {exc}"
+        ) from exc
+    root = prof.resolved_root()
+    kept, _ = resolve_index_files(root, prof.selection_rules, getattr(prof, "blacklist", None))
+    files = sorted(kept)
+    _SCOPE_CACHE[path] = (stamp, files, root)
+    return CorpusScope(files, root)
 
 
 def clear_cache() -> None:
-    """Drop memoised profiles and file lists (tests, and after re-onboarding)."""
+    """Drop memoised profiles and resolved scopes (tests, and after re-onboarding)."""
     _PROFILE_CACHE.clear()
-    _FILES_CACHE.clear()
+    _SCOPE_CACHE.clear()

@@ -80,9 +80,9 @@ class TestProfileDiscovery(unittest.TestCase):
         scoping.clear_cache()
         self.assertIn("work-rag", scoping.collection_profiles())
 
-    def test_an_unknown_collection_has_no_file_list(self):
+    def test_an_unknown_collection_has_no_scope(self):
         scoping.clear_cache()
-        self.assertIsNone(scoping.files_for_collection("nope"))
+        self.assertIsNone(scoping.scope_for_collection("nope"))
 
     def test_the_cache_notices_a_new_profile(self):
         d = os.environ["MAILRAG_PROFILE_DIR"]
@@ -167,14 +167,190 @@ class TestGrepRefusesWhenItCannotScope(unittest.TestCase):
 
     def test_an_explicit_root_bypasses_scoping(self):
         # The escape hatch: a caller naming a directory has said what it wants.
-        from src.mcp_server.grep import _scoped_files
+        from src.mcp_server.grep import _scoped_walk
 
-        self.assertIsNone(_scoped_files("not-a-known-corpus", "/tmp/somewhere"))
+        self.assertIsNone(_scoped_walk("not-a-known-corpus", "/tmp/somewhere"))
 
     def test_no_collection_means_no_scoping_attempt(self):
-        from src.mcp_server.grep import _scoped_files
+        from src.mcp_server.grep import _scoped_walk
 
-        self.assertIsNone(_scoped_files(None, None))
+        self.assertIsNone(_scoped_walk(None, None))
+
+
+class TestScopeResolution(unittest.TestCase):
+    """``scope_for_collection`` is the single answer to "which files, which root".
+
+    Files and root used to be two lookups against the same profile — one cached
+    with no invalidation, one re-read every call — so they could describe
+    different corpora at the same moment.
+    """
+
+    def setUp(self):
+        scoping.clear_cache()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _corpus(self, name, needle_file):
+        """A corpus directory holding one ``.eml`` that mentions "needle"."""
+        path = os.path.join(self.tmp.name, name)
+        os.makedirs(path)
+        with open(os.path.join(path, needle_file), "w") as fh:
+            fh.write(f"Subject: From {name}\nFrom: a@b.c\n\nthe needle is here\n")
+        return path
+
+    def _profile(self, collection, root):
+        """Write ``collection``'s profile pointing at ``root``."""
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        path = os.path.join(d, f"{collection}.profile.json")
+        with open(path, "w") as fh:
+            json.dump(
+                {
+                    "collection": collection,
+                    "root": root,
+                    "selection_rules": [{"type": "container-root"}],
+                },
+                fh,
+            )
+        return path
+
+    def test_the_scope_carries_both_the_files_and_the_root_they_came_from(self):
+        corpus = self._corpus("old", "m1.eml")
+        self._profile("scoped-rag", corpus)
+        scoping.clear_cache()
+        scope = scoping.scope_for_collection("scoped-rag")
+        self.assertEqual(os.path.realpath(scope.root), os.path.realpath(corpus))
+        self.assertEqual(len(scope.files), 1)
+        for f in scope.files:
+            self.assertTrue(os.path.realpath(f).startswith(os.path.realpath(scope.root)))
+
+    def test_an_unchanged_profile_is_answered_from_the_cache(self):
+        corpus = self._corpus("old", "m1.eml")
+        self._profile("scoped-rag", corpus)
+        scoping.clear_cache()
+        first = scoping.scope_for_collection("scoped-rag")
+        second = scoping.scope_for_collection("scoped-rag")
+        # Same list object: resolution was memoised, not repeated.
+        self.assertIs(first.files, second.files)
+
+    def test_no_collection_named_means_nothing_to_scope(self):
+        self.assertIsNone(scoping.scope_for_collection(None))
+        self.assertIsNone(scoping.scope_for_collection(""))
+
+    def test_an_unknown_collection_has_no_scope(self):
+        self.assertIsNone(scoping.scope_for_collection("no-such-corpus"))
+
+    def test_a_profile_that_cannot_be_stat_ed_gets_a_neutral_timestamp(self):
+        """The mtime is a cache key, and a missing file is not a crash.
+
+        A profile can vanish between the directory listing and the resolution
+        that reads it; the stat must degrade to a value that simply never
+        matches a real one, so the entry is re-resolved rather than trusted.
+        """
+        self.assertEqual(scoping._mtime(os.path.join(self.tmp.name, "gone.profile.json")), 0.0)
+
+    def test_an_unreadable_profile_is_a_scoping_error_not_a_silent_default(self):
+        """A recorded mapping can outlive a readable profile.
+
+        Directory scanning skips a corrupt profile, but a manifest names one
+        explicitly — and then the collection *is* known, its profile just
+        cannot be read. Answering ``None`` there would report "unknown
+        collection" for a profile sitting right where the manifest says.
+        """
+        from src.onboard import record_profile_for_collection
+
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        path = os.path.join(d, "broken-rag.profile.json")
+        with open(path, "w") as fh:
+            fh.write("{ not json")
+        record_profile_for_collection("broken-rag", path)
+        scoping.clear_cache()
+        with self.assertRaises(ValueError) as ctx:
+            scoping.scope_for_collection("broken-rag")
+        msg = str(ctx.exception)
+        self.assertIn("broken-rag", msg)
+        self.assertIn(path, msg)
+
+    def test_a_grep_reports_the_unreadable_profile_rather_than_scanning_everything(self):
+        from src.mcp_server.grep import grep_email
+        from src.onboard import record_profile_for_collection
+
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        path = os.path.join(d, "broken-rag.profile.json")
+        with open(path, "w") as fh:
+            fh.write("{ not json")
+        record_profile_for_collection("broken-rag", path)
+        scoping.clear_cache()
+        with self.assertRaises(ValueError) as ctx:
+            grep_email("needle", collection="broken-rag")
+        self.assertIn("could not be read", str(ctx.exception))
+
+
+class TestReOnboardingInvalidatesAWarmCache(unittest.TestCase):
+    """The MCP server is long-lived; a re-onboard happens underneath it.
+
+    Nothing in the onboarding path calls ``clear_cache``, so a warm process
+    must notice the profile changing by itself. When it did not, the file list
+    stayed on the previous corpus while the reported root moved to the new one
+    — grep answered from the old corpus under the new corpus's name, which is
+    the precise failure scoping exists to prevent.
+    """
+
+    def setUp(self):
+        scoping.clear_cache()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _corpus(self, name, filename):
+        path = os.path.join(self.tmp.name, name)
+        os.makedirs(path)
+        with open(os.path.join(path, filename), "w") as fh:
+            fh.write(f"Subject: From {name}\nFrom: a@b.c\n\nthe needle is here\n")
+        return path
+
+    def _write_scoped_profile(self, root, stamp):
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        path = os.path.join(d, "moving-rag.profile.json")
+        with open(path, "w") as fh:
+            json.dump(
+                {
+                    "collection": "moving-rag",
+                    "root": root,
+                    "selection_rules": [{"type": "container-root"}],
+                },
+                fh,
+            )
+        # Stamp the mtime explicitly: two writes inside one filesystem timestamp
+        # tick would make this test pass or fail on clock resolution.
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def test_a_re_onboarded_collection_is_grepped_in_its_new_corpus(self):
+        from src.mcp_server.grep import grep_email
+
+        old = self._corpus("old_corpus", "old.eml")
+        new = self._corpus("new_corpus", "new.eml")
+
+        self._write_scoped_profile(old, stamp=1_000_000)
+        scoping.clear_cache()
+        first = grep_email("needle", collection="moving-rag")
+        self.assertEqual(os.path.realpath(first["root"]), os.path.realpath(old))
+        self.assertEqual([m["subject"] for m in first["matches"]], ["From old_corpus"])
+
+        # Re-onboard: same collection, same profile path, new corpus root. The
+        # cache is warm and nobody clears it.
+        self._write_scoped_profile(new, stamp=2_000_000)
+        second = grep_email("needle", collection="moving-rag")
+
+        self.assertEqual(os.path.realpath(second["root"]), os.path.realpath(new))
+        self.assertEqual([m["subject"] for m in second["matches"]], ["From new_corpus"])
+        # The invariant either lookup could break on its own: every file the
+        # scan actually read lives under the root the result names.
+        self.assertTrue(second["matches"])
+        for m in second["matches"]:
+            self.assertTrue(
+                os.path.realpath(m["path"]).startswith(os.path.realpath(second["root"])),
+                f"{m['path']} is not under the reported root {second['root']}",
+            )
 
 
 if __name__ == "__main__":
