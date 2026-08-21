@@ -102,6 +102,26 @@ def files_for_collection(collection: str) -> Optional[List[str]]:
     return files
 
 
+def root_for_collection(collection: Optional[str]) -> Optional[str]:
+    """The corpus root ``collection``'s profile selects from, or ``None`` if unknown.
+
+    A scoped walk reads the profile's own root, which need not be
+    ``$MAILRAG_EML_ROOT`` — so a caller reporting "which corpus answered this"
+    must ask the profile rather than re-resolve the default.
+    """
+    if not collection:
+        return None
+    path = collection_profiles().get(collection)
+    if path is None:
+        return None
+    from src.profile import CorpusProfile
+
+    try:
+        return CorpusProfile.load(path).resolved_root()
+    except Exception:
+        return None
+
+
 def clear_cache() -> None:
     """Drop memoised profiles and file lists (tests, and after re-onboarding)."""
     _PROFILE_CACHE.clear()
