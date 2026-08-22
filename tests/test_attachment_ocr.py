@@ -234,6 +234,57 @@ class TestTesseractOcr(unittest.TestCase):
             out = TesseractOcr().read(b"%PDF-1.4", "application/pdf", "x.pdf")
         self.assertEqual(out.status, Status.ERROR)
 
+    def test_load_truncated_images_flag_is_restored_after_success(self):
+        """GH #185: the process-wide PIL flag must not leak past this one call.
+
+        Other PIL call sites (signals.py, pages.py, llm_vision.py) rely on PIL's
+        default of raising on a truncated image to detect corrupt uploads. If
+        ``_image`` sets ``ImageFile.LOAD_TRUNCATED_IMAGES = True`` and never
+        restores it, every later PIL call in the same long-running process
+        (MCP server, batch job) silently accepts truncated data forever, with no
+        way to tell OCR was ever invoked.
+        """
+        from PIL import ImageFile
+
+        fake_pt = mock.MagicMock()
+        fake_pt.image_to_string.return_value = "text"
+        with mock.patch.object(ImageFile, "LOAD_TRUNCATED_IMAGES", False):
+            with mock.patch.dict("sys.modules", {"pytesseract": fake_pt}):
+                TesseractOcr()._image(self._jpeg())
+            self.assertFalse(
+                ImageFile.LOAD_TRUNCATED_IMAGES,
+                "flag must be restored to its pre-call value (False), not leaked as True",
+            )
+
+    def test_load_truncated_images_flag_is_restored_after_failure(self):
+        """Same contract when the call raises: still must not leak the flag."""
+        from PIL import ImageFile
+
+        fake_pt = mock.MagicMock()
+        fake_pt.image_to_string.side_effect = RuntimeError("tesseract blew up")
+        with mock.patch.object(ImageFile, "LOAD_TRUNCATED_IMAGES", False):
+            with mock.patch.dict("sys.modules", {"pytesseract": fake_pt}):
+                TesseractOcr()._image(self._jpeg())
+            self.assertFalse(ImageFile.LOAD_TRUNCATED_IMAGES)
+
+    def test_load_truncated_images_flag_restored_when_already_true(self):
+        """A prior leak (real or from another call) must not be masked as fixed.
+
+        If the flag started ``True`` (e.g. another call site, or an earlier
+        leak, already flipped it) the restore must put it back to ``True``, not
+        ``False`` — a naive ``finally: ImageFile.LOAD_TRUNCATED_IMAGES = False``
+        would pass the "starts False" test above while still corrupting state
+        for callers that intentionally rely on it being True.
+        """
+        from PIL import ImageFile
+
+        fake_pt = mock.MagicMock()
+        fake_pt.image_to_string.return_value = "text"
+        with mock.patch.object(ImageFile, "LOAD_TRUNCATED_IMAGES", True):
+            with mock.patch.dict("sys.modules", {"pytesseract": fake_pt}):
+                TesseractOcr()._image(self._jpeg())
+            self.assertTrue(ImageFile.LOAD_TRUNCATED_IMAGES)
+
 
 class TestExtractorFacade(unittest.TestCase):
     def setUp(self):

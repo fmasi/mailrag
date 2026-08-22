@@ -112,6 +112,20 @@ class TesseractOcr:
         # few bytes outright, which threw away whole photographs over 20 unread
         # bytes; decoding what is there is strictly better than nothing, and the
         # missing tail is the bottom edge of the picture.
+        #
+        # ``LOAD_TRUNCATED_IMAGES`` is a process-wide mutable flag on the
+        # ``PIL.ImageFile`` module, not a per-call or per-thread setting, so it
+        # must be saved and restored around this one call rather than just set.
+        # Other PIL call sites in this codebase (signals.py, pages.py,
+        # llm_vision.py) rely on PIL's default of *raising* on a truncated image
+        # to detect corrupt input; leaving this flag flipped to True for the
+        # rest of the process would make those call sites silently accept
+        # truncated data forever, with no trace that OCR was ever invoked.
+        # This save/restore is not thread-safe against concurrent OCR calls in
+        # different threads (it is a plain module attribute, not thread-local),
+        # but it is strictly better than the always-leaks behaviour it replaces;
+        # a full fix would need thread-local scoping and is out of scope here.
+        previous = ImageFile.LOAD_TRUNCATED_IMAGES
         ImageFile.LOAD_TRUNCATED_IMAGES = True
         try:
             with Image.open(io.BytesIO(data)) as im:
@@ -123,6 +137,8 @@ class TesseractOcr:
                 return _ok(pytesseract.image_to_string(im.convert("RGB")))
         except Exception as exc:
             return _failed(exc)
+        finally:
+            ImageFile.LOAD_TRUNCATED_IMAGES = previous
 
     def _pdf(self, data: bytes) -> OcrResult:
         try:
