@@ -274,7 +274,6 @@ def _attachment_store(collection: Optional[str] = None):
             collection,
             exc_info=True,
         )
-        store = None
     try:
         yield store
     finally:

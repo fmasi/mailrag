@@ -204,6 +204,27 @@ class TestAttachmentNamesNeverFallsBackToTheUnscopedStore(unittest.TestCase):
         meta = server._thread_meta(_Ctx(), store=None)
         self.assertNotIn("attachment_names", meta)
 
+    def test_attachment_store_logs_and_yields_none_on_open_failure(self):
+        """Exercises the full chain the two tests above start midway through:
+        a genuine ``AttachmentStore`` open failure inside
+        ``_attachment_store()`` itself, not just its ``store=None`` result.
+
+        The warning is the only way "genuinely no attachments" and "the store
+        failed to open" stay distinguishable in server logs, per
+        ``_attachment_store``'s own docstring — a future refactor that
+        dropped the log call silently would otherwise go unnoticed.
+        """
+        with (
+            mock.patch(
+                "src.mcp_server.server.AttachmentStore",
+                side_effect=OSError("locked"),
+            ),
+            self.assertLogs("src.mcp_server.server", level="WARNING") as cm,
+        ):
+            with server._attachment_store(collection="work-rag") as store:
+                self.assertIsNone(store)
+        self.assertTrue(any("work-rag" in line for line in cm.output))
+
 
 if __name__ == "__main__":
     unittest.main()
