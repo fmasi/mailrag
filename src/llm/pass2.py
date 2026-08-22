@@ -92,7 +92,11 @@ def process_file(
 
     *sha* lets a caller that already hashed *path* (e.g. run_pass's ``--limit``
     bounding loop) pass the digest through instead of this function re-reading
-    and re-hashing the file.
+    and re-hashing the file. When *sha* is supplied, this skips the OSError
+    guard around ``file_sha256`` — if *path* has since disappeared or gone
+    unreadable, that surfaces later instead, as a normal ``load_email``
+    failure classified by ``classify_failure`` (still returns 'error', just
+    through the other branch below).
     """
     if sha is None:
         try:

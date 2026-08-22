@@ -13,7 +13,7 @@ nothing, verifying nothing.
 import unittest
 from unittest import mock
 
-from src.llm.pass2 import run_pass
+from src.llm.pass2 import process_file, run_pass
 
 
 class _Cache:
@@ -143,3 +143,73 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
             )
         self.assertEqual(counts["done"], 5)
         self.assertEqual(spy.call_count, 5)
+
+    def test_serial_sweep_hashes_bounded_files_including_cached_ones(self):
+        """The hash-once invariant covers a cached-but-bounded file too: the
+        bounding loop must still hash it (to call cache.has), store it in
+        sha_of, and the sweep must reuse that hash rather than re-hashing a
+        file it's about to report as "cached" anyway.
+        """
+        paths = [f"p{i}" for i in range(10)]
+        cache = _Cache(cached=["p0", "p1"])
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=lambda p: p) as spy:
+            counts = run_pass(
+                paths,
+                cache,
+                load_email=self._load,
+                summarize=self._summarize,
+                model="test-model",
+                limit=3,
+                workers=1,
+            )
+        # Bounding loop hashes p0, p1 (cached, don't consume the limit), p2,
+        # p3, p4 (three uncached attempts fill limit=3) -- five files total.
+        self.assertEqual(counts["cached"], 2)
+        self.assertEqual(counts["done"], 3)
+        self.assertEqual(spy.call_count, 5)
+
+    def test_bounding_loop_oserror_is_recorded_as_error(self):
+        """An unreadable file under --limit still consumes one attempt (the
+        original behavior) and is absent from sha_of, so the sweep falls
+        through to file_sha256 again, fails again, and records "error" --
+        the only path where the new sha_of lookup changes control flow
+        relative to before this fix.
+        """
+        paths = ["bad", "p1", "p2"]
+        cache = _Cache(cached=[])
+
+        def sha_side_effect(p):
+            if p == "bad":
+                raise OSError("unreadable")
+            return p
+
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=sha_side_effect):
+            counts = run_pass(
+                paths,
+                cache,
+                load_email=self._load,
+                summarize=self._summarize,
+                model="test-model",
+                limit=3,
+                workers=1,
+            )
+        self.assertEqual(counts["error"], 1)
+        self.assertEqual(counts["done"], 2)
+
+    def test_process_file_skips_hash_when_sha_supplied(self):
+        """process_file's new sha parameter is only exercised indirectly
+        through run_pass elsewhere in this file; pin it directly too so a
+        future refactor of run_pass can't silently drop the coverage.
+        """
+        cache = _Cache(cached=[])
+        with mock.patch("src.llm.pass2.file_sha256") as spy:
+            outcome = process_file(
+                "p0",
+                cache,
+                load_email=self._load,
+                summarize=self._summarize,
+                model="test-model",
+                sha="precomputed-hash",
+            )
+        spy.assert_not_called()
+        self.assertEqual(outcome, "done")
