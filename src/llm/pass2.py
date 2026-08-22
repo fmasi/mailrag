@@ -209,20 +209,20 @@ def run_pass(
         # LLM work out; cache.put happens here as each future lands.
         todo = []
         for path in paths:
-            sha = sha_of.get(path)
-            if sha is None:
+            cur_sha = sha_of.get(path)
+            if cur_sha is None:
                 try:
-                    sha = file_sha256(path)
+                    cur_sha = file_sha256(path)
                 except OSError as exc:  # see process_file: never abort the sweep
                     print(f"  pass2 error on {path}: {exc}")
                     _record(path, "error")
                     _tick()
                     continue
-            if cache.has(sha):
+            if cache.has(cur_sha):
                 _record(path, "cached")
                 _tick()
             else:
-                todo.append((path, sha))
+                todo.append((path, cur_sha))
 
         def _work(item):
             path, sha = item

@@ -111,9 +111,7 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
 
         paths = [f"p{i}" for i in range(10)]
         cache = _Cache(cached=[])
-        with mock.patch(
-            "src.llm.pass2.file_sha256", side_effect=lambda p: p
-        ) as spy:
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=lambda p: p) as spy:
             counts = run_pass(
                 paths,
                 cache,
@@ -133,9 +131,7 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
 
         paths = [f"p{i}" for i in range(10)]
         cache = _Cache(cached=[])
-        with mock.patch(
-            "src.llm.pass2.file_sha256", side_effect=lambda p: p
-        ) as spy:
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=lambda p: p) as spy:
             counts = run_pass(
                 paths,
                 cache,
