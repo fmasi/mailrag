@@ -15,10 +15,15 @@ A collection's profile is found from the onboarding manifest that recorded it,
 falling back to scanning ``*.profile.json`` under ``$MAILRAG_PROFILE_DIR``
 (default ``~``) and indexing them by the ``collection`` they name.
 
-Both lookups are memoised, and both invalidate on the profile's mtime, because
-the MCP server outlives the profiles it reads: re-onboarding a collection
-rewrites its profile underneath a running process, and nothing on that path
-clears these caches.
+Both lookups are memoised, and both invalidate on mtimes, because the MCP
+server outlives the profiles and manifests it reads: re-onboarding a
+collection rewrites its profile underneath a running process, and a separate
+CLI process (``index``, ``attachments build``) can record a fresh
+collection->profile mapping into the manifest directory at any time. Nothing
+on either path clears these caches, so ``collection_profiles()``'s cache key
+covers both the directory-scanned profiles and the manifest directory's own
+files, not just the former — a manifest write outside ``profile_dir()`` must
+still invalidate a cache warmed before the write.
 """
 
 from __future__ import annotations
@@ -29,7 +34,8 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 
 DEFAULT_PROFILE_DIR = "~"
 
-# (profile-dir, mtime-signature) -> {collection: profile path}
+# (profile-dir, profile-mtime-signature, manifest-mtime-signature) ->
+# {collection: profile path}
 _PROFILE_CACHE: Dict[tuple, Dict[str, str]] = {}
 # profile path -> (profile mtime when resolved, selected files, corpus root)
 _SCOPE_CACHE: Dict[str, Tuple[float, List[str], str]] = {}
@@ -66,10 +72,27 @@ def _signature(paths: List[str]) -> tuple:
     return tuple((p, _mtime(p)) for p in paths)
 
 
+def _manifest_paths() -> List[str]:
+    """Every manifest file whose write should invalidate the profile cache.
+
+    ``record_profile_for_collection`` writes collection->profile mappings
+    under the manifest directory (``$MAILRAG_HOME``, default ``~/.mailrag``),
+    which need not be ``profile_dir()`` and usually is not. Scanning it here
+    is what lets a manifest write invalidate a cache that was warmed before
+    the write, the same way editing a ``*.profile.json`` does.
+    """
+    try:
+        from src.onboard import manifest_dir
+
+        return sorted(str(p) for p in manifest_dir().glob("*.json"))
+    except Exception:
+        return []  # a missing/unreadable manifest dir must not break scoping
+
+
 def collection_profiles() -> Dict[str, str]:
     """``{collection: profile path}`` for every readable profile on disk."""
     paths = sorted(glob.glob(os.path.join(profile_dir(), "*.profile.json")))
-    key = (profile_dir(), _signature(paths))
+    key = (profile_dir(), _signature(paths), _signature(_manifest_paths()))
     cached = _PROFILE_CACHE.get(key)
     if cached is not None:
         return cached
