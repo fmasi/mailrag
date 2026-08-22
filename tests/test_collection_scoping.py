@@ -118,6 +118,22 @@ class TestProfileDiscovery(unittest.TestCase):
 
             self.assertIn("late-manifest-rag", scoping.collection_profiles())
 
+    def test_a_missing_manifest_dir_does_not_break_profile_discovery(self):
+        """The defensive path in ``_manifest_paths()`` — mirrors
+        ``test_an_unreadable_profile_does_not_break_the_others`` for the
+        analogous profile-dir case.
+
+        A server can start before ``$MAILRAG_HOME`` has ever been created
+        (nothing has been onboarded yet), and the manifest signature must
+        degrade to empty rather than crash discovery of the profiles that
+        do exist under ``profile_dir()``.
+        """
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        _write_profile(d, "good", "work-rag", "/tmp/root")
+        with mock.patch.dict(os.environ, {"MAILRAG_HOME": "/nonexistent/mailrag-home"}):
+            scoping.clear_cache()
+            self.assertIn("work-rag", scoping.collection_profiles())
+
 
 class TestGrepRefusesWhenItCannotScope(unittest.TestCase):
     """Falling back to the whole root would do the exact thing scoping prevents."""

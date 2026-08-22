@@ -83,9 +83,12 @@ def _manifest_paths() -> List[str]:
     """
     try:
         from src.onboard import manifest_dir
+    except ImportError:
+        return []  # onboard isn't always present; can't be helped here
 
+    try:
         return sorted(str(p) for p in manifest_dir().glob("*.json"))
-    except Exception:
+    except OSError:
         return []  # a missing/unreadable manifest dir must not break scoping
 
 
