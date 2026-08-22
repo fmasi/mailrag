@@ -86,16 +86,23 @@ def process_file(
     summarize: Callable[[Dict], Dict],
     model: str,
     provenance=None,
+    sha: Optional[str] = None,
 ) -> str:
-    """Summarize+judge one file unless cached. Returns 'cached' | 'done' | 'error'."""
-    try:
-        sha = file_sha256(path)
-    except OSError as exc:
-        # A missing/unreadable .eml must not abort the sweep. It is deterministic,
-        # so aborting means the same file kills every future run at the same
-        # position and nothing after it is ever processed.
-        print(f"  pass2 error on {path}: {exc}")
-        return "error"
+    """Summarize+judge one file unless cached. Returns 'cached' | 'done' | 'error'.
+
+    *sha* lets a caller that already hashed *path* (e.g. run_pass's ``--limit``
+    bounding loop) pass the digest through instead of this function re-reading
+    and re-hashing the file.
+    """
+    if sha is None:
+        try:
+            sha = file_sha256(path)
+        except OSError as exc:
+            # A missing/unreadable .eml must not abort the sweep. It is
+            # deterministic, so aborting means the same file kills every future
+            # run at the same position and nothing after it is ever processed.
+            print(f"  pass2 error on {path}: {exc}")
+            return "error"
     if cache.has(sha):
         return "cached"
     try:
@@ -139,6 +146,11 @@ def run_pass(
     tell a caller WHICH files succeeded — and with ``workers > 1`` results do not
     even arrive in input order — so any caller that records per-message state
     must use this rather than inferring from the counts.
+
+    When *limit* is set, the bounding loop below must read+hash every candidate
+    file to know whether it is already cache-covered. That hash is kept
+    (``sha_of``) and threaded into the sweep that follows, so each bounded file
+    is only ever read and hashed once per run, not twice.
     """
     counts = {"cached": 0, "done": 0, "error": 0, "unavailable": 0}
 
@@ -148,6 +160,11 @@ def run_pass(
             on_outcome(path, outcome)
 
     paths = list(paths)
+    # Hashes computed while bounding the run below, keyed by path, so the sweep
+    # that follows never re-reads+re-hashes a file the bounding loop already
+    # hashed to decide cache coverage (that double hashing used to double disk
+    # I/O and CPU on every --limit-bounded run — see GH #184).
+    sha_of: Dict[str, str] = {}
     if limit is not None:
         # Bound the WORK, not the file list. Slicing paths[:limit] caps how many
         # files are considered, which on a mostly-cached corpus means a "limit
@@ -160,10 +177,13 @@ def run_pass(
                 break
             bounded.append(path)
             try:
-                if not cache.has(file_sha256(path)):
-                    remaining -= 1
+                sha = file_sha256(path)
             except OSError:
                 remaining -= 1  # an unreadable file still consumes an attempt
+                continue
+            sha_of[path] = sha
+            if not cache.has(sha):
+                remaining -= 1
         paths = bounded
 
     bar = None
@@ -189,13 +209,15 @@ def run_pass(
         # LLM work out; cache.put happens here as each future lands.
         todo = []
         for path in paths:
-            try:
-                sha = file_sha256(path)
-            except OSError as exc:  # see process_file: never abort the sweep
-                print(f"  pass2 error on {path}: {exc}")
-                _record(path, "error")
-                _tick()
-                continue
+            sha = sha_of.get(path)
+            if sha is None:
+                try:
+                    sha = file_sha256(path)
+                except OSError as exc:  # see process_file: never abort the sweep
+                    print(f"  pass2 error on {path}: {exc}")
+                    _record(path, "error")
+                    _tick()
+                    continue
             if cache.has(sha):
                 _record(path, "cached")
                 _tick()
@@ -232,7 +254,10 @@ def run_pass(
         return counts
 
     for path in paths:
-        _record(path, process_file(path, cache, load_email, summarize, model, provenance))
+        outcome = process_file(
+            path, cache, load_email, summarize, model, provenance, sha=sha_of.get(path)
+        )
+        _record(path, outcome)
         _tick()
     if bar is not None:
         bar.close()

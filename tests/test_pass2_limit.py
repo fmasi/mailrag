@@ -80,3 +80,70 @@ class TestLimitBoundsWork(unittest.TestCase):
         paths = [f"p{i}" for i in range(4)]
         counts = self._run(paths, cached=[], limit=99)
         self.assertEqual(counts["done"], 4)
+
+
+class TestLimitHashesEachFileOnce(unittest.TestCase):
+    """GH #184: the bounding loop reads+hashes every candidate to decide cache
+    coverage, then the sweep that follows used to read+hash each of those same
+    files AGAIN before doing any work — doubling disk I/O and CPU on every
+    --limit-bounded run, exactly the run --limit exists to make cheap.
+
+    file_sha256 must be called exactly once per bounded file, regardless of
+    worker count.
+    """
+
+    def _summarize(self, email):
+        return {"summary": "s", "is_noise": False, "confidence": 0.1, "reason": "r"}
+
+    def _load(self, path):
+        return {
+            "source_id": path,
+            "body": "b",
+            "subject": "s",
+            "sender": "x",
+            "message_id": path,
+            "date": "",
+            "to": "",
+        }
+
+    def test_serial_sweep_hashes_each_bounded_file_once(self):
+        from src.llm.pass2 import run_pass
+
+        paths = [f"p{i}" for i in range(10)]
+        cache = _Cache(cached=[])
+        with mock.patch(
+            "src.llm.pass2.file_sha256", side_effect=lambda p: p
+        ) as spy:
+            counts = run_pass(
+                paths,
+                cache,
+                load_email=self._load,
+                summarize=self._summarize,
+                model="test-model",
+                limit=5,
+                workers=1,
+            )
+        self.assertEqual(counts["done"], 5)
+        # One hash per bounded file: the bounding loop's hash must be reused by
+        # the sweep, not recomputed.
+        self.assertEqual(spy.call_count, 5)
+
+    def test_worker_sweep_hashes_each_bounded_file_once(self):
+        from src.llm.pass2 import run_pass
+
+        paths = [f"p{i}" for i in range(10)]
+        cache = _Cache(cached=[])
+        with mock.patch(
+            "src.llm.pass2.file_sha256", side_effect=lambda p: p
+        ) as spy:
+            counts = run_pass(
+                paths,
+                cache,
+                load_email=self._load,
+                summarize=self._summarize,
+                model="test-model",
+                limit=5,
+                workers=4,
+            )
+        self.assertEqual(counts["done"], 5)
+        self.assertEqual(spy.call_count, 5)
