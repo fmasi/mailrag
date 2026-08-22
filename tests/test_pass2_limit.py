@@ -196,6 +196,32 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
         self.assertEqual(counts["error"], 1)
         self.assertEqual(counts["done"], 2)
 
+    def test_bounding_loop_oserror_is_recorded_as_error_workers(self):
+        """The workers path handles a missing sha_of entry inline (before the
+        todo-split) rather than delegating to process_file, so it's a
+        distinct branch from the serial case above and needs its own pin.
+        """
+        paths = ["bad", "p1", "p2"]
+        cache = _Cache(cached=[])
+
+        def sha_side_effect(p):
+            if p == "bad":
+                raise OSError("unreadable")
+            return p
+
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=sha_side_effect):
+            counts = run_pass(
+                paths,
+                cache,
+                load_email=self._load,
+                summarize=self._summarize,
+                model="test-model",
+                limit=3,
+                workers=4,
+            )
+        self.assertEqual(counts["error"], 1)
+        self.assertEqual(counts["done"], 2)
+
     def test_process_file_skips_hash_when_sha_supplied(self):
         """process_file's new sha parameter is only exercised indirectly
         through run_pass elsewhere in this file; pin it directly too so a

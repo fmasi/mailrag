@@ -184,7 +184,7 @@ def run_pass(
                 sha = file_sha256(path)
             except OSError:
                 remaining -= 1  # an unreadable file still consumes an attempt
-                continue
+                continue  # leave path in bounded so the sweep records "error"
             sha_of[path] = sha
             if not cache.has(sha):
                 remaining -= 1
