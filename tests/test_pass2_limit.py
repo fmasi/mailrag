@@ -88,8 +88,11 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
     files AGAIN before doing any work — doubling disk I/O and CPU on every
     --limit-bounded run, exactly the run --limit exists to make cheap.
 
-    file_sha256 must be called exactly once per bounded file, regardless of
-    worker count.
+    file_sha256 is called at most once per bounded file, regardless of worker
+    count. A file that hashes successfully in the bounding loop is never
+    re-hashed by the sweep; a file that raises OSError in the bounding loop
+    is retried in the sweep instead (still one attempt total, just made on
+    the second pass -- see the OSError tests below).
     """
 
     def _summarize(self, email):
@@ -246,3 +249,26 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
             )
         spy.assert_not_called()
         self.assertEqual(outcome, "done")
+
+    def test_process_file_sha_supplied_load_email_oserror(self):
+        """The other half of the docstring's TOCTOU note: a file that
+        disappears between the bounding loop's hash and this call must still
+        resolve to "error" through classify_failure, without ever re-hashing
+        (there's nothing left to hash).
+        """
+        cache = _Cache(cached=[])
+
+        def bad_load(path):
+            raise FileNotFoundError(f"gone: {path}")
+
+        with mock.patch("src.llm.pass2.file_sha256") as spy:
+            outcome = process_file(
+                "p0",
+                cache,
+                load_email=bad_load,
+                summarize=self._summarize,
+                model="test-model",
+                sha="precomputed-hash",
+            )
+        spy.assert_not_called()
+        self.assertEqual(outcome, "error")

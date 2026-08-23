@@ -102,6 +102,14 @@ def process_file(
     instead, as a normal ``load_email`` failure classified by
     ``classify_failure`` (still returns 'error', just through the other
     branch below).
+
+    A pre-supplied *sha* also widens a pre-existing TOCTOU window: if
+    *path*'s content changes between the hash and this call (rather than
+    disappearing outright), the summary computed here gets cached under a
+    now-stale sha. Not persistent corruption — the next run hashes the
+    current content, misses the stale entry, and reprocesses correctly —
+    just an orphaned cache row, and effectively theoretical for the
+    immutable ``.eml`` files this pipeline actually processes.
     """
     if sha is None:
         try:
