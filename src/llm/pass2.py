@@ -166,10 +166,12 @@ def run_pass(
 
     When *limit* is set, the bounding loop below must read+hash every candidate
     file to know whether it is already cache-covered. That hash is kept
-    (``sha_of``) and threaded into the sweep that follows, so each bounded file
-    is read and hashed at most once per run: a file that hashes successfully
-    is never re-hashed by the sweep, and a file that raises OSError in the
-    bounding loop is retried once in the sweep instead of twice unconditionally.
+    (``sha_of``) and threaded into the sweep that follows: a file that hashes
+    successfully in the bounding loop is never re-hashed by the sweep. A file
+    that raises OSError there is absent from ``sha_of``, so the sweep falls
+    back to a fresh ``file_sha256`` call, which also fails -- one bounding-loop
+    hash plus one sweep hash, not the two-per-mode this fix eliminates for
+    every other bounded file.
     """
     counts = {"cached": 0, "done": 0, "error": 0, "unavailable": 0}
 

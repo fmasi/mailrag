@@ -111,8 +111,6 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
         }
 
     def test_serial_sweep_hashes_each_bounded_file_once(self):
-        from src.llm.pass2 import run_pass
-
         paths = [f"p{i}" for i in range(10)]
         cache = _Cache(cached=[])
         with mock.patch("src.llm.pass2.file_sha256", side_effect=lambda p: p) as spy:
@@ -131,8 +129,6 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
         self.assertEqual(spy.call_count, 5)
 
     def test_worker_sweep_hashes_each_bounded_file_once(self):
-        from src.llm.pass2 import run_pass
-
         paths = [f"p{i}" for i in range(10)]
         cache = _Cache(cached=[])
         with mock.patch("src.llm.pass2.file_sha256", side_effect=lambda p: p) as spy:
