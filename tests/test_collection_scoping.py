@@ -91,6 +91,49 @@ class TestProfileDiscovery(unittest.TestCase):
         _write_profile(d, "late", "late-rag", "/tmp/root")
         self.assertIn("late-rag", scoping.collection_profiles())
 
+    def test_the_cache_notices_a_recorded_manifest_mapping(self):
+        """A manifest write must invalidate the cache even though it lands
+        outside ``profile_dir()``.
+
+        ``record_profile_for_collection`` (called by ``index`` and
+        ``attachments build`` for a profile that need not live under
+        ``$MAILRAG_PROFILE_DIR``) writes into ``$MAILRAG_HOME``, a directory
+        the old cache key never looked at. A long-running server that warmed
+        the cache before the write used to keep serving the pre-write mapping
+        forever, because nothing under ``profile_dir()`` had changed.
+        """
+        scoping.clear_cache()
+        self.assertEqual(scoping.collection_profiles(), {})  # warm the cache
+
+        from src.onboard import record_profile_for_collection
+
+        with tempfile.TemporaryDirectory() as elsewhere:
+            profile_path = os.path.join(elsewhere, "outside.profile.json")
+            with open(profile_path, "w") as fh:
+                json.dump(
+                    {"collection": "late-manifest-rag", "root": "/tmp/root", "selection_rules": []},
+                    fh,
+                )
+            record_profile_for_collection("late-manifest-rag", profile_path)
+
+            self.assertIn("late-manifest-rag", scoping.collection_profiles())
+
+    def test_a_missing_manifest_dir_does_not_break_profile_discovery(self):
+        """The defensive path in ``_manifest_paths()`` — mirrors
+        ``test_an_unreadable_profile_does_not_break_the_others`` for the
+        analogous profile-dir case.
+
+        A server can start before ``$MAILRAG_HOME`` has ever been created
+        (nothing has been onboarded yet), and the manifest signature must
+        degrade to empty rather than crash discovery of the profiles that
+        do exist under ``profile_dir()``.
+        """
+        d = os.environ["MAILRAG_PROFILE_DIR"]
+        _write_profile(d, "good", "work-rag", "/tmp/root")
+        with mock.patch.dict(os.environ, {"MAILRAG_HOME": "/nonexistent/mailrag-home"}):
+            scoping.clear_cache()
+            self.assertIn("work-rag", scoping.collection_profiles())
+
 
 class TestGrepRefusesWhenItCannotScope(unittest.TestCase):
     """Falling back to the whole root would do the exact thing scoping prevents."""
