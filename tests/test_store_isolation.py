@@ -142,5 +142,89 @@ class TestAttachmentToolsRequireACollection(unittest.TestCase):
         self.assertIn("collection", str(ctx.exception))
 
 
+class _Ctx:
+    def __init__(self, thread_id="shared-thread", message_ids=("<m1>",)):
+        self.thread_id = thread_id
+        self.emails = [_Email(mid) for mid in message_ids]
+
+
+class _Email:
+    def __init__(self, message_id):
+        self.message_id = message_id
+
+
+class TestAttachmentNamesNeverFallsBackToTheUnscopedStore(unittest.TestCase):
+    """A collection whose scoped store fails to open must not leak another
+    corpus's attachment names.
+
+    `_attachment_store()` never raises: when ``AttachmentStore(...)`` blows up
+    opening a collection's subdirectory (locked/corrupted ``index.db``,
+    disk-full, permissions), it swallows the exception and yields
+    ``store=None``. `_attachment_names(ctx, store=None)` must not then reach
+    for the plain, unscoped default store as a silent fallback — that store
+    can be a completely different corpus (or a stale pre-split legacy store),
+    and returning its names under a result labeled with the *correct*
+    collection is a cross-corpus data leak.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="unscoped_leak_")
+        # The plain, UNSCOPED default store living at the store root (no
+        # collection subdirectory) — exactly what `resolve_attach_store()`
+        # with no arguments resolves to. It holds an attachment filed under
+        # the SAME thread/message ids the scoped lookup will use, so a leak
+        # is directly observable rather than incidentally invisible.
+        self.unscoped = AttachmentStore(self.root)
+        self.unscoped.put(
+            b"unrelated-doc",
+            message_id="<m1>",
+            thread_id="shared-thread",
+            filename="other-corpus-secret.pdf",
+            mime="application/pdf",
+            size=13,
+            source_type="eml",
+            source_ref="/other.eml",
+        )
+        self.env = mock.patch.dict(os.environ, {"RAG_ATTACH_STORE": self.root})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.unscoped.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_a_failed_scoped_store_does_not_leak_the_default_store_names(self):
+        # This is the state `_attachment_store(collection)` leaves behind when
+        # `AttachmentStore(...)` raises for that collection's subdirectory: it
+        # swallows the exception and yields `store=None`.
+        names = server._attachment_names(_Ctx(), store=None)
+        self.assertIsNone(names)
+
+    def test_thread_meta_omits_the_field_rather_than_leaking_it(self):
+        meta = server._thread_meta(_Ctx(), store=None)
+        self.assertNotIn("attachment_names", meta)
+
+    def test_attachment_store_logs_and_yields_none_on_open_failure(self):
+        """Exercises the full chain the two tests above start midway through:
+        a genuine ``AttachmentStore`` open failure inside
+        ``_attachment_store()`` itself, not just its ``store=None`` result.
+
+        The warning is the only way "genuinely no attachments" and "the store
+        failed to open" stay distinguishable in server logs, per
+        ``_attachment_store``'s own docstring — a future refactor that
+        dropped the log call silently would otherwise go unnoticed.
+        """
+        with (
+            mock.patch(
+                "src.mcp_server.server.AttachmentStore",
+                side_effect=OSError("locked"),
+            ),
+            self.assertLogs("src.mcp_server.server", level="WARNING") as cm,
+        ):
+            with server._attachment_store(collection="work-rag") as store:
+                self.assertIsNone(store)
+        self.assertTrue(any("work-rag" in line for line in cm.output))
+
+
 if __name__ == "__main__":
     unittest.main()

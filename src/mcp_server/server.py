@@ -36,6 +36,7 @@ configured through the usual ``RAG_*`` env vars (see ``src.llm.client``).
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from contextlib import contextmanager
@@ -47,6 +48,8 @@ from src.mcp_server import usage
 from src.mcp_server.grep import grep_email as _grep_email
 from src.onboard import latest_manifest_collection
 from src.query.hybrid import build_hybrid_searcher
+
+log = logging.getLogger(__name__)
 
 SERVER_NAME = "mailrag"
 DEFAULT_QDRANT_URL = "http://localhost:6333"
@@ -254,13 +257,23 @@ def _attachment_store(collection: Optional[str] = None):
     """Yield an AttachmentStore for the duration of one tool call, or ``None``.
 
     Never raises: retrieval must keep working when the attachment store is
-    absent, just without attachment names.
+    absent, just without attachment names. A failure to open is still logged
+    (rather than silently swallowed) so it is visible in server logs even
+    though it never reaches the caller — the caller only sees the absence of
+    ``attachment_names``, which is indistinguishable, by design, from a corpus
+    that was simply never ingested. The log line is how "genuinely none" and
+    "the store failed to open" are told apart after the fact.
     """
     store = None
     try:
         store = AttachmentStore(resolve_attach_store(collection=collection))
     except Exception:
-        store = None
+        log.warning(
+            "attachment store failed to open for collection=%r; continuing "
+            "without attachment names",
+            collection,
+            exc_info=True,
+        )
     try:
         yield store
     finally:
@@ -289,11 +302,20 @@ def _attachment_names(ctx, store=None) -> Optional[List[str]]:
     is the same defect as the unbounded grep scan, wearing different clothes.
 
     So: names when the store can answer, and no field at all when it cannot.
+
+    ``store=None`` means the caller's collection-scoped store is unavailable —
+    either ``_attachment_store()`` failed to open it (already logged there) or
+    no collection could be resolved to scope a lookup with in the first place.
+    Either way this must NOT fall back to the plain, unscoped default store:
+    that store belongs to no particular collection, may hold a different
+    corpus (or a stale pre-split legacy store) entirely, and returning its
+    names under a result labeled with a specific ``collection`` would be a
+    cross-corpus data leak — exactly what per-collection store separation
+    exists to prevent. So ``store=None`` means ``None`` out, unconditionally.
     """
-    owns = store is None
+    if store is None:
+        return None
     try:
-        if store is None:
-            store = AttachmentStore(resolve_attach_store())
         if store.count() == 0:
             return None  # never ingested — say nothing rather than say "none"
         message_ids = [getattr(e, "message_id", "") for e in getattr(ctx, "emails", []) or []]
@@ -302,12 +324,6 @@ def _attachment_names(ctx, store=None) -> Optional[List[str]]:
         # The attachment store is an optional companion to retrieval; search must
         # keep working when it is missing, just without this field.
         return None
-    finally:
-        if owns and store is not None:
-            try:
-                store.close()
-            except Exception:
-                pass
 
 
 def _thread_meta(ctx, store=None) -> Dict[str, Any]:
