@@ -167,7 +167,9 @@ def run_pass(
     When *limit* is set, the bounding loop below must read+hash every candidate
     file to know whether it is already cache-covered. That hash is kept
     (``sha_of``) and threaded into the sweep that follows, so each bounded file
-    is only ever read and hashed once per run, not twice.
+    is read and hashed at most once per run: a file that hashes successfully
+    is never re-hashed by the sweep, and a file that raises OSError in the
+    bounding loop is retried once in the sweep instead of twice unconditionally.
     """
     counts = {"cached": 0, "done": 0, "error": 0, "unavailable": 0}
 
