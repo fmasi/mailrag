@@ -183,7 +183,7 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
                 raise OSError("unreadable")
             return p
 
-        with mock.patch("src.llm.pass2.file_sha256", side_effect=sha_side_effect):
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=sha_side_effect) as spy:
             counts = run_pass(
                 paths,
                 cache,
@@ -195,6 +195,10 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
             )
         self.assertEqual(counts["error"], 1)
         self.assertEqual(counts["done"], 2)
+        # "bad" is hashed twice: bounding loop (fails) + sweep fallthrough
+        # (fails again, since sha_of has no entry for it). "p1" and "p2" are
+        # each hashed once, in the bounding loop, and reused by the sweep.
+        self.assertEqual(spy.call_count, 4)
 
     def test_bounding_loop_oserror_is_recorded_as_error_workers(self):
         """The workers path handles a missing sha_of entry inline (before the
@@ -209,7 +213,7 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
                 raise OSError("unreadable")
             return p
 
-        with mock.patch("src.llm.pass2.file_sha256", side_effect=sha_side_effect):
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=sha_side_effect) as spy:
             counts = run_pass(
                 paths,
                 cache,
@@ -221,6 +225,9 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
             )
         self.assertEqual(counts["error"], 1)
         self.assertEqual(counts["done"], 2)
+        # Same shape as the serial case: "bad" hashed twice (bounding loop +
+        # workers path's own inline retry), "p1"/"p2" hashed once each.
+        self.assertEqual(spy.call_count, 4)
 
     def test_process_file_skips_hash_when_sha_supplied(self):
         """process_file's new sha parameter is only exercised indirectly
