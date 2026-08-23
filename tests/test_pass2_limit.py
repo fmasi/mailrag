@@ -88,11 +88,12 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
     files AGAIN before doing any work — doubling disk I/O and CPU on every
     --limit-bounded run, exactly the run --limit exists to make cheap.
 
-    file_sha256 is called at most once per bounded file, regardless of worker
-    count. A file that hashes successfully in the bounding loop is never
-    re-hashed by the sweep; a file that raises OSError in the bounding loop
-    is retried in the sweep instead (still one attempt total, just made on
-    the second pass -- see the OSError tests below).
+    ``file_sha256`` is called at most once per bounded file that hashes
+    successfully. A file that raises ``OSError`` in the bounding loop is
+    absent from ``sha_of``, so the sweep falls back to a fresh
+    ``file_sha256`` call (which also fails); see the OSError tests below. In
+    both cases only one slot is consumed from ``remaining`` -- "one attempt"
+    is about the bounding loop's own accounting, not the hash call count.
     """
 
     def _summarize(self, email):
@@ -145,6 +146,27 @@ class TestLimitHashesEachFileOnce(unittest.TestCase):
                 workers=4,
             )
         self.assertEqual(counts["done"], 5)
+        self.assertEqual(spy.call_count, 5)
+
+    def test_worker_sweep_hashes_bounded_files_including_cached_ones(self):
+        """Workers-path mirror of the serial mixed-cache test below: the
+        ``if cache.has(cur_sha): _record(path, "cached")`` branch, where
+        cur_sha came from sha_of, has no other coverage for workers > 1.
+        """
+        paths = [f"p{i}" for i in range(10)]
+        cache = _Cache(cached=["p0", "p1"])
+        with mock.patch("src.llm.pass2.file_sha256", side_effect=lambda p: p) as spy:
+            counts = run_pass(
+                paths,
+                cache,
+                load_email=self._load,
+                summarize=self._summarize,
+                model="test-model",
+                limit=3,
+                workers=4,
+            )
+        self.assertEqual(counts["cached"], 2)
+        self.assertEqual(counts["done"], 3)
         self.assertEqual(spy.call_count, 5)
 
     def test_serial_sweep_hashes_bounded_files_including_cached_ones(self):
