@@ -86,16 +86,40 @@ def process_file(
     summarize: Callable[[Dict], Dict],
     model: str,
     provenance=None,
+    sha: Optional[str] = None,
 ) -> str:
-    """Summarize+judge one file unless cached. Returns 'cached' | 'done' | 'error'."""
-    try:
-        sha = file_sha256(path)
-    except OSError as exc:
-        # A missing/unreadable .eml must not abort the sweep. It is deterministic,
-        # so aborting means the same file kills every future run at the same
-        # position and nothing after it is ever processed.
-        print(f"  pass2 error on {path}: {exc}")
-        return "error"
+    """Summarize+judge one file unless cached. Returns 'cached' | 'done' | 'error'.
+
+    *sha* lets a caller that already hashed *path* (e.g. run_pass's serial
+    sweep, reusing the ``--limit`` bounding loop's hash) pass the digest
+    through instead of this function re-reading and re-hashing the file. It's
+    a serial-path optimization only: run_pass's workers path never calls
+    process_file at all (load_email/summarize/cache.put run inline there so
+    the single SQLite connection stays off worker threads) and reuses its own
+    precomputed hash through a plain ``(path, sha)`` tuple instead. When *sha*
+    is supplied here, this skips the OSError guard around ``file_sha256`` —
+    if *path* has since disappeared or gone unreadable, that surfaces later
+    instead, as a normal ``load_email`` failure classified by
+    ``classify_failure`` (still returns 'error', just through the other
+    branch below).
+
+    A pre-supplied *sha* also widens a pre-existing TOCTOU window: if
+    *path*'s content changes between the hash and this call (rather than
+    disappearing outright), the summary computed here gets cached under a
+    now-stale sha. Not persistent corruption — the next run hashes the
+    current content, misses the stale entry, and reprocesses correctly —
+    just an orphaned cache row, and effectively theoretical for the
+    immutable ``.eml`` files this pipeline actually processes.
+    """
+    if sha is None:
+        try:
+            sha = file_sha256(path)
+        except OSError as exc:
+            # A missing/unreadable .eml must not abort the sweep. It is
+            # deterministic, so aborting means the same file kills every future
+            # run at the same position and nothing after it is ever processed.
+            print(f"  pass2 error on {path}: {exc}")
+            return "error"
     if cache.has(sha):
         return "cached"
     try:
@@ -139,6 +163,15 @@ def run_pass(
     tell a caller WHICH files succeeded — and with ``workers > 1`` results do not
     even arrive in input order — so any caller that records per-message state
     must use this rather than inferring from the counts.
+
+    When *limit* is set, the bounding loop below must read+hash every candidate
+    file to know whether it is already cache-covered. That hash is kept
+    (``sha_of``) and threaded into the sweep that follows: a file that hashes
+    successfully in the bounding loop is never re-hashed by the sweep. A file
+    that raises OSError there is absent from ``sha_of``, so the sweep falls
+    back to a fresh ``file_sha256`` call, which also fails -- one bounding-loop
+    hash plus one sweep hash, not the two-per-mode this fix eliminates for
+    every other bounded file.
     """
     counts = {"cached": 0, "done": 0, "error": 0, "unavailable": 0}
 
@@ -148,6 +181,11 @@ def run_pass(
             on_outcome(path, outcome)
 
     paths = list(paths)
+    # Hashes computed while bounding the run below, keyed by path, so the sweep
+    # that follows never re-reads+re-hashes a file the bounding loop already
+    # hashed to decide cache coverage (that double hashing used to double disk
+    # I/O and CPU on every --limit-bounded run — see GH #184).
+    sha_of: Dict[str, str] = {}
     if limit is not None:
         # Bound the WORK, not the file list. Slicing paths[:limit] caps how many
         # files are considered, which on a mostly-cached corpus means a "limit
@@ -160,10 +198,13 @@ def run_pass(
                 break
             bounded.append(path)
             try:
-                if not cache.has(file_sha256(path)):
-                    remaining -= 1
+                sha = file_sha256(path)
             except OSError:
                 remaining -= 1  # an unreadable file still consumes an attempt
+                continue  # leave path in bounded so the sweep records "error"
+            sha_of[path] = sha
+            if not cache.has(sha):
+                remaining -= 1
         paths = bounded
 
     bar = None
@@ -189,18 +230,20 @@ def run_pass(
         # LLM work out; cache.put happens here as each future lands.
         todo = []
         for path in paths:
-            try:
-                sha = file_sha256(path)
-            except OSError as exc:  # see process_file: never abort the sweep
-                print(f"  pass2 error on {path}: {exc}")
-                _record(path, "error")
-                _tick()
-                continue
-            if cache.has(sha):
+            cur_sha = sha_of.get(path)
+            if cur_sha is None:
+                try:
+                    cur_sha = file_sha256(path)
+                except OSError as exc:  # see process_file: never abort the sweep
+                    print(f"  pass2 error on {path}: {exc}")
+                    _record(path, "error")
+                    _tick()
+                    continue
+            if cache.has(cur_sha):
                 _record(path, "cached")
                 _tick()
             else:
-                todo.append((path, sha))
+                todo.append((path, cur_sha))
 
         def _work(item):
             path, sha = item
@@ -232,7 +275,10 @@ def run_pass(
         return counts
 
     for path in paths:
-        _record(path, process_file(path, cache, load_email, summarize, model, provenance))
+        outcome = process_file(
+            path, cache, load_email, summarize, model, provenance, sha=sha_of.get(path)
+        )
+        _record(path, outcome)
         _tick()
     if bar is not None:
         bar.close()
