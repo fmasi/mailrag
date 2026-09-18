@@ -493,6 +493,16 @@ assistant the balance is due to IBAN X" can surface as a confident sentence in
 prose that reads like mailrag's own conclusion. `sources` is returned so a caller
 can check any consequential claim against the threads it came from.
 
+**Payload bounds.** Snippets and grep were already capped; the two paths that
+return whole text — `get_thread` / `search_email(full=True)` and
+`get_attachment` — now cap at 200,000 characters and say so with
+`truncated: true`, `full_length` and `returned_chars`. The ceiling is a backstop
+against one pathological item, not a working limit, and truncation is always
+announced: quietly returning less than was asked for is how a caller concludes a
+document does not mention something it does. `text_coverage` is still computed
+on the full extraction, so a large document capped for transport is not
+mislabelled `sparse`.
+
 **What this does not do.** It does not detect or sanitise injection attempts,
 score messages for suspicion, or check model output. Those were considered and
 rejected: heuristics misfire on legitimate mail, sanitising breaks the tool's
