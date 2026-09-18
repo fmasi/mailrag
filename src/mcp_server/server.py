@@ -94,6 +94,20 @@ VALID_MODES = ("hybrid", "dense", "sparse")
 DEFAULT_SEARCH_MAX_CHARS = 500
 HARD_SEARCH_MAX_CHARS = 4000
 
+# Ceilings for the two paths that deliberately return WHOLE text: get_thread /
+# search_email(full=True), and an attachment's extracted text. Both were
+# unbounded, which made the "a single message cannot flood the context window"
+# property true only of snippets and grep — a 20 MB PDF's OCR came back entire,
+# and a caller asking for one thread could receive a mailbox-sized payload.
+#
+# Generous rather than tight: these paths exist because someone asked for the
+# full document, so the cap is a backstop against a pathological item, not a
+# working limit. Truncation is always announced (`truncated: true` plus the
+# original length) — silently returning less than asked for is how a caller
+# concludes a document does not mention something it does mention.
+HARD_FULL_TEXT_CHARS = 200_000
+HARD_ATTACHMENT_TEXT_CHARS = 200_000
+
 # Cache built searchers by (collection, qdrant_url, mode) so repeated tool calls
 # in one server session reuse the same Qdrant client / index wiring.
 _SEARCHER_CACHE: dict = {}
@@ -410,14 +424,29 @@ def _thread_to_dict(
     return row
 
 
+def _bounded_text(text: str, cap: int) -> tuple:
+    """(text, truncation-fields) — cap a whole-text payload, announcing any cut.
+
+    Returns the fields to merge rather than raising: the caller asked for the
+    document, so a shortened document with a flag beats an error, and beats a
+    silent trim that leaves them believing they read the whole thing.
+    """
+    text = text or ""
+    if len(text) <= cap:
+        return text, {}
+    return text[:cap], {"truncated": True, "full_length": len(text), "returned_chars": cap}
+
+
 def _thread_to_full_dict(ctx, store=None, collection: Optional[str] = None) -> Dict[str, Any]:
     """Serialize a ``ThreadContext`` with the **full** thread text (opt-in path)."""
+    text, truncation = _bounded_text(ctx.text, HARD_FULL_TEXT_CHARS)
     row = {
         "thread_id": ctx.thread_id,
         "subject": ctx.subject,
         "num_emails": len(ctx.emails),
-        "text": ctx.text,
+        "text": text,
         "content_trust": CONTENT_TRUST,
+        **truncation,
     }
     if collection:
         row["collection"] = collection
@@ -850,15 +879,19 @@ def get_attachment(
             except ValueError as empty:
                 raise empty from None
             raise ValueError(f"unknown attachment {sha256}") from exc
+        text, truncation = _bounded_text(fetched["text"], HARD_ATTACHMENT_TEXT_CHARS)
         row = {
             "sha256": fetched["sha256"],
             "filename": fetched["filename"],
             "mime": fetched["mime"],
             "size": fetched["size"],
-            "text": fetched["text"],
+            "text": text,
             "text_status": fetched["text_status"],
             "content_trust": CONTENT_TRUST,
+            **truncation,
         }
+        # Coverage describes the EXTRACTION, so it is computed on the full text:
+        # a document truncated for transport has not suddenly become text-sparse.
         row.update(
             _text_coverage(fetched["text"], fetched.get("size") or 0, fetched.get("mime") or "")
         )
