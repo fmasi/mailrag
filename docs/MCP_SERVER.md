@@ -503,6 +503,16 @@ document does not mention something it does. `text_coverage` is still computed
 on the full extraction, so a large document capped for transport is not
 mislabelled `sparse`.
 
+**The cleaning pass is fenced too, at lower stakes.** Pass-2 summarisation quotes
+each email inside `<<<EMAIL>>>` markers and tells the model that text addressed to
+an AI assistant is a signal to note, not a command to obey. The blast radius here
+is small — the worst an injection achieves is a wrong noise verdict on a message
+the attacker sent anyway. Note that a rubric is *calibrated*, so editing its
+prompt is not free: measured on 40 work emails, 39 verdicts were unchanged and
+one borderline notification flipped. A local rubric override
+(`rubrics/local/*.yaml`) is not modified by this change — apply the fencing and
+re-calibrate it deliberately if you want it there.
+
 **What this does not do.** It does not detect or sanitise injection attempts,
 score messages for suspicion, or check model output. Those were considered and
 rejected: heuristics misfire on legitimate mail, sanitising breaks the tool's

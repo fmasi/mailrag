@@ -126,6 +126,12 @@ resistance rate.
 > carried a forged `<<<END EMAIL THREAD>>>` marker followed by a fake SYSTEM
 > block. Both are now reported as content rather than asserted as fact.
 
+| P3 | Fencing the quoted email in the Pass-2 rubric left **39 of 40** work-mail noise verdicts unchanged; one borderline file-share notification flipped | ad-hoc old-vs-new comparison over 40 sampled emails | `gemma-4-26b-a4b-it-mlx`, local | Author-reported ⚠️ n=40 | 2026-09-18 |
+
+> **P3 is a drift check, not a safety result.** A calibrated rubric makes a
+> prompt edit non-free, so the question it answers is "did the wording move the
+> judgements", not "did it stop an attack". 2.5% on n=40 is small but not zero.
+
 > **This is a property of the model, not of the codebase.** Re-measure when the
 > model changes, and do not carry P1 forward as though it were a guarantee. No
 > prompt wording makes a model reliably ignore embedded instructions.
