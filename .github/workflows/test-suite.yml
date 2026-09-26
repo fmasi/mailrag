@@ -1,7 +1,11 @@
 name: Test Suite
 
 "on":
+  # `pytest` is a required check: NO paths-ignore here, a filtered-out run would
+  # leave the PR waiting forever. It skips drafts instead (`if` below), and a job
+  # skipped by its `if` reports success; `gh pr ready` then runs it for real.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches:
       - main
@@ -12,11 +16,16 @@ permissions:
 
 concurrency:
   group: "test-suite-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
-  cancel-in-progress: true
+  # Supersede stale PR runs, but never cancel a push to main: every commit on
+  # main gets a finished run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   pytest:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    # ~3.5 min median, 7.2 min slowest green run: 20 leaves headroom, not 6 hours.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository

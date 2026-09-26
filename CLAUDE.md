@@ -23,6 +23,10 @@ or a doc.
 
 No tests required. Skip steps 1 and 2 above.
 
+## CI
+
+CI follows the local-first standard (`~/.claude/skills/ci-guidelines`): `just ci` before pushing, draft PRs, `gh pr ready` runs CI + the Claude review once.
+
 ## Verify the audience and the intent before you write
 
 **The rule:** before writing or editing anything published, establish *who reads
