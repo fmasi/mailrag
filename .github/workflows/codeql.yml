@@ -9,9 +9,11 @@ name: CodeQL
 # never receives the required CodeQL status and there is no way to trigger it.
 #
 # An unfiltered `pull_request:` trigger fixes that: every PR gets analysed
-# whatever it is based on.
+# whatever it is based on. `types` below filters ACTIONS, not base branches, so
+# it keeps that property; `ready_for_review` is there because drafts skip.
 "on":
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches:
       - main
@@ -26,7 +28,9 @@ permissions:
 
 concurrency:
   group: "codeql-${{ github.event.pull_request.number || github.ref }}"
-  cancel-in-progress: true
+  # Supersede stale PR runs, but never cancel a push to main or the weekly scan:
+  # the security scan sees every commit on main.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:
@@ -34,6 +38,10 @@ jobs:
     # "CodeQL (actions)" and "CodeQL (python)". Both are branch-protection gates;
     # renaming this job means updating the required checks on `main`.
     name: CodeQL
+    # Skips drafts but never push/schedule/dispatch. A skipped matrix job reports
+    # once as plain "CodeQL", so on a draft the two required checks show as
+    # expected; drafts cannot merge, and `ready_for_review` runs both legs.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 20
 

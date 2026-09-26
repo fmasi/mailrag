@@ -6,6 +6,7 @@ name: Dependency Review
 # the action diffs the PR base against head and has nothing to compare on push.
 "on":
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -16,7 +17,9 @@ concurrency:
 
 jobs:
   dependency-review:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

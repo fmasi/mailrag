@@ -1,0 +1,21 @@
+# Git hooks for the local-first CI flow. Activate once per clone: `lefthook install`.
+pre-commit:
+  parallel: true
+  commands:
+    # check --fix and format in ONE command: run in parallel they'd write the same files at once
+    ruff:
+      glob: "*.py"
+      run: pipx run --spec ruff==0.15.20 ruff check --fix {staged_files} && pipx run --spec ruff==0.15.20 ruff format {staged_files}
+      stage_fixed: true
+    secrets:
+      run: gitleaks git --staged --no-banner
+    shell:
+      glob: "*.sh"
+      run: shellcheck {staged_files}
+    workflows:
+      glob: ".github/workflows/*.yml"
+      run: actionlint {staged_files}
+pre-push:
+  commands:
+    ci:
+      run: just ci   # skip once with: git push --no-verify

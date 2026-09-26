@@ -4,7 +4,10 @@ name: CI Quality Gates
 # `pytest` required check (test-suite.yml) so each gate is an independently
 # named status that can be wired into branch protection later.
 "on":
+  # Every job skips drafts (`if` below): a draft is the local-work phase
+  # (`just ci`), and `gh pr ready` is what runs these gates.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches:
       - main
@@ -15,12 +18,16 @@ permissions:
 
 concurrency:
   group: "ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
-  cancel-in-progress: true
+  # Supersede stale PR runs, but never cancel a push to main: every commit on
+  # main gets a finished run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ruff:
     name: ruff (lint + format)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -43,7 +50,9 @@ jobs:
 
   mypy:
     name: mypy (type check)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -67,7 +76,9 @@ jobs:
 
   pip-audit:
     name: pip-audit (dependency CVEs)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
