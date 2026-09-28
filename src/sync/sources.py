@@ -152,7 +152,7 @@ CURSOR_UID = "uid"  # IMAP without CONDSTORE
 CURSOR_UID_MODSEQ = "uid+modseq"  # IMAP with CONDSTORE
 CURSOR_HISTORY_ID = "history_id"  # Gmail API
 CURSOR_JMAP_STATE = "jmap_state"  # JMAP Email/changes
-CURSOR_DELTA_TOKEN = "delta_token"  # Microsoft Graph
+CURSOR_DELTA_TOKEN = "delta_token"  # Microsoft Graph  # noqa: S105 - cursor type name, not a secret
 CURSOR_MTIME = "mtime"  # local filesystem sources
 
 

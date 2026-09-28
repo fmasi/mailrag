@@ -1,0 +1,5 @@
+# gitleaks false positives, one fingerprint per line (commit:file:rule:line).
+# A synthetic plaintext literal in a test that asserts the secret resolver never echoes what it
+# rejects (tests/test_sync_accounts.py, test_a_rejected_literal_is_never_echoed). Not a credential.
+c76169971ed55d8a13817043c6d8b336c5a84d21:tests/test_sync_accounts.py:generic-api-key:284
+tests/test_sync_accounts.py:generic-api-key:284

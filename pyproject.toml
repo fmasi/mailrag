@@ -200,9 +200,8 @@ tornado = "^6.5.8"
 # .github/workflows/ci.yml, so running them locally meant installing them by
 # hand, and whatever version you happened to get. Pinned exactly (not caret) to
 # the versions ci.yml uses: a lint/type gate that disagrees with CI about which
-# rules exist is worse than no local gate at all. Bump both here and in the
-# matching `ruff (lint + format)` / `mypy (type check)` jobs in
-# .github/workflows/ci.yml together.
+# rules exist is worse than no local gate at all. Bump both here, in the `lint`
+# job of .github/workflows/ci.yml, in the justfile and in lefthook.yml together.
 ruff = "0.15.20"
 mypy = "2.1.0"
 
@@ -246,7 +245,12 @@ ignore = [
 "tests/test_summary_rerank.py" = ["E402"]
 # Standalone eval scripts bootstrap sys.path / os.chdir / offline env vars
 # BEFORE importing src.*, so their imports intentionally sit below that setup.
-"scripts/**" = ["E402"]
+# S310/S311 (only seen by `just security`, the SAST run): operator-run eval tools that
+# call the operator's own endpoints and sample eval sets with seeded, non-crypto RNGs.
+"scripts/**" = ["E402", "S310", "S311"]
+# SAST in tests (`just security`): fake /tmp paths handed to mocks (S108), synthetic
+# credentials asserted never to leak (S105/S106), and a fixed-argv tool call (S607).
+"tests/**" = ["S105", "S106", "S108", "S607"]
 
 # --- mypy: lenient type-check gate -------------------------------------------
 # Deliberately NOT strict: this repo was never annotated end-to-end, so the gate

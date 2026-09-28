@@ -10,7 +10,10 @@ updates:
    directory: "/"
    schedule:
      interval: weekly
- - package-ecosystem: "poetry"
+ # Poetry projects use the `pip` ecosystem: Dependabot reads pyproject.toml + poetry.lock
+ # through it. This entry used to say "poetry", which is not an ecosystem name, and no
+ # version-update job had ever run for any ecosystem (security updates still did).
+ - package-ecosystem: "pip"
    directory: "/"
    schedule:
      interval: weekly

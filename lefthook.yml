@@ -1,4 +1,6 @@
-# Git hooks for the local-first CI flow. Activate once per clone: `lefthook install`.
+# Git hooks for the local-first CI flow (the ONE hook system, CHEATSHEET R15).
+# Activate once per clone: `lefthook install`. Block style only: `{staged_files}` inside a
+# `{ ... }` flow mapping is invalid YAML.
 pre-commit:
   parallel: true
   commands:
@@ -8,7 +10,7 @@ pre-commit:
       run: pipx run --spec ruff==0.15.20 ruff check --fix {staged_files} && pipx run --spec ruff==0.15.20 ruff format {staged_files}
       stage_fixed: true
     secrets:
-      run: gitleaks git --staged --no-banner
+      run: gitleaks git --staged --redact --no-banner
     shell:
       glob: "*.sh"
       run: shellcheck {staged_files}
@@ -18,4 +20,4 @@ pre-commit:
 pre-push:
   commands:
     ci:
-      run: just ci   # skip once with: git push --no-verify
+      run: just ci   # never skipped with --no-verify (AGENTS.md)

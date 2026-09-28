@@ -349,7 +349,7 @@ class SyncState:
                     )
                 elif column:
                     self._conn.execute(
-                        f"UPDATE messages SET state=?, {column}=?, error=NULL "
+                        f"UPDATE messages SET state=?, {column}=?, error=NULL "  # noqa: S608 - column comes from a fixed Event map
                         "WHERE account_id=? AND message_key=?",
                         (new.value, now, account_id, key),
                     )
@@ -392,7 +392,7 @@ class SyncState:
         marks = ",".join("?" * len(keys))
         return list(
             self._conn.execute(
-                f"SELECT * FROM messages WHERE account_id=? AND message_key IN ({marks})",
+                f"SELECT * FROM messages WHERE account_id=? AND message_key IN ({marks})",  # noqa: S608 - ? placeholders only
                 [account_id, *keys],
             )
         )
@@ -433,7 +433,7 @@ class SyncState:
         marks = ",".join("?" * len(wanted))
         return list(
             self._conn.execute(
-                f"SELECT * FROM messages WHERE account_id=? AND state IN ({marks}) "
+                f"SELECT * FROM messages WHERE account_id=? AND state IN ({marks}) "  # noqa: S608 - ? placeholders only
                 "ORDER BY fetched_at",
                 (account_id, *wanted),
             )
@@ -482,7 +482,7 @@ class SyncState:
         self._conn.commit()
         marks = ",".join("?" * len(keys))
         rows = self._conn.execute(
-            f"SELECT message_key, attempts FROM messages WHERE account_id=? "
+            f"SELECT message_key, attempts FROM messages WHERE account_id=? "  # noqa: S608 - ? placeholders only
             f"AND message_key IN ({marks})",
             [account_id, *keys],
         ).fetchall()
