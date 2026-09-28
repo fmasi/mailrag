@@ -1,10 +1,10 @@
-# `make bench`: the number you can check yourself
+# `just bench`: the number you can check yourself
 
 Most of this project's retrieval figures are measured on a **private** mailbox. That
 is the corpus the system is actually for, and it is not something a reader can be
 handed. So those numbers are, unavoidably, author-reported.
 
-`make bench` exists to make the core claim checkable anyway: it scores retrieval on
+`just bench` exists to make the core claim checkable anyway: it scores retrieval on
 the **public** [Enron-QA](https://huggingface.co/datasets/MichaelR207/enron_qa_0922)
 dataset, needs no API key and no private data, and prints a real recall table in a
 few minutes.
@@ -31,15 +31,15 @@ open licence, please [open an issue](https://github.com/fmasi/mailrag/issues).*
 
 ```bash
 docker compose up -d          # Qdrant
-make bench                    # 2 000 docs / 360 queries
-make bench SIZE=large         # 10 000 docs / 360 queries (harder)
+just bench                    # 2 000 docs / 360 queries
+just bench large              # 10 000 docs / 360 queries (harder)
 ```
 
 First run downloads bge-m3 (~2 GB) and the Enron-QA test split.
 
 ### How long it takes
 
-Measured rather than estimated, on `make bench` at the default size, covering build
+Measured rather than estimated, on `just bench` at the default size, covering build
 **and** scoring:
 
 | device | wall clock |
@@ -67,7 +67,7 @@ runs), and scores with retrieval only, so no answer generation and no cross-enco
 times above are embedding plus Qdrant and nothing else.
 
 That is also the scope boundary. Recall@k measures the **retrieval layer** rather than
-the product. `make demo` spends no LLM calls either, because its summaries are committed
+the product. `just demo` spends no LLM calls either, because its summaries are committed
 as fixtures. `./mailrag ask` is the one that does, since it generates an answer. Needing
 no key is exactly why anyone can reproduce these two commands.
 
@@ -114,7 +114,7 @@ The marginal intervals above **overlap**, which invites the conclusion that the
 difference is not real. That conclusion would be wrong, and the reason is worth
 stating: both arms answer the *same* 360 queries, so the comparison is **paired**.
 Overlapping marginal intervals discard the pairing and are badly conservative for
-paired data. `make bench` therefore also reports an exact **McNemar** test over the
+paired data. `just bench` therefore also reports an exact **McNemar** test over the
 queries where the arms disagree:
 
 | set | k | sparse fixes | sparse breaks | McNemar exact p |
@@ -150,14 +150,14 @@ queries are spent generously to tighten the interval rather than rationed for sp
 
 **Read this before quoting the number.**
 
-`make bench` validates **one layer** of mailrag: hybrid retrieval. It is not a
+`just bench` validates **one layer** of mailrag: hybrid retrieval. It is not a
 reproduction of the headline result, and it is not a demonstration of the system as
 a whole. Every other lever is switched off:
 
-| lever | private-eval value | in `make bench`? | why not |
+| lever | private-eval value | in `just bench`? | why not |
 |---|---|---|---|
-| Thread reconstruction | **+29.1** recall@5, the flagship | ❌ | Enron-QA rows carry no conversation linkage. The schema is `email / questions / path / user / …`, where `path` is a per-user mailbox path. **There are no threads to reconstruct.** Measured by `make demo` instead. |
-| Contextual summaries | **+12.8** recall@5 | ❌ | Built with `embed_summary=False`. Generating summaries live would need an LLM and forfeit the no-key property. Measured by `make demo` instead, from committed fixtures. |
+| Thread reconstruction | **+29.1** recall@5, the flagship | ❌ | Enron-QA rows carry no conversation linkage. The schema is `email / questions / path / user / …`, where `path` is a per-user mailbox path. **There are no threads to reconstruct.** Measured by `just demo` instead. |
+| Contextual summaries | **+12.8** recall@5 | ❌ | Built with `embed_summary=False`. Generating summaries live would need an LLM and forfeit the no-key property. Measured by `just demo` instead, from committed fixtures. |
 | Cross-encoder rerank | +2.5 recall@5 | ❌ | Needs a paid NVIDIA endpoint. A benchmark whose headline requires the reader to hold an API key is not a public benchmark. |
 | Noise cleanup | precision rather than recall | ❌ | Built with `apply_noise_filter=False`. The corpus *is* the benchmark, so dropping documents would change what is being scored. |
 | **Hybrid dense + learned-sparse** | — | ✅ | **+3.1 / +4.4 pp, the number above** |
@@ -175,12 +175,12 @@ So the honest summary is:
 
 The excluded levers are measured in the private harness and reported in
 [`EXPERIMENTS.md`](EXPERIMENTS.md). Two of them are no longer excluded everywhere:
-`make demo` now measures both contextual summaries and thread reconstruction on public
+`just demo` now measures both contextual summaries and thread reconstruction on public
 data, which is the subject of the next section.
 
-## The other public number: `make demo`
+## The other public number: `just demo`
 
-`make bench` scores the retrieval layer. `make demo` answers a different question, on a
+`just bench` scores the retrieval layer. `just demo` answers a different question, on a
 different corpus, and the two are easy to confuse.
 
 The demo builds **two** indexes over the same 1,200 public Enron emails. One embeds each
@@ -222,7 +222,7 @@ about 3pp between runs because Qdrant rebuilds its HNSW graph each time, so read
 direction and the significance rather than the third digit.
 
 Runtime is under two minutes on an Apple-silicon GPU. Expect roughly 15 on CPU, at the
-same 9x penalty measured for `make bench` below.
+same 9x penalty measured for `just bench` below.
 
 **What remains private.** Thread reconstruction and contextual summaries are now both
 publicly demonstrated, on a corpus anyone can download. What is still author-reported is

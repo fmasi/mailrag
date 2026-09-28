@@ -104,8 +104,8 @@ deferred, however interesting.
 
 "See what it is for" is new, and it is not a rewording. Shipping
 [#97](https://github.com/fmasi/mailrag/issues/97) exposed that the two commands a
-stranger actually runs both fall short of it from opposite directions: `make demo`
-shows the pipeline working but compares it to nothing, and `make bench` measures
+stranger actually runs both fall short of it from opposite directions: `just demo`
+shows the pipeline working but compares it to nothing, and `just bench` measures
 the hybrid layer while every lever behind the headline number is switched off. The
 project is therefore *demonstrable* and *measurable* but its central claim is
 neither shown nor checked. [#123](https://github.com/fmasi/mailrag/issues/123) and
@@ -115,9 +115,9 @@ neither shown nor checked. [#123](https://github.com/fmasi/mailrag/issues/123) a
 |---|---|---|
 | [#93](https://github.com/fmasi/mailrag/issues/93) | MCP capability expansion (first slice — see below) | The MCP server is the flagship interface; 1.0 should ship more than tools-only query access |
 | [#39](https://github.com/fmasi/mailrag/issues/39) | Unified config file (file < env < CLI precedence) | MCP settings are where config finally pays for itself; the issue itself targets landing alongside the MCP work |
-| ~~[#97](https://github.com/fmasi/mailrag/issues/97)~~ **done** | One reproducible public recall@5 number — turnkey `make bench` on Enron-QA | Shipped in [#122](https://github.com/fmasi/mailrag/pull/122). Delivered less than the bar needs, though — see #123 below |
-| [#123](https://github.com/fmasi/mailrag/issues/123) | Make **thread reconstruction** publicly measurable — reconstruct conversations over the full Enron corpus (by header where present, else derived from normalised subject + shared participants) and score the message-level → thread-level ladder | `make bench` validates the hybrid layer only (+3.1/+4.4pp). Every lever behind the headline ladder — thread reconstruction (+29.1), summaries (+12.8), rerank (+2.5) — is switched off, so **45.6 → 93.3 remains author-reported**. The 1.0 bar says a stranger can verify the headline claim; today they verify the foundation under it |
-| [#125](https://github.com/fmasi/mailrag/issues/125) | Make `make demo` showcase the value proposition — thread-aware vs naive RAG, side by side | The most-run command in the project currently proves the pipeline *runs*, not what it is *for*. Nothing is compared to anything, so the flagship claim is invisible. A stranger should learn "why this instead of a generic RAG?" in one screen |
+| ~~[#97](https://github.com/fmasi/mailrag/issues/97)~~ **done** | One reproducible public recall@5 number — turnkey `just bench` on Enron-QA | Shipped in [#122](https://github.com/fmasi/mailrag/pull/122). Delivered less than the bar needs, though — see #123 below |
+| [#123](https://github.com/fmasi/mailrag/issues/123) | Make **thread reconstruction** publicly measurable — reconstruct conversations over the full Enron corpus (by header where present, else derived from normalised subject + shared participants) and score the message-level → thread-level ladder | `just bench` validates the hybrid layer only (+3.1/+4.4pp). Every lever behind the headline ladder — thread reconstruction (+29.1), summaries (+12.8), rerank (+2.5) — is switched off, so **45.6 → 93.3 remains author-reported**. The 1.0 bar says a stranger can verify the headline claim; today they verify the foundation under it |
+| [#125](https://github.com/fmasi/mailrag/issues/125) | Make `just demo` showcase the value proposition — thread-aware vs naive RAG, side by side | The most-run command in the project currently proves the pipeline *runs*, not what it is *for*. Nothing is compared to anything, so the flagship claim is invisible. A stranger should learn "why this instead of a generic RAG?" in one screen |
 | ~~[#43](https://github.com/fmasi/mailrag/issues/43)~~ **done** | Clear the repo root: delete the orphaned `examples_advanced.py`, and relocate `main.py` out of the root as part of #125 | The first thing a visitor sees after `git clone` is a root `main.py` beside a polished CLI, which contradicts the documented entry point. Note `main.py` is **not** dead code — `scripts/quickstart.sh` runs it, so it must move rather than go; sequencing it with #125 avoids rewriting the same file twice |
 | [#128](https://github.com/fmasi/mailrag/issues/128) | Re-verify every published claim — the `docs/CLAIMS.md` "last verified" pass | Ten of the twelve figures the README and landing page publish were last measured in June, by scripts that were `chdir`-ing into a since-deleted worktree — so they may have been produced against stale code. "A release a stranger can trust" cannot rest on numbers nobody has re-checked |
 | [#42](https://github.com/fmasi/mailrag/issues/42) | Finish the verb rename in code identifiers (pass1/pass2/explore/build → tag/summarize/scan/index) | Mass renames are exactly what a 1.0 boundary is for; doing it afterwards churns a supposedly stable codebase |
@@ -224,9 +224,10 @@ planning after that. No calendar dates are promised, deliberately.
 - *Minor*: new capability (a new MCP tool, a new CLI verb, a new config layer)
   or a completed milestone.
 
-**Security.** CI runs `pip-audit` with **zero ignore entries** — an advisory
-fails the build rather than accumulating in an allow-list — and Dependabot
-watches the dependency tree. Policy: an actionable advisory in a shipped
+**Security.** `pip-audit` is a required CI check: an advisory fails the build
+rather than accumulating in an allow-list. Its only ignore entries are advisories
+with **no fixed release** (today one, nltk GHSA-8mgp-746c-j5xp), each with its
+reason in `ci.yml`, and Dependabot watches the dependency tree. Policy: an actionable advisory in a shipped
 dependency triggers a patch release as soon as the fix is verified (recent
 example: the pypdf CVE bump shipped within a day). If a fix is unreachable —
 for instance the qdrant-client cap in
@@ -237,7 +238,7 @@ documented in an open issue and the release notes rather than silently ignored.
 
 1. Full test suite green in CI on `main` (branch protection already requires
    this for merge).
-2. `pip-audit` clean, no new Dependabot alerts.
+2. `pip-audit` clean (ignoring only no-fix advisories), no new Dependabot alerts.
 3. `docs/RELEASE_NOTES.md` entry written — what changed, what broke, what to do
    about it.
 4. Docs updated for any behaviour change (per the project rules, this happens

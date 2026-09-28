@@ -115,7 +115,7 @@ def data_path(env_var: str, default: str, *, what: str) -> pathlib.Path:
         raise SystemExit(
             f"{what} not found at {p}\n"
             f"  Set {env_var} to its location, e.g.  {env_var}=/path/to/data python -m {__package__}...\n"
-            f"  (This is a PRIVATE eval script. The public benchmark is `make bench`.)"
+            f"  (This is a PRIVATE eval script. The public benchmark is `just bench`.)"
         )
     return p
 
@@ -136,7 +136,7 @@ def require_key(
             f"      {env_var}=nvapi-... python -m scripts.eval.<script>\n"
             f"  or point it at a stored secret, which is the project convention:\n"
             f"      {env_var}=keychain:mailrag.nvidia.token python -m scripts.eval.<script>\n"
-            f"  The public benchmark (`make bench`) needs no key and no private data."
+            f"  The public benchmark (`just bench`) needs no key and no private data."
         )
     # A reference (keychain:/env:/file:) is dereferenced through the same resolver
     # the sync passwords and RAG_LLM_API_KEY use, so the token never has to sit in

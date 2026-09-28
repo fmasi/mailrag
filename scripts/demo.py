@@ -1,4 +1,4 @@
-"""`make demo` — show what contextual embedding buys, on public data, with no API key.
+"""`just demo` — show what contextual embedding buys, on public data, with no API key.
 
 Builds TWO indexes over the same 1,200 public Enron emails:
 
@@ -306,7 +306,7 @@ def main() -> int:
     print("\n  Two levers, on a public corpus with conversations derived from subject +")
     print("  participants: contextual embedding (findability) and thread expansion")
     print("  (completeness). Reranking and noise cleanup are not measured here.")
-    print("  `make bench` is the retrieval benchmark; docs/CLAIMS.md tracks every figure.\n")
+    print("  `just bench` is the retrieval benchmark; docs/CLAIMS.md tracks every figure.\n")
     return 0
 
 

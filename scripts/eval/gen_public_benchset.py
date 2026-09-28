@@ -1,4 +1,4 @@
-"""Generate the committed public benchmark fixtures for `make bench` (issue #97).
+"""Generate the committed public benchmark fixtures for `just bench` (issue #97).
 
 Run this ONCE to (re)generate the fixtures under ``eval/public/``; the benchmark
 itself (``bench_public.py``) never calls it. The fixtures are committed so the

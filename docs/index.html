@@ -102,7 +102,7 @@
     <div class="term">
       <div class="bar">thread-aware contextual RAG over the public Enron demo</div>
 <pre><span class="p">$</span> git clone https://github.com/fmasi/mailrag &amp;&amp; cd mailrag
-<span class="p">$</span> make demo                <span class="c"># two indexes, same questions — what context buys</span>
+<span class="p">$</span> just demo                <span class="c"># two indexes, same questions — what context buys</span>
   <span class="c">→ plain          R@5  60.6%</span>
   <span class="c">  with context   R@5  73.7%   (McNemar p=0.0044, public Enron)</span>
   <span class="c">→ spanning questions: right conversation found 97.3% @5;</span>
@@ -111,7 +111,7 @@
   <span class="c">→ retrieves the matching message, expands to its full thread,</span>
   <span class="c">  and answers from the whole conversation — with citations.</span>
 
-<span class="p">$</span> make bench               <span class="c"># check the retrieval claim yourself — no LLM, no key</span>
+<span class="p">$</span> just bench               <span class="c"># check the retrieval claim yourself — no LLM, no key</span>
   <span class="c">→ dense         R@5  94.4 [91.6, 96.4]</span>
   <span class="c">  dense+sparse  R@5  97.5 [95.3, 98.7]</span>
   <span class="c">  paired @5: fixes 12, breaks 1 — McNemar p=0.0034</span></pre>
@@ -237,20 +237,20 @@
        so read it as a direction rather than a score.</p>
 
     <p class="muted" style="margin-top:14px"><b>What a stranger can reproduce.</b>
-       <code>make demo</code> now covers both of the big levers on 1,200 public Enron emails. Contextual
+       <code>just demo</code> now covers both of the big levers on 1,200 public Enron emails. Contextual
        embedding takes R@5 from 60.6% to 73.7% (McNemar p=0.0044), and on 73 questions whose answers
        span several messages it finds the right conversation 97.3% of the time at top-5, where the top-5
        <i>messages</i> give you only 52.6% of that conversation and thread expansion gives you all of it.
-       <code>make bench</code> then scores the retrieval layer: 360 committed queries against 2 000
+       <code>just bench</code> then scores the retrieval layer: 360 committed queries against 2 000
        public Enron-QA documents in a couple of minutes, no key and no private data, printing
        <b>R@5 94.4% dense vs 97.5% dense+learned-sparse</b> (95% Wilson [91.6, 96.4] vs [95.3, 98.7]).
        Those intervals overlap, so it reports the <i>paired</i> test too, since both arms answer the same
        queries: learned-sparse fixes 12 and breaks 1, <b>McNemar exact p=0.0034</b>. Zero LLM calls,
        1.6 min on an M5 Pro GPU and 14.7 min CPU-only. Widen the distractor pool 5× with
-       <code>make bench SIZE=large</code> and the advantage grows instead of shrinking (+4.4pp,
+       <code>just bench large</code> and the advantage grows instead of shrinking (+4.4pp,
        p=0.0001), which is the directional claim that matters.</p>
 
-    <p class="muted" style="margin-top:14px"><b>Scope, stated plainly.</b> <code>make bench</code>
+    <p class="muted" style="margin-top:14px"><b>Scope, stated plainly.</b> <code>just bench</code>
        checks the hybrid <i>retrieval layer</i> alone, with reranking switched off because it needs a
        paid endpoint. Between them the two commands reproduce the mechanisms but not the magnitude: the
        45.6→93.3 ladder was measured on a 32,000-email archive and stays author-reported. Every figure

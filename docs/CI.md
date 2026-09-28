@@ -1,19 +1,20 @@
 # CI and quality gates
 
 Every pull request runs the checks below once it is marked ready: draft PRs skip CI (see
-[Local CI](#local-ci)). Three of them block a merge; the rest report and let you decide.
-Every action in every workflow is pinned to a commit SHA, with no exceptions.
+[Local CI](#local-ci)). All the gates below block a merge through the `main-protection`
+ruleset, which has no bypass, the owner included. Every third-party action in every workflow is
+pinned to a commit SHA.
 
 | Gate | Required? | What it enforces | Run locally |
 |------|-----------|------------------|-------------|
-| `pytest` | ✅ required | Full test suite (~1,500 tests) plus a coverage floor of **85%** (currently ~88%) | `poetry run python -m pytest tests/ --cov=src --cov-fail-under=85 -q` |
+| `pytest` | ✅ required | Full test suite plus a coverage floor of **85%** (currently ~90%) | `just test` |
+| `pip-audit` | ✅ required | Known CVEs in the locked deps (OSV). The only `--ignore-vuln` entries are advisories with **no fixed release**, each with its reason in `ci.yml` (today: nltk GHSA-8mgp-746c-j5xp) | `just audit` |
 | `CodeQL (python)` | ✅ required | Static security analysis of `src/`, `scripts/` and `tests/`, `default` query suite | (runs on GitHub) |
 | `CodeQL (actions)` | ✅ required | Static analysis of the workflow files themselves | (runs on GitHub) |
-| `ruff (lint + format)` | advisory | Import order plus pyflakes/pycodestyle (`E,F,I,W`), and formatting | `ruff check .` and `ruff format --check .` |
-| `mypy (type check)` | advisory | Type-checks all of `src/`, including the bodies of unannotated functions (`check_untyped_defs`), with no per-module opt-outs. Lenient only about third-party imports (`ignore_missing_imports`), and CI runs deps-free so they resolve to `Any` and results stay deterministic | `just type` (deps-free, like CI) |
-| `pip-audit` | advisory | Known CVEs in the locked deps (OSV), with **zero** `--ignore-vuln` entries | `poetry run pip-audit --vulnerability-service osv` |
-| `dependency-review` | advisory | Blocks PRs that add deps carrying `moderate`+ advisories | (PR-only, runs on GitHub) |
-| Claude review | advisory | One automated review per PR, when it is marked ready or labelled `ready-for-review` (`claude-review.yml`); re-review with an `@claude review` comment (`claude.yml`, owner/members/collaborators only). Both call reusable workflows in `fmasi/.github`; the rubric is `.github/claude-review-prompt.md` | `/ci-review` in Claude Code |
+| `review / review-gate` | ✅ required | Green only while the PR carries `claude-reviewed` and not `claude-blocked`: the one Claude review passed with no Critical finding | (see below) |
+| `lint` | ✅ required | One job: ruff lint + format (`E,F,I,W`); SAST (ruff's bandit rules `S`, exceptions in `pyproject.toml`); mypy on `src/` (`check_untyped_defs`, run deps-free so third-party imports resolve to `Any` and results stay deterministic); actionlint + zizmor on the workflows; gitleaks on the new commits | `just lint security type workflows` |
+| `dependency-review` | ✅ required | Blocks PRs that add deps carrying `moderate`+ advisories | (PR-only, runs on GitHub) |
+| `review / claude-review` | — | The one Claude review per PR, when it is marked ready or labelled `ready-for-review` (`claude-review.yml`, rubric `.github/claude-review-prompt.md`). Re-review: remove and re-add `ready-for-review`. An `@claude` comment (`claude.yml`, owner/members/collaborators only) gets an answer, not a verdict | `/ci-review` in Claude Code |
 
 `ruff format` is enforced, not just `ruff check`. Running one without the other is the
 most common way to get a red build here.
@@ -22,8 +23,9 @@ most common way to get a red build here.
 
 Lint and type settings sit in `pyproject.toml` under `[tool.ruff]` and `[tool.mypy]`.
 The workflows are in `.github/workflows/`: `ci.yml`, `test-suite.yml`, `codeql.yml`,
-`dependency-review.yml`, `claude.yml` and `claude-review.yml`. Most lint and format
-findings clear with `ruff check --fix .` followed by `ruff format .`.
+`dependency-review.yml`, `claude.yml` and `claude-review.yml`; zizmor's policy is
+`.github/zizmor.yml`, and gitleaks' known false positives are in `.gitleaksignore`. Most lint
+and format findings clear with `just fmt`.
 
 ### Why CodeQL has a workflow file
 
@@ -40,9 +42,12 @@ changed how CodeQL is invoked rather than which alerts it raises.
 
 ## Supply chain
 
-Zero open Dependabot alerts, and a `pip-audit` with no ignore entries. Every advisory
-that has reached this project was resolved by a constraint floor in `pyproject.toml`
-rather than waived. The Qdrant server image is pinned by digest instead of `:latest`.
+`pip-audit` is a required check. Every advisory with a fixed release is cleared by a
+constraint floor in `pyproject.toml` (the "Transitive security floors" block names each
+advisory) rather than waived. An advisory with no fixed release is the one exception: it is
+ignored by ID in `ci.yml` and the justfile's `audit_ignores`, with its reason, until a fix
+ships. GitHub keeps the matching Dependabot alert open meanwhile. The Qdrant server image is
+pinned by digest instead of `:latest`.
 
 One pin is deliberate and awkward: `qdrant-client` is capped below 1.19, because that
 release dropped a symbol `llama-index-vector-stores-qdrant` still imports.
@@ -53,16 +58,17 @@ tree carries a comment saying why it exists and what would let it go.
 
 CI runs once per PR, when it is marked ready, so run the same checks on your machine first.
 The `justfile` mirrors `ci.yml` and `test-suite.yml` command for command, with the same pins
-and the same coverage floor (it needs `just`, `pipx`, Poetry, and the tesseract and poppler
-binaries):
+and the same coverage floor. It needs `just`, `pipx`, Poetry, the tesseract and poppler
+binaries, and `gitleaks`, `actionlint` and `zizmor` (`brew install just pipx poetry tesseract
+poppler gitleaks actionlint zizmor`):
 
 ```bash
-lefthook install      # once per clone: pre-commit ruff/secrets/shell/workflow checks, pre-push `just ci`
-just ci               # ruff, mypy (deps-free, like CI), pip-audit, then pytest with the 85% floor
+lefthook install      # once per clone: pre-commit ruff/gitleaks/shellcheck/actionlint, pre-push `just ci`
+just ci               # lint, SAST, workflow lint, mypy (deps-free, like CI), pytest with the 85% floor, pip-audit
 /ci-review            # in Claude Code: the same review rubric CI uses
 gh pr create --draft  # CI skips drafts
 gh pr ready           # runs CI and the Claude review once
 ```
 
-`just quick` is the fast per-change run (`make test`, no coverage). Documentation-only changes
-skip the test steps. See the project `CLAUDE.md` for what counts as documentation-only.
+`just quick` is the fast per-change run (`python -m pytest tests/ -q`, no coverage).
+Documentation-only changes skip the test steps. `AGENTS.md` has the full workflow.

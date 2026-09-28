@@ -16,6 +16,7 @@ the **full** path including the local `.eml` hybrid pipeline and the LLM `summar
 |------|-----|
 | **Python 3.11+** + **conda/miniconda** | the `mailrag` env (never install project deps on the host) |
 | **Docker** | Qdrant vector store |
+| **[`just`](https://github.com/casey/just)** (`brew install just`) | the task runner: `just demo`, `just bench`, `just ci` |
 | **Apple Silicon (MPS)** *or* CUDA *or* CPU | embeddings (bge-m3 via FlagEmbedding) — MPS/CUDA strongly preferred |
 | **LM Studio** (or any OpenAI-compatible local LLM) | optional, for the LLM `summarize`/`judge` pass and answers |
 
@@ -83,10 +84,10 @@ For pointing the LLM / embedder / vector store at a specific backend, see
 ## 5. Quick demo (public data)
 
 ```bash
-make demo        # starts Qdrant, then builds an index over 100 Enron emails and answers example queries
+just demo        # starts Qdrant, then builds an index over 100 Enron emails and answers example queries
 ```
 
-`make demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh) (bring up Qdrant →
+`just demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh) (bring up Qdrant →
 `python -m scripts.demo`). See [`QUICKSTART.md`](QUICKSTART.md) for the trimmed walkthrough.
 
 ---

@@ -8,7 +8,7 @@ here rather than repeating it.
 ## Reader journey
 
 1. **[`README.md`](../README.md)** *(repo root)*. **Start here.** What `mailrag` is, the
-   two public commands (`make demo` and `make bench`), the architecture sketch and the
+   two public commands (`just demo` and `just bench`), the architecture sketch and the
    headline numbers.
 2. **[`WHY_LOCAL.md`](WHY_LOCAL.md)**. Why this runs on your own hardware, why no
    consented email corpus exists, and what running locally actually costs you.
@@ -51,8 +51,8 @@ does it work?".
   produces it, the corpus it came from, and when it was last verified. Start here to find out
   whether a figure is publicly reproducible or author-reported, which two are currently
   unverifiable, and which one was withdrawn.
-- **[`BENCHMARK.md`](BENCHMARK.md)**. The two public commands. `make bench` regenerates the
-  retrieval number on Enron-QA with no key and no private data, `make demo` measures
+- **[`BENCHMARK.md`](BENCHMARK.md)**. The two public commands. `just bench` regenerates the
+  retrieval number on Enron-QA with no key and no private data, `just demo` measures
   contextual embedding and thread reconstruction. Covers what each one deliberately omits.
 - **[`CASE_STUDY.md`](CASE_STUDY.md)**. What each cleanup and retrieval choice bought on a
   real ~32k-email mailbox: the technique ladder, the cost and benefit of each stage, and the
@@ -84,7 +84,7 @@ A shorter, reader-facing version of the same material is published as
 
 | You want to… | Use |
 |--------------|-----|
-| Run the public demo | `make demo` → [`scripts/quickstart.sh`](../scripts/quickstart.sh) → [`scripts/demo.py`](../scripts/demo.py) |
+| Run the public demo | `just demo` → [`scripts/quickstart.sh`](../scripts/quickstart.sh) → [`scripts/demo.py`](../scripts/demo.py) |
 | Ask a question from the CLI | `./mailrag ask "…" --collection <name>` |
 | Serve a collection to an agent | `./mailrag mcp` (see [`MCP_SERVER.md`](MCP_SERVER.md)) |
 | Keep a collection fresh | `./mailrag sync` (see [`SYNC.md`](SYNC.md)) |
