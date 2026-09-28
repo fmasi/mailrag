@@ -126,3 +126,63 @@ class TestDefaults(unittest.TestCase):
             fake_embed_instance,
             "Settings.embed_model was not set to the OpenAIEmbedding instance",
         )
+
+
+class TestEmptyEnvWarningNeverEchoesValue(unittest.TestCase):
+    """An empty env var falls back to the current value, and the warning must not print that
+    value: for the *_API_KEY settings it is a credential loaded earlier (CodeQL alert #14,
+    py/clear-text-logging-sensitive-data). All values here are synthetic."""
+
+    _ATTRS = ("LLM_API_KEY", "EMBEDDING_API_KEY", "QDRANT_API_KEY", "LLM_MODEL")
+
+    def setUp(self):
+        from src.config.settings import RAGConfig
+
+        self._snapshot = {k: getattr(RAGConfig, k) for k in self._ATTRS}
+
+    def tearDown(self):
+        from src.config.settings import RAGConfig
+
+        for k, v in self._snapshot.items():
+            setattr(RAGConfig, k, v)
+
+    def _load_with_env(self, env: dict) -> str:
+        from src.config.settings import RAGConfig
+
+        with patch.dict("os.environ", env, clear=True), patch("builtins.print") as fake_print:
+            RAGConfig.load_from_env()
+        return "\n".join(" ".join(str(a) for a in call.args) for call in fake_print.call_args_list)
+
+    def test_empty_api_keys_warn_by_name_without_the_value(self):
+        from src.config.settings import RAGConfig
+
+        RAGConfig.LLM_API_KEY = "synthetic-llm-value-111"
+        RAGConfig.EMBEDDING_API_KEY = "synthetic-embed-value-222"
+        RAGConfig.QDRANT_API_KEY = "synthetic-qdrant-value-333"
+
+        printed = self._load_with_env(
+            {"RAG_LLM_API_KEY": "", "RAG_EMBEDDING_API_KEY": "   ", "QDRANT_API_KEY": "\t"}
+        )
+
+        for name in ("RAG_LLM_API_KEY", "RAG_EMBEDDING_API_KEY", "QDRANT_API_KEY"):
+            self.assertIn(name, printed)
+        for value in ("synthetic-llm-value-111", "synthetic-embed-value-222", "synthetic-qdrant"):
+            self.assertNotIn(value, printed)
+
+    def test_empty_env_var_still_keeps_the_current_value(self):
+        from src.config.settings import RAGConfig
+
+        RAGConfig.LLM_API_KEY = "synthetic-llm-value-111"
+        RAGConfig.LLM_MODEL = "synthetic-model"
+
+        self._load_with_env({"RAG_LLM_API_KEY": "", "RAG_LLM_MODEL": " "})
+
+        self.assertEqual(RAGConfig.LLM_API_KEY, "synthetic-llm-value-111")
+        self.assertEqual(RAGConfig.LLM_MODEL, "synthetic-model")
+
+    def test_unset_env_var_prints_nothing(self):
+        from src.config.settings import RAGConfig
+
+        RAGConfig.LLM_API_KEY = "synthetic-llm-value-111"
+
+        self.assertEqual(self._load_with_env({}), "")
