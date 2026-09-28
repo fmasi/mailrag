@@ -65,10 +65,12 @@ anthropic = "^0.40"
 tqdm = "^4.66"
 numpy = "^2.0"
 scikit-learn = "^1.5"
-# 6.15 is the CVE floor: 6.14.2 is affected by CVE-2026-71870 and
-# CVE-2026-71852, both fixed in 6.15.0. Caught by the OSV-backed pip-audit gate
-# before Dependabot raised an alert for either.
-pypdf = "^6.15.0"
+# 6.16.1 is the CVE floor: 6.15.0 is affected by GHSA-jp53-mhqp-8xcg
+# (PYSEC-2026-3913, fixed in 6.16.0) and GHSA-23w6-3w8w-8484 / GHSA-763m-79hh-57f2
+# (PYSEC-2026-3910/3911, fixed in 6.16.1). The previous floor, 6.15.0, cleared
+# CVE-2026-71870 and CVE-2026-71852 (6.14.2). pypdf parses attacker-chosen
+# attachments, so this floor matters more than most.
+pypdf = "^6.16.1"
 python-docx = "^1.1"
 openpyxl = "^3.1"
 python-pptx = "^1.0"
@@ -112,9 +114,10 @@ imapclient = {version = "^3.1.0", optional = true}
 # These are pulled in transitively (soupsieve via beautifulsoup4; transformers
 # via FlagEmbedding). We pin a minimum here purely to lift the resolved version
 # past known CVEs — see the pip-audit job in .github/workflows/ci.yml.
-#   soupsieve  — CVE-2026-49476/49477 (PYSEC-2026-3071/3072), fixed in 2.8.4.
-#                Supersedes Dependabot PR #79.
-soupsieve = "^2.8.4"
+#   soupsieve  — CVE-2026-49476/49477 (PYSEC-2026-3071/3072), fixed in 2.8.4;
+#                CVE-2026-85999/86000 (GHSA-gjv8-xp57-g29c, GHSA-j934-xhv5-fg8f),
+#                fixed in 2.9.0. Supersedes Dependabot PR #79.
+soupsieve = "^2.9.0"
 #   transformers — CVE-2026-5241 (PYSEC-2026-2290), fixed in 5.5.0.
 transformers = "^5.5.0"
 #   click — CVE-2026-7246 (PYSEC-2026-2132), fixed in 8.3.3; pin the 8.4 line.
@@ -133,9 +136,36 @@ cryptography = "^50.0.0"
 #   nltk — via llama-index-core. Four high advisories (GHSA-6hm5-jgcp-p838,
 #          GHSA-fg7f-2386-8897, GHSA-qvv7-cg9c-w4x3, GHSA-xh95-f55m-82fw) plus the
 #          path-traversal GHSA-p4gq-832x-fm9v the CI audit used to ignore, all
-#          fixed in 3.10.0. That release is now on PyPI (3.10.2), so the
-#          --ignore-vuln entries in ci.yml could finally be dropped.
-nltk = "^3.10.2"
+#          fixed in 3.10.0. 3.10.3 fixed the next batch (PYSEC-2026-3733..3752,
+#          -3790, -3867..3871), two of them critical (GHSA-m4rf-3fr8-xwx3,
+#          GHSA-x99w-6fgc-pmfw). Supersedes Dependabot PR #192.
+#          One advisory has NO fixed release yet: GHSA-8mgp-746c-j5xp
+#          (PYSEC-2026-3740, CVE-2026-81726), a pathsec bypass in nltk's
+#          model-artifact import/export APIs, affected through 3.10.3 (the
+#          latest). pip-audit ignores it by ID, with the reason, in ci.yml and
+#          the justfile's `audit` recipe; drop that ignore and raise this floor
+#          as soon as a fix ships.
+nltk = "^3.10.3"
+#   anyio — via mcp / httpx / httpx2 / openai / anthropic / starlette.
+#           GHSA-82r6-8w77-94w6 (critical) and GHSA-5p39-cfhj-2xmp
+#           (CVE-2026-63374, CVE-2026-64847), fixed in 4.14.2.
+anyio = "^4.14.2"
+#   httpx2 / httpcore2 — via mcp (its v2 HTTP stack). GHSA-7mj9-2mp8-4m2p (high,
+#           both packages) and GHSA-f2fp-rgf2-35cp fixed in 2.10.0;
+#           GHSA-h4x7-gw46-3wm6 and GHSA-pf96-p4fj-6566 in 2.11.0;
+#           GHSA-8xx6-hgc6-gc2m (high) in 2.12.0 (PYSEC-2026-3844..3849).
+#           httpx2 pins httpcore2 to its own version, so the two move together.
+httpx2 = "^2.12.0"
+httpcore2 = "^2.10.0"
+#   banks — via llama-index-core (prompt templating). GHSA-x8wg-4xgc-vr54
+#           (PYSEC-2026-3810), fixed in 2.4.5.
+banks = "^2.4.5"
+#   accelerate — via FlagEmbedding / peft. GHSA-4j2p-28q2-5m79 (CVE-2026-69112,
+#                PYSEC-2026-3804): path traversal via sharded-checkpoint
+#                weight_map entries, affected through 1.14.0 (the advisory
+#                names no "fixed" release; 1.15.0 is the first outside the
+#                affected range). We never load sharded checkpoints through it.
+accelerate = "^1.15.0"
 #   h2 — via httpx[http2] (the qdrant-client transport). GHSA-6hr6-w5qg-qmwg
 #        fixed in 4.4.1.
 h2 = "^4.4.1"
@@ -160,6 +190,11 @@ imap = ["imapclient"]
 pytest = "^9.0.2"
 pytest-cov = "^6.0"
 ipykernel = "^7.2.0"
+# Security floor for a dev-only transitive (ipykernel / jupyter-client), kept in
+# this group so it never enters the runtime install: GHSA-mpf4-983q-p7j4 (high),
+# GHSA-8423-8fgw-73vq and GHSA-wwv5-g3v4-889x (PYSEC-2026-3928,
+# CVE-2026-91990/91991), fixed in 6.5.8.
+tornado = "^6.5.8"
 # The two CI quality gates, declared so a dev environment built from this file
 # is complete — previously they existed only as pinned `pip install` lines in
 # .github/workflows/ci.yml, so running them locally meant installing them by
