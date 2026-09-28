@@ -54,8 +54,8 @@ ruff and mypy already catch.
    `pyproject.toml` (the "Transitive security floors" block, the pypdf, pillow, datasets and
    cryptography floors, the `tornado` dev floor) without a stated, advisory-level reason. The
    `qdrant-client <1.19` cap stays until #106 is resolved. A new `--ignore-vuln` must name an
-   advisory with NO fixed release, carry its reason, and appear in both `ci.yml` and the
-   justfile's `audit_ignores`. `pyproject.toml` and `poetry.lock` change together.
+   advisory with NO fixed release, carry its reason, and appear in `ci.yml`, the justfile's
+   `audit_ignores` and `dependency-review.yml`'s `allow-ghsas`. `pyproject.toml` and `poetry.lock` change together.
 8. **Tests.** New or changed behaviour has tests in the `unittest.TestCase` style of `tests/`:
    the happy path, edge cases and invalid input. A bug fix has a test that fails without it.
    LLMs, the Qdrant server, IMAP and model downloads are mocked (or use the in-memory Qdrant); no

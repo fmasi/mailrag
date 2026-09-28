@@ -76,7 +76,8 @@ Qdrant runs in Docker: `docker compose up -d`. The CLI is `./mailrag` (see `docs
   operator opt-in, never a default.
 - **Never weaken a security floor.** The floors and caps in `pyproject.toml` each carry the
   advisory that set them. Raise them, don't lower them. A pip-audit `--ignore-vuln` is only for an
-  advisory with no fixed release, with its reason, in both `ci.yml` and the justfile. Re-lock
+  advisory with no fixed release, with its reason, in `ci.yml`, the justfile and
+  `dependency-review.yml`'s `allow-ghsas`. Re-lock
   inside a container or env (`poetry lock`), never with a host `pip install`.
 - **Dependencies** live in `pyproject.toml` + `poetry.lock` (Poetry 2.x). Project deps go in a
   conda env or a container, never the host Python.

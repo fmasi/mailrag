@@ -13,7 +13,7 @@ pinned to a commit SHA.
 | `CodeQL (actions)` | ✅ required | Static analysis of the workflow files themselves | (runs on GitHub) |
 | `review / review-gate` | ✅ required | Green only while the PR carries `claude-reviewed` and not `claude-blocked`: the one Claude review passed with no Critical finding | (see below) |
 | `lint` | ✅ required | One job: ruff lint + format (`E,F,I,W`); SAST (ruff's bandit rules `S`, exceptions in `pyproject.toml`); mypy on `src/` (`check_untyped_defs`, run deps-free so third-party imports resolve to `Any` and results stay deterministic); actionlint + zizmor on the workflows; gitleaks on the new commits | `just lint security type workflows` |
-| `dependency-review` | ✅ required | Blocks PRs that add deps carrying `moderate`+ advisories | (PR-only, runs on GitHub) |
+| `dependency-review` | ✅ required | Blocks PRs that add deps carrying `moderate`+ advisories; `allow-ghsas` holds the same no-fix exceptions as pip-audit | (PR-only, runs on GitHub) |
 | `review / claude-review` | — | The one Claude review per PR, when it is marked ready or labelled `ready-for-review` (`claude-review.yml`, rubric `.github/claude-review-prompt.md`). Re-review: remove and re-add `ready-for-review`. An `@claude` comment (`claude.yml`, owner/members/collaborators only) gets an answer, not a verdict | `/ci-review` in Claude Code |
 
 `ruff format` is enforced, not just `ruff check`. Running one without the other is the

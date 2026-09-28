@@ -28,3 +28,9 @@ jobs:
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           fail-on-severity: moderate
+          # The same no-fix exceptions as pip-audit (ci.yml `pip-audit`, the justfile's
+          # `audit_ignores`), each an advisory with NO fixed release; keep the three in step:
+          #   GHSA-8mgp-746c-j5xp (PYSEC-2026-3740): nltk <= 3.10.3, the latest release. A
+          #     pathsec bypass in model import/export APIs that neither llama-index-core (the
+          #     only thing pulling nltk in) nor this repo ever calls.
+          allow-ghsas: GHSA-8mgp-746c-j5xp

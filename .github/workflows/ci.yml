@@ -181,7 +181,8 @@ jobs:
       # advisory IDs), never waived.
       #
       # --ignore-vuln is ONLY for an advisory with NO fixed release, each with
-      # its reason here and the same list in the justfile's `audit_ignores`.
+      # its reason here and the same list in the justfile's `audit_ignores` and
+      # in dependency-review.yml's `allow-ghsas` (by GHSA ID).
       # Drop an entry, and raise the floor, as soon as its fix ships:
       #   PYSEC-2026-3740 (GHSA-8mgp-746c-j5xp, CVE-2026-81726), nltk <= 3.10.3,
       #     the latest release. A pathsec sandbox bypass in nltk's model-artifact
