@@ -54,8 +54,8 @@ can stop at any of them:
 | | what you need | what you get | your mail leaves? | cost |
 |---|---|---|---|---|
 | **1. Read** | nothing | the measured numbers, below | | none |
-| **2. `make bench`** | Docker, ~2 GB weights | re-run those numbers yourself | | none |
-| **3. `make demo`** | same | both levers measured: findability and completeness | | none |
+| **2. `just bench`** | Docker, ~2 GB weights | re-run those numbers yourself | | none |
+| **3. `just demo`** | same | both levers measured: findability and completeness | | none |
 | **4. Your mail + your agent** | IMAP or `.eml`, an MCP client | your archive, answerable by Claude/ChatGPT | **yes**, to that provider | your LLM's usage |
 | **5. Your mail + local model** | ~8 GB RAM/VRAM | the same, fully airgapped | **no** | electricity |
 
@@ -66,14 +66,15 @@ enough to judge whether the retrieval is any good.
 git clone https://github.com/fmasi/mailrag.git
 cd mailrag
 pip install -r requirements.txt        # includes FlagEmbedding (bge-m3); first run pulls ~2 GB of weights
-make demo                              # two indexes, same questions: see what context buys
-make bench                             # the full retrieval benchmark
+just demo                              # two indexes, same questions: see what context buys
+just bench                             # the full retrieval benchmark
 ```
 
-Prerequisites are Python 3.11+ and Docker, for the Qdrant container. Neither command needs an
-API key, an LLM endpoint, or a `.env` file, and both run on data committed in this repo.
+Prerequisites are Python 3.11+, Docker (for the Qdrant container) and
+[`just`](https://github.com/casey/just) (`brew install just`). Neither command needs an API key,
+an LLM endpoint, or a `.env` file, and both run on data committed in this repo.
 
-**`make demo`** builds two indexes over the same 1,200 public Enron emails, one plain and one
+**`just demo`** builds two indexes over the same 1,200 public Enron emails, one plain and one
 with each message embedded alongside its conversation's preceding context, then asks 99
 single-message questions and 73 spanning ones:
 
@@ -98,7 +99,7 @@ right conversation is found **97.3%** of the time at top-5, where top-5 *message
 **52.6%** of it and thread expansion gives you all of it. A generic RAG hands you half the
 conversation, and it tends to be the half the answer is missing from.
 
-**`make bench`** scores 360 committed queries against a fixed 2,000-document slice of public
+**`just bench`** scores 360 committed queries against a fixed 2,000-document slice of public
 Enron-QA and prints recall@k with intervals and a paired test. Zero LLM calls, about 1.6 min on
 an Apple-silicon GPU. Method, caveats and every omission for both commands are in
 [`docs/BENCHMARK.md`](docs/BENCHMARK.md). Fixtures are committed under
@@ -143,7 +144,7 @@ thread reconstruction (**+29.1**) and per-email contextual summaries (**+12.8**)
 a fancier embedding model. Full ladder in the [case study](docs/CASE_STUDY.md), reasoning in the
 [benchmark post](https://fmasi.eu/blog/email-rag-retrieval/). You cannot re-run these.
 
-**What you can check yourself.** `make bench`, on public Enron-QA, no key, no private data:
+**What you can check yourself.** `just bench`, on public Enron-QA, no key, no private data:
 
 | arm | R@1 | R@5 | R@10 |
 |---|---|---|---|
@@ -152,7 +153,7 @@ a fancier embedding model. Full ladder in the [case study](docs/CASE_STUDY.md), 
 
 Brackets are 95% Wilson intervals. They overlap, so the benchmark also reports the paired test,
 which is the right one here: at R@5 learned-sparse fixes 12 queries and breaks 1, McNemar exact
-**p = 0.0034**. Run `make bench SIZE=large`, the distractor pool grows 5x, the task gets harder,
+**p = 0.0034**. Run `just bench large`, the distractor pool grows 5x, the task gets harder,
 and the sparse advantage *widens* to **+4.4pp** (p = 0.0001). That direction is the real result.
 
 Every published figure is tracked in **[`docs/CLAIMS.md`](docs/CLAIMS.md)** with the script that
@@ -232,8 +233,9 @@ persona, [`QUICKSTART.md`](docs/QUICKSTART.md) for 5-minute setup,
 [`BENCHMARK.md`](docs/BENCHMARK.md) for the public numbers and exactly what they omit, and
 [`CLAIMS.md`](docs/CLAIMS.md) for whether any given figure is reproducible or author-reported.
 
-Every PR runs pytest with an 85% coverage floor and CodeQL as required gates, plus ruff, mypy
-and pip-audit as advisory ones. Details in [`docs/CI.md`](docs/CI.md).
+Every PR must pass pytest with an 85% coverage floor, pip-audit, CodeQL, a lint job (ruff,
+SAST, mypy, workflow lint, gitleaks) and one Claude review before it can merge. Details in
+[`docs/CI.md`](docs/CI.md).
 
 ## Status
 

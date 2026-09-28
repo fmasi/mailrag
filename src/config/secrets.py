@@ -91,8 +91,8 @@ def _from_keychain(service: str) -> str:
             f"(on Linux use env: or file: instead of keychain:{service})"
         )
     try:
-        out = subprocess.run(
-            ["security", "find-generic-password", "-s", service, "-w"],
+        out = subprocess.run(  # noqa: S603 - fixed argv, no shell; service is an argv item
+            ["security", "find-generic-password", "-s", service, "-w"],  # noqa: S607 - macOS `security`, checked with shutil.which above
             capture_output=True,
             text=True,
             timeout=30,

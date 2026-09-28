@@ -104,7 +104,7 @@ class TestDataPath(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(SystemExit) as cm:
                 data_path("MAILRAG_EVAL_TREC", "/nope", what="x")
-        self.assertIn("make bench", str(cm.exception))
+        self.assertIn("just bench", str(cm.exception))
 
 
 class TestRequireKey(unittest.TestCase):

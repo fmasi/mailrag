@@ -1,4 +1,4 @@
-"""The public, reproducible retrieval benchmark — `make bench` (issue #97).
+"""The public, reproducible retrieval benchmark — `just bench` (issue #97).
 
 Builds a Qdrant collection from a fixed slice of the **public** Enron-QA dataset
 and reports recall@k for two locally-runnable arms:
@@ -19,8 +19,8 @@ unreproducible for a reader without a key. Both are measured in the private
 harness; this file only reports what a stranger can regenerate.
 
 Usage:
-    make bench                 # standard set (2000 docs / 360 queries)
-    make bench SIZE=large      # large set   (10000 docs / 360 queries, harder)
+    just bench                 # standard set (2000 docs / 360 queries)
+    just bench large           # large set   (10000 docs / 360 queries, harder)
 
 Timings and the no-LLM guarantee are documented in docs/BENCHMARK.md.
     python -m scripts.eval.bench_public --size standard --skip-build

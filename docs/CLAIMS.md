@@ -9,8 +9,8 @@ register, "is that still true?" is unanswerable, and the honest answer drifts
 silently as the code, the models and the dependencies move underneath it. A
 published number with no traceable source is a claim, not a result.
 
-It also guards a subtler failure. When `make bench` shipped, its docs listed two
-omissions (rerank, thread reconstruction) and missed a third — contextual
+It also guards a subtler failure. When the public benchmark (now `just bench`) shipped, its
+docs listed two omissions (rerank, thread reconstruction) and missed a third — contextual
 summaries were switched off too, so a reader could reasonably have assumed the
 +12.8 lever was in play. Writing every claim down next to what actually produces
 it is how that class of gap gets caught.
@@ -31,8 +31,8 @@ saying so.
 |---|---|---|---|---|---|---|
 | R1 | dense R@5 **94.4** [91.6, 96.4] vs dense+sparse **97.5** [95.3, 98.7]; McNemar p=0.0034 | README, landing page, `BENCHMARK.md` | `scripts/eval/bench_public.py` | public Enron-QA, 2 000 docs / 360 q | **Public** ✅ | 2026-08-12 |
 | R2 | large set: dense **90.0** vs dense+sparse **94.4**; p=0.0001 | README, `BENCHMARK.md` | `scripts/eval/bench_public.py --size large` | public Enron-QA, 10 000 docs | **Public** ✅ | 2026-08-12 |
-| R2b | contextual summaries: plain R@5 **60.6** vs with-context **73.7**; McNemar p=0.0044 | README, `make demo` | `scripts/demo.py` | public Enron, 1 200 docs / 99 validated questions | **Public** ✅ | 2026-08-14 |
-| R2c | thread reconstruction, public: **T@5 97.3%** on spanning questions; message-level retrieval surfaces only **52.6%** of the answering conversation at top-5 | README, `make demo` | `scripts/demo.py` | public Enron, 1 200 docs / 73 spanning questions | **Public** ✅ | 2026-08-14 |
+| R2b | contextual summaries: plain R@5 **60.6** vs with-context **73.7**; McNemar p=0.0044 | README, `just demo` | `scripts/demo.py` | public Enron, 1 200 docs / 99 validated questions | **Public** ✅ | 2026-08-14 |
+| R2c | thread reconstruction, public: **T@5 97.3%** on spanning questions; message-level retrieval surfaces only **52.6%** of the answering conversation at top-5 | README, `just demo` | `scripts/demo.py` | public Enron, 1 200 docs / 73 spanning questions | **Public** ✅ | 2026-08-14 |
 | R3 | plain-dense baseline **45.6%** R@5 | README, landing page | private eval ladder | private ~32k mailbox | Private | 2026-06 (pre-register) |
 | R4 | thread reconstruction **64.2 → 93.3** (+29.1) | README, landing page | `scripts/eval/bench_thread_reconstruction.py` | private, `work-rag-ctx-threadaware` | Private ✅ **re-verified, exact** — and **corroborated publicly by R2c** (T@5 97.3% on public Enron) | 2026-08-13 |
 | R5 | contextual summaries **+12.8** | README, landing page | `scripts/eval/build_bodyonly_collections.py` (builds the no-summary control) | private | Private — **corroborated publicly by R2b** (+13.1pp R@5 on a different corpus) | 2026-06 (pre-register) |
@@ -74,8 +74,8 @@ is unblocked — it just needs the build step first.
 
 | # | Claim | Where published | Produced by | Status | Last verified |
 |---|---|---|---|---|---|
-| P1 | `make bench` runs in **1.6 min** (MPS) / **14.7 min** (CPU-only) | README, `BENCHMARK.md`, Makefile | timed `make bench`, M5 Pro 6P+12E / 48 GB, load-gated | **Public** ✅ | 2026-08-12 |
-| P2 | `make bench` spends **zero LLM calls** | README, `BENCHMARK.md` | code inspection: `embed_summary=False`, `apply_noise_filter=False`, no profile, retrieval-only scoring | **Public** ✅ | 2026-08-12 |
+| P1 | `just bench` runs in **1.6 min** (MPS) / **14.7 min** (CPU-only) | README, `BENCHMARK.md`, justfile | timed `just bench`, M5 Pro 6P+12E / 48 GB, load-gated | **Public** ✅ | 2026-08-12 |
+| P2 | `just bench` spends **zero LLM calls** | README, `BENCHMARK.md` | code inspection: `embed_summary=False`, `apply_noise_filter=False`, no profile, retrieval-only scoring | **Public** ✅ | 2026-08-12 |
 
 ## Attachment-noise claims (2026-08-19)
 
@@ -111,7 +111,7 @@ because these figures appear in `MCP_SERVER.md`, `ARCHITECTURE.md` and `EXPERIME
 
 | # | Claim | Verified by |
 |---|---|---|
-| S1 | `make bench` excludes thread reconstruction, summaries, rerank and noise cleanup | `BENCHMARK.md` exclusion table; `bench_public.py` flags |
+| S1 | `just bench` excludes thread reconstruction, summaries, rerank and noise cleanup | `BENCHMARK.md` exclusion table; `bench_public.py` flags |
 | S2 | Enron-QA carries no conversation linkage, so thread reconstruction cannot be scored on it *as shipped* | dataset schema: `email / questions / path / user / …`; 400-row sample shows `Message-ID` in 1, `In-Reply-To` in 0 |
 | S3 | The **CMU Enron maildir** has no threading headers either — but conversations are derivable | 8 000 real messages: `In-Reply-To` 0.0%, `References` 0.0%, yet `Re:`/`Fw:` subjects 64.3%. Deriving by normalised subject + shared participant puts **50.2%** of 19 530 messages in a multi-message thread (largest 59). Measured 2026-08-14 |
 | S4 | Derived threads carry a **measured false-merge rate**, concentrated in generic subjects and long spans | 19 530 Enron messages: 2.2% of same-thread pairs share **no** participant (transitive chaining, 1.0% of threads); 11.1% of threads span >30d and **1.4% span >1 year**; generic subjects ("hey", "lunch", "meeting") account for 55 threads / 2.3% of threaded messages. Worst case observed: "happy hour", 36 messages over 391 days across 16 participants — a recurring invite, not a conversation. Measured 2026-08-14 |
@@ -119,7 +119,7 @@ because these figures appear in `MCP_SERVER.md`, `ARCHITECTURE.md` and `EXPERIME
 ## What is still author-reported, and what would close it
 
 Both of the ladder's biggest levers are now publicly demonstrated. Contextual embedding
-(R2b) and thread reconstruction (R2c) both run inside `make demo`, on 1,200 public Enron
+(R2b) and thread reconstruction (R2c) both run inside `just demo`, on 1,200 public Enron
 emails anyone can download, with a paired significance test on each.
 
 What stays author-reported is the **magnitude on a real mailbox**. A 32,000-email archive
@@ -148,7 +148,7 @@ older than the last release is a row that should not be quoted without a caveat.
 ## Running the private scripts
 
 They need the private corpus and are not runnable by a stranger; the public path
-is `make bench`. Data locations are environment-overridable — see
+is `just bench`. Data locations are environment-overridable — see
 [`scripts/eval/_paths.py`](../scripts/eval/_paths.py):
 
 ```bash

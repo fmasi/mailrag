@@ -289,7 +289,7 @@ class AttachmentStore:
             where, params = "a.message_id=?", [message_id]
         elif thread_id is not None:
             where, params = "a.thread_id=?", [thread_id]
-        rows = list(self._conn.execute(f"SELECT a.* FROM attachments a WHERE {where}", params))
+        rows = list(self._conn.execute(f"SELECT a.* FROM attachments a WHERE {where}", params))  # noqa: S608 - fixed WHERE literals, values bound as ?
         metas = [self._row_to_meta(r) for r in rows]
         if include_boilerplate:
             return metas
@@ -367,7 +367,7 @@ class AttachmentStore:
         if not clauses:
             return []
         rows = self._conn.execute(
-            "SELECT DISTINCT filename FROM attachments "
+            "SELECT DISTINCT filename FROM attachments "  # noqa: S608 - clauses are ? placeholders only
             f"WHERE inline=0 AND filename != '' AND ({' OR '.join(clauses)})",
             params,
         )

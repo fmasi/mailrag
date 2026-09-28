@@ -75,7 +75,7 @@ one server:
 
 ### a. Local bge-m3 hybrid — the default, recommended path
 
-The headline contextual stack (`make demo`, `build_contextual_index`,
+The headline contextual stack (`just demo`, `build_contextual_index`,
 `build_hybrid_searcher`) embeds with **bge-m3 via FlagEmbedding, locally**:
 **dense + learned-sparse** in one model. This is the differentiator — the
 learned-sparse leg is what beats dense-only retrieval on real email (see

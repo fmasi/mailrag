@@ -2,7 +2,7 @@
 
 Only the pure parts are unit-tested here: fixture loading, row->email parsing,
 rank/recall arithmetic. Building a collection and searching it needs Qdrant and
-bge-m3 weights, which is what `make bench` is for.
+bge-m3 weights, which is what `just bench` is for.
 
 These tests exist because a benchmark that silently miscounts is worse than no
 benchmark — it produces a confident, wrong, *public* number.

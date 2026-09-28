@@ -93,7 +93,9 @@ class RAGConfig:
 
             value = value.strip()
             if not value:
-                print(f"Warning: {var_name} is empty. Using default '{current_value}'.")
+                # Name the variable, never the value kept: for the *_API_KEY settings
+                # it is a credential (CodeQL py/clear-text-logging-sensitive-data).
+                print(f"Warning: {var_name} is empty. Keeping the current setting.")
                 return current_value
 
             return value

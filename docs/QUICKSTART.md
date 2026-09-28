@@ -2,7 +2,7 @@
 
 *[← docs index](INDEX.md) · [README](../README.md) · full setup in [`SETUP.md`](SETUP.md)*
 
-The fastest way to see `mailrag` work is `make demo`: two indexes over 1,200 public Enron
+The fastest way to see `mailrag` work is `just demo`: two indexes over 1,200 public Enron
 emails, the same questions asked of both, and a measured difference. It needs no API key and
 touches no private data. For the full local `.eml` pipeline, the `mailrag` conda env and the
 test suite, go to [`SETUP.md`](SETUP.md).
@@ -13,9 +13,10 @@ From a fresh clone:
 
 ```bash
 pip install -r requirements.txt   # includes FlagEmbedding (bge-m3); first run downloads ~2 GB of weights
-make demo                         # starts Qdrant, builds both indexes, scores them
+just demo                         # starts Qdrant, builds both indexes, scores them
 ```
 
+It needs Python 3.11+, Docker and [`just`](https://github.com/casey/just) (`brew install just`).
 No `.env` and no key. You need those only for `./mailrag ask` and for indexing your own mail,
 which come later on this page.
 
@@ -23,7 +24,7 @@ which come later on this page.
 > [`SETUP.md`](SETUP.md) for the `mailrag` env. `pyproject.toml` and `poetry.lock` pin exact
 > versions, and `requirements.txt` is the supported install path.
 
-`make demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh), which brings up Qdrant in
+`just demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh), which brings up Qdrant in
 Docker and then runs `python -m scripts.demo`. That builds **two** indexes over the same
 corpus, one embedding each message as it stands and one embedding it alongside a summary of
 what came before it in its conversation, then asks both the same questions.
@@ -47,11 +48,11 @@ p = 0.0044).
 conversation is found 97.3% of the time at top-5, the top-5 *messages* give you 52.6% of that
 conversation, and expanding to the thread gives you all of it.
 
-### How it differs from `make bench`
+### How it differs from `just bench`
 
 The two commands answer different questions, and it is worth keeping them apart.
 
-| | `make demo` | `make bench` |
+| | `just demo` | `just bench` |
 |---|---|---|
 | asks | does the technique work? | how good is the retrieval? |
 | corpus | 1,200 public Enron emails | 2,000-document Enron-QA slice |
@@ -102,7 +103,7 @@ The live query API is `build_hybrid_searcher(...).search_threads(query)`:
 from dotenv import load_dotenv; load_dotenv()
 from src.query.hybrid import build_hybrid_searcher
 
-# point at a built collection (see `make demo` / SETUP.md)
+# point at a built collection (see `just demo` / SETUP.md)
 searcher = build_hybrid_searcher("mailrag-demo", mode="hybrid")
 
 # plain retrieval: ranked NodeWithScore chunks
@@ -129,7 +130,7 @@ classes that no longer exist.
 
 ## Next steps
 
-1. Run `make demo`, then edit the questions in [`eval/demo/questions.jsonl`](../eval/demo/questions.jsonl) and watch the numbers move.
+1. Run `just demo`, then edit the questions in [`eval/demo/questions.jsonl`](../eval/demo/questions.jsonl) and watch the numbers move.
 2. Read [`WHY_LOCAL.md`](WHY_LOCAL.md) for why the project is built this way.
 3. Read [`SETUP.md`](SETUP.md) to run the full local `.eml` pipeline over your own mailbox.
 4. Read [`GUIDE.md`](GUIDE.md) and [`VERBS.md`](VERBS.md) for the persona flow and the CLI.

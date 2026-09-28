@@ -309,7 +309,7 @@ def sample_files(paths: Iterable[str], n: Optional[int], seed: int = 0) -> List[
     items = list(paths)
     if n is None or n >= len(items):
         return items
-    return random.Random(seed).sample(items, n)
+    return random.Random(seed).sample(items, n)  # noqa: S311 - seeded sampling, not crypto
 
 
 def apply_pass2(emails, cache: Pass2Cache, min_confidence: float = 0.7):

@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 # Hosts that mean "this ran on my machine". Anything else is treated as remote,
 # which is the safe direction: mislabelling a hosted endpoint as local would
 # understate both cost and data exposure.
-_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"}
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"}  # noqa: S104 - a host to classify, not a bind
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ def _lmstudio_model_info(api_base: str, model: str, api_key: str = "") -> dict:
         root = str(api_base).rstrip("/")
         if root.endswith("/v1"):
             root = root[: -len("/v1")]
-        req = urllib.request.Request(f"{root}/api/v0/models")
+        req = urllib.request.Request(f"{root}/api/v0/models")  # noqa: S310 - operator-configured
         if api_key:
             req.add_header("Authorization", f"Bearer {api_key}")
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 - operator-configured

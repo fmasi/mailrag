@@ -1,4 +1,4 @@
-"""`make demo`'s scoring logic and fixtures (#125).
+"""`just demo`'s scoring logic and fixtures (#125).
 
 The demo prints numbers a stranger will quote, so its arithmetic gets the same
 treatment as the benchmark's: a demo that miscounts is worse than no demo.

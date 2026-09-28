@@ -65,7 +65,7 @@ private, open stack of context that I own.
 
 - [`CLAIMS.md`](CLAIMS.md) tracks which numbers a stranger can reproduce and which stay
   author-reported, which is the same honesty problem in a different form.
-- [`BENCHMARK.md`](BENCHMARK.md) covers `make bench`, the public retrieval number that
+- [`BENCHMARK.md`](BENCHMARK.md) covers `just bench`, the public retrieval number that
   needs no key and no private data.
 - [`BACKENDS.md`](BACKENDS.md) covers the two seams where cloud is an option rather than
   a requirement, and what you give up at each.
