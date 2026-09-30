@@ -741,6 +741,7 @@ class TestListAttachments(unittest.TestCase):
                     "thread_id": "t1",
                     "message_id": "m1",
                     "inline": False,
+                    "content_trust": "untrusted-email",
                 }
             ],
         )
@@ -792,6 +793,8 @@ class TestGetAttachment(unittest.TestCase):
                 # document actually arrived (a 22MB deck can extract to 1.4k
                 # chars and still say "extracted").
                 "chars": 14,
+                # Attachment text is third-party content like any email body.
+                "content_trust": "untrusted-email",
             },
         )
         self.assertNotIn("path", out)  # no raw bytes / local path leaked
