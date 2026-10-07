@@ -43,7 +43,7 @@ class TestCliDispatch(unittest.TestCase):
                 rc = cli.main(["pass1", "--profile", fp])
         self.assertEqual(rc, 0)
 
-    def test_build_verb_saves_profile(self):
+    def test_build_verb_runs_the_build_stage(self):
         from src import cli
 
         with tempfile.TemporaryDirectory() as d:

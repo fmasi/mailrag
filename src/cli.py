@@ -38,7 +38,7 @@ from src.pipeline import pass2 as pass2_stage
 from src.pipeline import profile as profile_stage
 from src.pipeline import prune as prune_stage
 from src.pipeline import select as select_stage
-from src.profile import CorpusProfile
+from src.profile import CorpusProfile, ProfileChangedError
 
 
 def _add_profile_arg(p):
@@ -65,7 +65,10 @@ def _cmd_index(args):
         noise_min_confidence=args.noise_confidence,
         allow_legacy_append=args.allow_legacy_append,
     )
-    prof.save(args.profile)
+    # Deliberately does not write the profile back: build only READS it. It used
+    # to save the copy it had loaded before an hours-long run, which reverted a
+    # calibrate that finished in between. save() merges now, so that particular
+    # loss cannot recur, but a command that changes nothing has nothing to save.
     print(f"DONE: {res.chunks} chunks -> '{res.collection}'")
     return 0
 
@@ -1148,7 +1151,9 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except ValueError as e:
+    except (ValueError, ProfileChangedError, PermissionError) as e:
+        # PermissionError: a profile its owner made read-only is refused by
+        # save(), and that is an answer for the user, not a stack trace.
         print(f"error: {e}", file=sys.stderr)
         return 1
 

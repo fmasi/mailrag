@@ -22,6 +22,7 @@ from src.ingest.selection import discover_structure, list_eml_relpaths
 from src.persona.registry import Persona, Registry
 from src.persona.runner import build_handlers
 from src.persona.wizard import read_recommendation
+from src.profile import ProfileChangedError
 
 __all__ = [
     "LLM_STEPS",
@@ -293,29 +294,57 @@ def execute_plan(
 
     Returns a process exit code (0 done, 1 user-aborted). The profile is saved
     on every exit path — including a handler raising — so partial progress
-    (scope rules, calibration) is never discarded."""
+    (scope rules, calibration) is kept. The save merges with whatever another
+    command wrote meanwhile. If both changed the same field, that field keeps
+    the other command's value, the rest is saved, the log names the field and
+    the run returns 1 rather than report itself complete."""
+    saved = True
     try:
-        for index, step in enumerate(planned):
-            if step.skipped:
-                ui.on_step_skip(index, step)
-                ui.log(f"skip {step.verb} (optional, not implemented yet)")
-                continue
-            if step.verb == "calibrate":
-                ui.on_step_start(index, step)
-                if run_calibrate_gate(prof, handlers["calibrate"], ui) == "abort":
-                    ui.log("aborted at the calibration gate")
-                    return 1
-                ui.on_step_done(index, step, None)
-                continue
-            if step.verb == "summarize" and not ui.confirm_spend():
-                ui.log("stopped before the LLM summary pass")
-                return 1
-            ui.on_step_start(index, step)
-            result = handlers[step.verb](prof, **step.params)
-            ui.on_step_done(index, step, result)
-        return 0
+        code = _run_planned(prof, planned, handlers, ui)
     finally:
-        prof.save(profile_path)
+        # No ``return`` in here and nothing allowed to raise out of it: either
+        # would replace an exception a handler raised.
+        try:
+            prof.save(profile_path)
+        except ProfileChangedError as exc:
+            saved = False
+            # Field names only. The log renders markup and the exception text
+            # carries the profile path, which may hold brackets.
+            ui.log(
+                f"profile not fully saved: another command changed {', '.join(exc.fields)} "
+                "during this run. Its value was kept; re-run that step to redo it."
+            )
+        except OSError as exc:
+            # A full disk, a read-only profile, a directory that went away. Same
+            # rule: it must not replace what a handler raised. The reason is
+            # logged without the path, for the same markup reason as above.
+            saved = False
+            ui.log(f"profile not saved: {exc.strerror or type(exc).__name__}")
+    return code if saved else 1
+
+
+def _run_planned(
+    prof: Any, planned: Sequence[PlannedStep], handlers: Dict[str, Handler], ui: WizardUI
+) -> int:
+    for index, step in enumerate(planned):
+        if step.skipped:
+            ui.on_step_skip(index, step)
+            ui.log(f"skip {step.verb} (optional, not implemented yet)")
+            continue
+        if step.verb == "calibrate":
+            ui.on_step_start(index, step)
+            if run_calibrate_gate(prof, handlers["calibrate"], ui) == "abort":
+                ui.log("aborted at the calibration gate")
+                return 1
+            ui.on_step_done(index, step, None)
+            continue
+        if step.verb == "summarize" and not ui.confirm_spend():
+            ui.log("stopped before the LLM summary pass")
+            return 1
+        ui.on_step_start(index, step)
+        result = handlers[step.verb](prof, **step.params)
+        ui.on_step_done(index, step, result)
+    return 0
 
 
 def short_result(result: Any, limit: int = 140) -> str:
