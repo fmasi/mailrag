@@ -260,14 +260,20 @@ grounded natural-language answer for you.
 List the files attached to a thread or a message (parity with the CLI
 `./mailrag attachments list`) — and the way in to their contents.
 
-> **The store must be built once, separately.** `mailrag onboard` / `index` /
-> `sync` do **not** populate it: they extract attachment *text* for retrieval
-> down a different path (`src/indexing/attachment_docs.py`), which is why
-> attachment content can be fully searchable while `list_attachments` returns
-> nothing for every thread. Run `./mailrag attachments build --profile
-> <corpus.profile.json>` once to populate it. Both attachment tools now raise an
+> **The store must be built once, separately.** `mailrag onboard` and `index`
+> do **not** populate it: they extract attachment *text* for retrieval down a
+> different path (`src/indexing/attachment_docs.py`), which is why attachment
+> content can be fully searchable while `list_attachments` returns nothing for
+> every thread. Run `./mailrag attachments build --profile
+> <corpus.profile.json>` once to populate it. Both attachment tools raise an
 > actionable error naming that command when the store is empty, rather than
 > answering like a thread that simply has no attachments.
+>
+> **`sync` keeps it current after that.** Each message sync indexes has its
+> attachment bytes written to the collection's store first, in the same stage,
+> so new mail is listable as soon as it is searchable. Mail synced before this
+> behaviour existed is not backfilled: re-run `attachments build` once to pick
+> it up (it is idempotent and skips what the store already holds).
 
 > **Attachment contents are invisible to `search_email`, `answer_question` and
 > `grep_email`.** Those index message *bodies* only. So when the answer lives in
@@ -480,6 +486,8 @@ Consequences:
 - `./mailrag attachments build --profile <p>` derives the store from the
   profile's own `collection` field, so no extra flag is needed. `attachments
   list` / `get` take `--collection`. An explicit `--store` overrides everything.
+  Without one, the CLI, the server and `sync` all resolve the same directory,
+  `$RAG_ATTACH_STORE` included (`src/attachments/location.py`).
 - Collection names are reduced to one safe path segment, so a name containing
   separators cannot walk out of the store root.
 - The same document legitimately appearing in both corpora — a PDF mailed to a

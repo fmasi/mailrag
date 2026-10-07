@@ -517,6 +517,145 @@ class TestIndexStage(_RunnerTest):
         self.assertEqual(self.state.counts("acct")["pending_index"], 0)
 
 
+def _eml_with_attachment(message_id: str, data: bytes = b"quarterly figures\n") -> bytes:
+    m = EmailMessage()
+    m["From"] = "alice@example.com"
+    m["To"] = "bob@example.com"
+    m["Subject"] = "Report"
+    m["Message-ID"] = message_id
+    m["Date"] = "Tue, 15 Jan 2026 09:30:00 +0000"
+    m.set_content("See attached.")
+    m.add_attachment(data, maintype="application", subtype="octet-stream", filename="report.bin")
+    return bytes(m)
+
+
+class TestAttachmentStoreFollowsSync(_RunnerTest):
+    """Sync keeps the attachment store as fresh as the index (#160).
+
+    Attachment TEXT reached the vector index on every sync, but the bytes behind
+    ``list_attachments`` / ``get_attachment`` were only ever written by the manual
+    ``attachments build``. Mail synced after that build was searchable by its
+    attachment content and had no attachment anyone could list or fetch.
+    """
+
+    def _profile(self):
+        return mock.Mock(pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x")
+
+    def _deliver_with_attachment(self, name="m1", message_id="<a@x>", data=b"quarterly figures\n"):
+        path = os.path.join(self.maildir, "cur", name)
+        with open(path, "wb") as fh:
+            fh.write(_eml_with_attachment(message_id, data))
+        os.utime(path, (1000, 1000))
+        self._sync()
+
+    def _index(self, **kw):
+        kw.setdefault("index_fn", lambda **k: (1, self._keys_for(k["paths"])))
+        return index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder_factory=lambda: mock.Mock(),
+            require_judged=False,
+            **kw,
+        )
+
+    def _store(self, collection="test-collection"):
+        from src.attachments.location import resolve_attach_store
+        from src.attachments.store import AttachmentStore
+
+        store = AttachmentStore(resolve_attach_store(collection=collection))
+        self.addCleanup(store.close)
+        return store
+
+    def test_indexing_a_message_stores_its_attachment_bytes(self):
+        self._deliver_with_attachment(data=b"quarterly figures\n")
+        self._index()
+        store = self._store()
+        self.assertEqual(store.count(), 1)
+        (meta,) = store.list_for(message_id="<a@x>", include_boilerplate=True)
+        self.assertEqual(meta.filename, "report.bin")
+        self.assertEqual(store.get_bytes(meta.sha256), b"quarterly figures\n")
+
+    def test_the_bytes_land_only_in_the_accounts_own_collection_store(self):
+        from src.attachments.location import resolve_attach_store
+
+        self._deliver_with_attachment()
+        self._index()
+        root = resolve_attach_store()
+        self.assertEqual(os.listdir(root), ["test-collection"])
+        # No flat index.db at the root: that is the legacy shared store the
+        # server refuses to run against.
+        self.assertFalse(os.path.exists(os.path.join(root, "index.db")))
+
+    def test_the_report_counts_what_was_stored_without_naming_it(self):
+        self._deliver_with_attachment()
+        report = self._index()
+        self.assertIn("stored 1 attachment(s)", report.messages)
+        self.assertFalse([m for m in report.messages if "report.bin" in m])
+
+    def test_a_store_failure_defers_the_index_and_says_so(self):
+        """Indexing on regardless would mark the mail indexed and never revisit
+        it: the silent drift this stage exists to end."""
+        self._deliver_with_attachment()
+        reached = []
+
+        def broken(**kw):
+            raise OSError("disk full")
+
+        report = self._index(attach_fn=broken, index_fn=lambda **k: reached.append(1) or (1, set()))
+        self.assertIn("attachments", report.skipped_stages)
+        self.assertEqual(report.status, STATUS_PARTIAL)
+        self.assertEqual(reached, [], "the index ran although the store write failed")
+        self.assertEqual(report.indexed, 0)
+        self.assertEqual(len(self._pending_index_keys()), 1)
+
+    def test_the_next_run_after_a_store_failure_catches_up(self):
+        self._deliver_with_attachment()
+        self._index(attach_fn=lambda **kw: (_ for _ in ()).throw(OSError("disk full")))
+        report = self._index()
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(self._store().count(), 1)
+
+    def test_storing_the_same_message_twice_keeps_one_row(self):
+        from src.sync.runner import _default_attach
+
+        self._deliver_with_attachment()
+        paths = [
+            r["eml_path"] for r in self.state.pending("acct", "indexed", judge_configured=False)
+        ]
+        _default_attach(paths=paths, collection="test-collection")
+        _default_attach(paths=paths, collection="test-collection")
+        self.assertEqual(self._store().count(), 1)
+
+    def test_an_empty_delta_never_opens_the_store(self):
+        calls = []
+        self._index(attach_fn=lambda **kw: calls.append(1) or 0)
+        self.assertEqual(calls, [])
+
+    def test_the_store_is_written_before_the_embedder_is_built(self):
+        """A store failure must cost a file write, not a 2 GB model load."""
+        self._deliver_with_attachment()
+        order = []
+        index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder_factory=lambda: order.append("embedder") or mock.Mock(),
+            attach_fn=lambda **kw: order.append("attach") or 0,
+            index_fn=lambda **k: (1, self._keys_for(k["paths"])),
+            require_judged=False,
+        )
+        self.assertEqual(order, ["attach", "embedder"])
+
+    def test_an_account_with_no_collection_is_refused(self):
+        """An empty collection resolves to the store ROOT, the shared pre-split
+        layout where one corpus could list another's files."""
+        from src.sync.runner import _default_attach
+
+        with self.assertRaises(ValueError):
+            _default_attach(paths=[], collection="")
+
+
 class TestMultiAccount(_RunnerTest):
     def test_two_accounts_keep_separate_ledgers_and_cursors(self):
         other_dir = os.path.join(self.d, "Other")

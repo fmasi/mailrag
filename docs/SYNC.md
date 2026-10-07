@@ -135,6 +135,7 @@ and anything it couldn't do is picked up next time:
 | Network / IMAP | warn, exit cleanly, retry on the next tick |
 | LLM endpoint | mail is still fetched and spooled; judging deferred, and indexing waits with it. An endpoint outage is distinguished from a per-message failure (`classify_failure`) and never consumes a message's retry budget — otherwise a weekend with LM Studio closed would abandon the whole backlog |
 | Qdrant | mail is still fetched and judged; indexing deferred |
+| Attachment store (disk full, locked) | mail is still fetched and judged; the store write is retried on the next tick and **indexing waits for it**, so a message never becomes searchable by an attachment that cannot be listed or fetched |
 
 Two failures are deliberately *not* treated as outages, because retrying cannot
 fix them and a silent "deferred" every 12 hours would hide them forever:
@@ -202,6 +203,18 @@ message left in the queue may be one your model reliably chokes on, which is the
 they are abandoned after three attempts; probe fails, nothing is charged and the
 stage is deferred. Transport failures are classified as outages up front and
 never consume a retry budget at all.
+
+### Attachments: text to the index, bytes to the store
+
+A synced message's attachments travel two paths in the index stage. Their
+extracted *text* is chunked into the collection, which is what `search_email`
+finds. Their *bytes* are written to the collection's attachment store
+(`~/.mailrag/attachments/<collection>/`), which is what `list_attachments` and
+`get_attachment` read. The store write runs first and is idempotent.
+
+Sync only stores what it brings in. Mail indexed in bulk, or synced before the
+store step existed, needs one `./mailrag attachments build --profile <p>` to
+catch up.
 
 ### Known limitation: a degraded environment loses attachment text
 

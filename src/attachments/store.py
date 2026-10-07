@@ -119,13 +119,14 @@ class AttachmentStore:
         """Total attachment rows in the store (0 = never ingested).
 
         Exists so callers can tell "this thread has no attachments" apart from
-        "no attachments have ever been ingested". The store is populated only by
-        ``mailrag attachments build``; indexing and continuous sync extract
-        attachment *text* for retrieval down a separate path
-        (``src.indexing.attachment_docs``) and never write here. So a corpus can
-        be fully indexed, with attachment content searchable, while this store
-        is still empty — and every lookup then returns an empty list that looks
-        exactly like a thread with no attachments.
+        "no attachments have ever been ingested". Two things write here:
+        ``mailrag attachments build`` over a whole profile, and continuous sync
+        for each message it indexes. A bulk ``index`` / ``onboard`` does not: it
+        extracts attachment *text* for retrieval down a separate path
+        (``src.indexing.attachment_docs``). So a corpus can be fully indexed,
+        with attachment content searchable, while this store is still empty —
+        and every lookup then returns an empty list that looks exactly like a
+        thread with no attachments.
         """
         return int(self._conn.execute("SELECT COUNT(*) FROM attachments").fetchone()[0])
 

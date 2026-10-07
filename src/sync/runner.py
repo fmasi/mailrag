@@ -413,6 +413,7 @@ def index_pending(
     embedder_factory: Callable[[], Any],
     report: Optional[SyncReport] = None,
     index_fn: Optional[Callable] = None,
+    attach_fn: Optional[Callable] = None,
     require_judged: bool = True,
     embed_summary: bool = True,
 ) -> SyncReport:
@@ -451,6 +452,22 @@ def index_pending(
             del by_path[path]
     if not by_path:
         return report
+
+    # Attachment bytes go to the collection's store in the same stage that indexes
+    # their text, and FIRST. Once a message is marked indexed nothing revisits it,
+    # so a store write that failed after the index would be a message whose
+    # attachments are searchable but can never be listed or fetched, with nothing
+    # to say so (#160). Failing here defers the whole stage instead: the write is
+    # idempotent, the next tick retries it, and it costs no model load.
+    try:
+        stored = (attach_fn or _default_attach)(paths=list(by_path), collection=account.collection)
+    except Exception as exc:  # noqa: BLE001 — a full disk or a locked store, retried next tick
+        log.warning("attachment store unavailable (%s); %d message(s) deferred", exc, len(by_path))
+        report.skipped_stages.append("attachments")
+        report.messages.append(f"attachment store deferred: {exc}")
+        return report
+    if stored:
+        report.messages.append(f"stored {stored} attachment(s)")
 
     # Below every early return: the delta is non-empty, so the model load is work
     # we are definitely going to use.
@@ -504,6 +521,39 @@ def index_pending(
             f"{skipped} message(s) deduped against existing mail (retry next run)"
         )
     return report
+
+
+def _default_attach(*, paths, collection) -> int:
+    """Write the delta's attachment bytes to the collection's store.
+
+    The same ingest ``mailrag attachments build`` runs, over the same files, so a
+    store filled by sync and one filled by a build hold the same rows. Returns
+    the number of attachment parts seen. Safe to repeat: blobs are
+    content-addressed and a (message, sha256) row is inserted once.
+    """
+    from src.attachments.classify import classify_blobs  # noqa: PLC0415
+    from src.attachments.ingest_eml import ingest_eml  # noqa: PLC0415
+    from src.attachments.location import resolve_attach_store  # noqa: PLC0415
+    from src.attachments.store import AttachmentStore  # noqa: PLC0415
+
+    if not collection:
+        # No collection resolves to the store ROOT: the pre-split shared layout,
+        # where one corpus could list another's files.
+        raise ValueError("an account needs a collection before its attachments can be stored")
+
+    store = AttachmentStore(resolve_attach_store(collection=collection))
+    try:
+        counts = ingest_eml(paths, store)
+        try:
+            # The cheap measurement the boilerplate filter reads. Not fatal: it
+            # works from the store's unmeasured blobs, so whatever this run
+            # misses the next one picks up.
+            classify_blobs(store)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("attachment classify skipped (%s); retried on the next run", exc)
+    finally:
+        store.close()
+    return counts["attachments"]
 
 
 def _default_index(*, profile, embedder, paths, collection, embed_summary=True):
