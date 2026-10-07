@@ -22,6 +22,24 @@ from src.ingest.local_source import resolve_index_files
 from src.ingest.selection import list_eml_relpaths
 
 
+def _real(path: str) -> str:
+    return os.path.realpath(os.path.expanduser(path))
+
+
+def _folder_label(dirs: List[str]) -> str:
+    """The report row a message belongs to, from its directory components.
+
+    A two-level row counts everything beneath it. A one-level row holds only the
+    files sitting directly in that folder, and says so: printed bare, ``5 Sent``
+    beside ``4000 Sent/2019`` reads as "Sent holds five messages".
+    """
+    if not dirs:
+        return "(root)"
+    if len(dirs) == 1:
+        return f"{dirs[0]}/ (direct files)"
+    return "/".join(dirs[:2])
+
+
 def coverage(profiles: Sequence, root: str) -> Dict:
     """Compare what ``profiles`` select against every ``.eml`` under ``root``.
 
@@ -29,28 +47,41 @@ def coverage(profiles: Sequence, root: str) -> Dict:
     Profiles are compared as a set because corpora share a root here: a message
     is "unclaimed" only when *no* profile selects it.
     """
+    # Both sides are compared as paths under the REAL root. A root taken as typed
+    # (relative, ``~/mail``, or through a symlink) never matched the absolute
+    # paths a profile resolves to, so every claimed file also counted as
+    # unclaimed and the totals stopped adding up.
+    root = _real(root)
     all_rel = set(list_eml_relpaths(root))
     all_abs = {os.path.join(root, r) for r in all_rel}
 
     per_profile: Dict[str, int] = {}
     claimed: set = set()
     for prof in profiles:
+        prof_root = prof.resolved_root()
         kept, _ = resolve_index_files(
-            prof.resolved_root(), prof.selection_rules, getattr(prof, "blacklist", None)
+            prof_root, prof.selection_rules, getattr(prof, "blacklist", None)
         )
-        per_profile[getattr(prof, "collection", "?")] = len(kept)
-        claimed |= set(kept)
+        real_prof = _real(prof_root)
+        mine = {os.path.join(real_prof, os.path.relpath(k, prof_root)) for k in kept}
+        # Counted within the report root, like every other number in the report.
+        per_profile[getattr(prof, "collection", "?")] = len(mine & all_abs)
+        claimed |= mine
 
     unclaimed = all_abs - claimed
     folders: Counter = Counter()
     for path in unclaimed:
         rel = os.path.relpath(path, root)
-        parts = rel.split(os.sep)
-        folders["/".join(parts[:2]) if len(parts) > 1 else "(root)"] += 1
+        # Group on the DIRECTORY, at most two levels deep. Taking the first two
+        # path components instead named a message sitting straight in a top-level
+        # folder after its own file, which is a subject line.
+        folders[_folder_label(rel.split(os.sep)[:-1])] += 1
 
     return {
         "total": len(all_abs),
-        "claimed": len(claimed),
+        # Only what lies under the report root: a profile may select mail outside
+        # it, and counting that made "claimed" exceed the total it sits under.
+        "claimed": len(claimed & all_abs),
         "unclaimed": len(unclaimed),
         "per_profile": per_profile,
         "unclaimed_folders": folders,
