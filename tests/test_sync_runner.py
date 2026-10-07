@@ -719,14 +719,14 @@ class TestAttachmentStoreFollowsSync(_RunnerTest):
     def test_a_read_only_store_is_refused_not_retried_forever(self):
         self._store().close()
         db = os.path.join(self._store_dir(), "index.db")
-        os.chmod(db, 0o444)
-        os.chmod(self._store_dir(), 0o555)
+        os.chmod(db, 0o400)
+        os.chmod(self._store_dir(), 0o500)
         try:
             self._deliver_with_attachment()
             report = self._index()
         finally:
-            os.chmod(self._store_dir(), 0o755)
-            os.chmod(db, 0o644)
+            os.chmod(self._store_dir(), 0o700)
+            os.chmod(db, 0o600)
         self.assertTrue([m for m in report.messages if "REFUSED (needs operator action)" in m])
         self.assertNotIn("attachments", report.skipped_stages)
 
