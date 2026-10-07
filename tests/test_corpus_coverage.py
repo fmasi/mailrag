@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from src.ingest.coverage import coverage, render
 
@@ -68,7 +69,7 @@ class TestCoverage(unittest.TestCase):
         for name in ("Quarterly numbers.eml", "Re- lunch.eml", "Invoice 7.eml"):
             open(os.path.join(d, name), "wb").close()
         r = coverage(self._profiles(), self.root)
-        self.assertEqual(r["unclaimed_folders"]["Trash"], 3)
+        self.assertEqual(r["unclaimed_folders"]["Trash/ (direct files)"], 3)
         self.assertFalse([f for f in r["unclaimed_folders"] if f.endswith(".eml")])
         self.assertNotIn("Quarterly numbers", render(r, limit=50))
 
@@ -83,6 +84,35 @@ class TestCoverage(unittest.TestCase):
         open(os.path.join(d, "old.eml"), "wb").close()
         r = coverage(self._profiles(), self.root)
         self.assertEqual(r["unclaimed_folders"]["Personal/Ignored"], 5)
+
+    def test_loose_files_are_not_mistaken_for_the_whole_folder(self):
+        """A two-level row counts everything beneath it, a one-level row only the
+        files sitting directly in the folder. Printed alike, ``1 Personal`` next
+        to ``4 Personal/Ignored`` reads as "Personal holds one message"."""
+        open(os.path.join(self.root, "Personal", "loose.eml"), "wb").close()
+        r = coverage(self._profiles(), self.root)
+        self.assertEqual(r["unclaimed_folders"]["Personal/ (direct files)"], 1)
+        self.assertEqual(r["unclaimed_folders"]["Personal/Ignored"], 4)
+        self.assertNotIn("Personal", r["unclaimed_folders"])
+        self.assertEqual(sum(r["unclaimed_folders"].values()), r["unclaimed"])
+
+    def test_a_relative_or_tilde_root_gives_the_same_numbers(self):
+        """Profiles resolve their files to absolute paths. A root passed as typed
+        made the two sets disjoint: every claimed file also counted as unclaimed,
+        and ``~/mail`` was never expanded so the walk found nothing."""
+        want = coverage(self._profiles(), self.root)
+        parent, name = os.path.split(self.root)
+        cwd = os.getcwd()
+        os.chdir(parent)
+        try:
+            got = coverage(self._profiles(), name)
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(got["total"], 9)
+        self.assertEqual(got["unclaimed"], want["unclaimed"])
+        self.assertEqual(got["claimed"] + got["unclaimed"], got["total"])
+        with mock.patch.dict(os.environ, {"HOME": parent}):
+            self.assertEqual(coverage(self._profiles(), "~/" + name)["total"], 9)
 
     def test_a_message_claimed_by_any_profile_is_not_unclaimed(self):
         # Corpora share a root, so "unclaimed" means no profile selects it —

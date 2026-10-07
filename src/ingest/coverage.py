@@ -22,6 +22,24 @@ from src.ingest.local_source import resolve_index_files
 from src.ingest.selection import list_eml_relpaths
 
 
+def _real(path: str) -> str:
+    return os.path.realpath(os.path.expanduser(path))
+
+
+def _folder_label(dirs: List[str]) -> str:
+    """The report row a message belongs to, from its directory components.
+
+    A two-level row counts everything beneath it. A one-level row holds only the
+    files sitting directly in that folder, and says so: printed bare, ``5 Sent``
+    beside ``4000 Sent/2019`` reads as "Sent holds five messages".
+    """
+    if not dirs:
+        return "(root)"
+    if len(dirs) == 1:
+        return f"{dirs[0]}/ (direct files)"
+    return "/".join(dirs[:2])
+
+
 def coverage(profiles: Sequence, root: str) -> Dict:
     """Compare what ``profiles`` select against every ``.eml`` under ``root``.
 
@@ -29,17 +47,24 @@ def coverage(profiles: Sequence, root: str) -> Dict:
     Profiles are compared as a set because corpora share a root here: a message
     is "unclaimed" only when *no* profile selects it.
     """
+    # Both sides are compared as paths under the REAL root. A root taken as typed
+    # (relative, ``~/mail``, or through a symlink) never matched the absolute
+    # paths a profile resolves to, so every claimed file also counted as
+    # unclaimed and the totals stopped adding up.
+    root = _real(root)
     all_rel = set(list_eml_relpaths(root))
     all_abs = {os.path.join(root, r) for r in all_rel}
 
     per_profile: Dict[str, int] = {}
     claimed: set = set()
     for prof in profiles:
+        prof_root = prof.resolved_root()
         kept, _ = resolve_index_files(
-            prof.resolved_root(), prof.selection_rules, getattr(prof, "blacklist", None)
+            prof_root, prof.selection_rules, getattr(prof, "blacklist", None)
         )
         per_profile[getattr(prof, "collection", "?")] = len(kept)
-        claimed |= set(kept)
+        real_prof = _real(prof_root)
+        claimed |= {os.path.join(real_prof, os.path.relpath(k, prof_root)) for k in kept}
 
     unclaimed = all_abs - claimed
     folders: Counter = Counter()
@@ -48,8 +73,7 @@ def coverage(profiles: Sequence, root: str) -> Dict:
         # Group on the DIRECTORY, at most two levels deep. Taking the first two
         # path components instead named a message sitting straight in a top-level
         # folder after its own file, which is a subject line.
-        dirs = rel.split(os.sep)[:-1]
-        folders["/".join(dirs[:2]) if dirs else "(root)"] += 1
+        folders[_folder_label(rel.split(os.sep)[:-1])] += 1
 
     return {
         "total": len(all_abs),
