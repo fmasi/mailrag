@@ -179,6 +179,35 @@ torch = "^2.13.0"
 #   setuptools — via llama-index-core (and formerly capped by torch, see above).
 #                GHSA-h35f-9h28-mq5c fixed in 83.0.0.
 setuptools = "^83.0.0"
+#   pyjwt — via mcp (pyjwt[crypto]). 2.13.0 is affected by sixteen advisories
+#           (PYSEC-2026-4140..4152, -4183). Most are fixed in 2.14.0, including
+#           GHSA-gvp8-978c-rx2q (CVE-2026-103001: decode() mutating a reused
+#           options dict, a silent claim-verification bypass, last affected
+#           2.13.0). GHSA-42vr-xj54-vc7v (CVE-2026-101918, a pre-verification
+#           RecursionError DoS) and GHSA-x33g-cr3x-6449 (CVE-2026-102275) need
+#           2.15.0. Supersedes Dependabot PR #208.
+pyjwt = "^2.15.0"
+#   urllib3 — via requests / qdrant-client. GHSA-8988-9cw3-xx77 (HTTPS-proxy
+#             TLS settings ignored), GHSA-gh4c-6fx4-qh6g (chunked-deflate
+#             infinite loop) and GHSA-vxq7-64xx-v4gw (unbounded chunk-size
+#             line), PYSEC-2026-4175..4177, all fixed in 2.8.0.
+urllib3 = "^2.8.0"
+#   fsspec — via datasets / huggingface-hub / llama-index-core / torch.
+#            GHSA-27vj-qcqg-25rc (CVE-2026-104851): template injection in
+#            ReferenceFileSystem leading to code execution, fixed in 2026.6.0.
+#            We never open a reference filesystem. datasets 5.0.1 caps fsspec
+#            at <=2026.6.0, so this floor and that cap leave exactly one
+#            release: the next fsspec advisory needs a datasets bump first.
+fsspec = ">=2026.6.0"
+#   multidict — via aiohttp / yarl. GHSA-54p9-h82j-f925 (CVE-2026-104874), a
+#               reference leak in the items-view union/subtraction, fixed in
+#               6.9.1.
+multidict = "^6.9.1"
+#   sentence-transformers — via FlagEmbedding. GHSA-jhr6-gm9c-rqjv
+#               (CVE-2026-68770, PYSEC-2026-4164): loading a local model
+#               bypasses trust_remote_code and runs its custom Python, fixed
+#               in 5.6.0.
+sentence-transformers = "^5.6.0"
 
 [tool.poetry.extras]
 # C/NIM experiment path (NVIDIA NeMo Retriever dense embed + rerank NIMs)
