@@ -133,6 +133,9 @@ class TestCoverage(unittest.TestCase):
         it made "claimed" larger than the total it is printed under."""
         r = coverage(self._profiles(), os.path.join(self.root, "Work"))
         self.assertEqual((r["total"], r["claimed"], r["unclaimed"]), (3, 3, 0))
+        # The per-profile rows sit under the same header, so they follow the same
+        # rule: "personal 2" beside "3 .eml, claimed 3" described another folder.
+        self.assertEqual(r["per_profile"], {"work": 3, "personal": 0})
 
     def test_a_message_claimed_by_any_profile_is_not_unclaimed(self):
         # Corpora share a root, so "unclaimed" means no profile selects it —

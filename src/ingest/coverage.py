@@ -62,9 +62,11 @@ def coverage(profiles: Sequence, root: str) -> Dict:
         kept, _ = resolve_index_files(
             prof_root, prof.selection_rules, getattr(prof, "blacklist", None)
         )
-        per_profile[getattr(prof, "collection", "?")] = len(kept)
         real_prof = _real(prof_root)
-        claimed |= {os.path.join(real_prof, os.path.relpath(k, prof_root)) for k in kept}
+        mine = {os.path.join(real_prof, os.path.relpath(k, prof_root)) for k in kept}
+        # Counted within the report root, like every other number in the report.
+        per_profile[getattr(prof, "collection", "?")] = len(mine & all_abs)
+        claimed |= mine
 
     unclaimed = all_abs - claimed
     folders: Counter = Counter()
