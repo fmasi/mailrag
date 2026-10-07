@@ -231,7 +231,7 @@ tornado = "^6.5.8"
 # the versions ci.yml uses: a lint/type gate that disagrees with CI about which
 # rules exist is worse than no local gate at all. Bump both here, in the `lint`
 # job of .github/workflows/ci.yml, in the justfile and in lefthook.yml together.
-ruff = "0.15.20"
+ruff = "0.16.10"
 mypy = "2.1.0"
 
 [build-system]
