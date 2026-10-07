@@ -35,7 +35,14 @@ class TestAttachmentsCli(unittest.TestCase):
         ing.assert_called_once()
         store_cls.assert_called_once_with("/tmp/st")
 
-    def _build(self, *extra):
+    def test_a_build_that_found_no_mail_does_not_call_the_store_complete(self):
+        """A profile root that is missing or unmounted resolves to zero files.
+        Marked built, a store sync had left partial read as complete."""
+        store = self._build(emails=0)
+        self.assertIsNone(store.built_at())
+        self.assertEqual(store.build_gap(), "partial")
+
+    def _build(self, *extra, emails=3):
         import tempfile
 
         from src.attachments.store import AttachmentStore
@@ -48,6 +55,10 @@ class TestAttachmentsCli(unittest.TestCase):
             mock.patch("src.cli.CorpusProfile.load", return_value=prof),
             mock.patch("src.cli.resolve_index_files", return_value=([], [])),
             mock.patch("src.onboard.record_profile_for_collection"),
+            mock.patch(
+                "src.cli.ingest_eml",
+                return_value={"emails": emails, "attachments": 0, "skipped": 0, "bad_parts": 0},
+            ),
         ):
             rc = cli.main(
                 ["attachments", "build", "--profile", "p.json", "--store", d, "--no-classify"]

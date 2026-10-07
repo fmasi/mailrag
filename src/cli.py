@@ -620,9 +620,11 @@ def _cmd_attachments_build(args):
                 progress=True,
             )
             print(f"classified: {stats.as_dict()}")
-        if not args.limit:
+        if not args.limit and counts.get("emails", 0) > 0:
             # Only a build over the whole profile makes an empty lookup mean "no
-            # attachments". A --limit run, like sync, covers part of the corpus.
+            # attachments". A --limit run, like sync, covers part of the corpus,
+            # and a build that found no mail at all (a missing or unmounted
+            # root) covered none of it.
             store.mark_built()
     finally:
         store.close()

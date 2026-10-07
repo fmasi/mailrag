@@ -463,8 +463,8 @@ def index_pending(
     #
     # It also runs before the indexer's own refusal checks, so while Qdrant is
     # down or a collection is REFUSED each tick re-reads the pending files here.
-    # That is a parse and a hash per message, no OCR and no model, and it writes
-    # nothing the second time.
+    # That is a parse and a hash per message and no model. It writes nothing the
+    # second time, and OCR runs only for small images not yet measured.
     try:
         stored = (attach_fn or _default_attach)(paths=list(by_path), collection=account.collection)
     except Exception as exc:  # noqa: BLE001 — sorted into refusal or outage just below
@@ -590,8 +590,15 @@ def _default_attach(*, paths, collection) -> int:
         # only, and the tools must keep saying so until a build covers the rest.
         store.mark_partial()
         before = store.count()
-        ingest_eml(paths, store)
+        counts = ingest_eml(paths, store)
         added = store.count() - before
+        if counts["bad_parts"] or counts["skipped"]:
+            # Counts only: which message, and what was in it, stays out of the log.
+            log.warning(
+                "attachment ingest: %d part(s) could not be stored, %d message(s) unreadable",
+                counts["bad_parts"],
+                counts["skipped"],
+            )
         try:
             # The cheap measurement the boilerplate filter reads. Not fatal: it
             # works from the store's unmeasured blobs, and neither a failure nor

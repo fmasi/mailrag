@@ -134,6 +134,38 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestHostileHeadersDoNotStopTheIndex(unittest.TestCase):
+    """The index path reads the same sender-controlled headers as the store
+    ingest. Its docstring said "never raises"; one crafted part made it raise,
+    and under sync that deferred the whole index stage on every tick."""
+
+    def test_an_unparseable_part_is_skipped_and_the_rest_extracted(self):
+        from src.attachments.extract.result import ExtractResult
+        from src.indexing.attachment_docs import _extract_texts_for_eml
+
+        class _Extractor:
+            def extract(self, data, mime, filename):
+                return ExtractResult(text="quarterly figures", status="extracted", extractor="x")
+
+        d = tempfile.mkdtemp()
+        import shutil
+
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        raw = (
+            b"From: alice@example.com\r\nMessage-ID: <p@x>\r\nSubject: Report\r\n"
+            b"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n"
+            b"--B\r\nContent-Type: application/octet-stream\r\n"
+            b"Content-Disposition: attachment; filename*" + b"1" * 4301 + b"=x\r\n\r\nBAD\r\n"
+            b"--B\r\nContent-Type: text/plain\r\n"
+            b'Content-Disposition: attachment; filename="ok.txt"\r\n\r\nGOOD\r\n--B--\r\n'
+        )
+        path = os.path.join(d, "p.eml")
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        out = _extract_texts_for_eml(path, _Extractor())
+        self.assertEqual([row[0] for row in out], ["ok.txt"])
+
+
 class TestAttachmentMessageKey(unittest.TestCase):
     """An email's attachment chunks must carry the SAME message_key as its body
     chunks, so one delete filter clears the whole email before a re-index (#101)."""

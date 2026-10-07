@@ -147,8 +147,9 @@ Both are reported as `index REFUSED (needs operator action)` and are checked
 *before* the delta is loaded, judged and OCR'd — so a refusal costs one round
 trip rather than repeating the whole delta's work on every tick. The one thing
 that does repeat is the attachment-store step, which runs ahead of these checks:
-each tick re-reads the pending files (a parse and a hash per message, no OCR and
-no model) and writes nothing it already holds.
+each tick re-reads the pending files (a parse and a hash per message, no model)
+and writes nothing it already holds. OCR runs only for small images it has not
+measured yet, so a repeat tick has none left to do.
 
 The attachment store has its own version of this. A lock or a full disk is an
 outage and is retried. A directory that cannot be written, a corrupt store index
@@ -225,6 +226,10 @@ store step existed, needs one `./mailrag attachments build --profile <p>` to
 catch up. A store that sync starts from empty is marked partial until that build
 runs, and until then `list_attachments` refuses to answer "none" for a thread it
 holds nothing for.
+
+A message cannot stop this step. A part whose headers the parser rejects is
+skipped, at most 500 parts are taken from one message, and whatever could not be
+stored is counted in the log without naming the message.
 
 New small inline images are also measured for the decoration filter, up to 500
 per run. If `tesseract` is missing from the job's `PATH` nothing is recorded for

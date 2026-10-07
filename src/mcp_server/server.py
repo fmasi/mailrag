@@ -688,11 +688,11 @@ def _require_populated_store(store) -> None:
         )
     if gap == "partial":
         raise ValueError(
-            f"attachment store at {store.root!r} holds only attachments from mail that "
-            "sync brought in. It was never built over the rest of the corpus, so finding "
-            "nothing for this lookup does not mean the mail has no attachments. Run "
-            "`mailrag attachments build --profile <corpus.profile.json>` once to cover "
-            "the older mail."
+            f"attachment store at {store.root!r} covers only part of the corpus: mail "
+            "that sync brought in, or a build that was limited or interrupted. A full "
+            "build has never completed, so finding nothing for this lookup does not mean "
+            "the mail has no attachments. Run `mailrag attachments build --profile "
+            "<corpus.profile.json>` once to cover the rest."
         )
 
 

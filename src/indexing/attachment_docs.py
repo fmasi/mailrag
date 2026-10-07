@@ -31,7 +31,7 @@ from typing import Iterable, List, Optional
 from llama_index.core import Document
 
 from src.attachments.extract import Status, build_default_extractor
-from src.attachments.ingest_eml import _decode_filename
+from src.attachments.ingest_eml import iter_attachment_parts
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 from src.data.models import _truncate
 from src.data.threading import compute_thread_id
@@ -84,38 +84,10 @@ def _extract_texts_for_eml(
         return []
 
     out: List[tuple[str, str, str, str, bytes, str, str]] = []
-    for part in msg.walk():
-        if part.is_multipart():
-            continue
-        filename = _decode_filename(part.get_filename())
-        disp = part.get_content_disposition() or ""
-        if not filename and disp not in ("attachment", "inline"):
-            continue
-        try:
-            data = part.get_payload(decode=True)
-        except Exception:
-            data = None
-        if not data:
-            continue
-        mime = part.get_content_type()
-        charset = part.get_content_charset()
-        if charset and mime.startswith("text/"):
-            mime = f"{mime}; charset={charset}"
-        result = extractor.extract(data, mime, filename or "(unnamed)")
+    for filename, mime, data, _inline in iter_attachment_parts(msg):
+        result = extractor.extract(data, mime, filename)
         if result.status == Status.EXTRACTED and result.text.strip():
-            # ``data`` is bytes here (decode=True on a leaf part) — narrow it for the
-            # typed tuple so the structure-aware chunker receives raw bytes.
-            out.append(
-                (
-                    filename or "(unnamed)",
-                    result.text,
-                    message_id,
-                    thread_id,
-                    bytes(data),
-                    mime,
-                    msg_key,
-                )
-            )
+            out.append((filename, result.text, message_id, thread_id, data, mime, msg_key))
     return out
 
 

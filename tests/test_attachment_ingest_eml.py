@@ -122,5 +122,87 @@ class TestIngestEml(unittest.TestCase):
         )
 
 
+def _raw_message(parts: bytes, headers: bytes = b"Message-ID: <p@work>\r\nSubject: Report\r\n"):
+    return (
+        b"From: alice@example.com\r\n" + headers + b"MIME-Version: 1.0\r\n"
+        b"Content-Type: multipart/mixed; boundary=B\r\n\r\n" + parts + b"--B--\r\n"
+    )
+
+
+def _part(disposition: bytes, body: bytes = b"DATA") -> bytes:
+    return (
+        b"--B\r\nContent-Type: application/octet-stream\r\n"
+        b"Content-Disposition: " + disposition + b"\r\n\r\n" + body + b"\r\n"
+    )
+
+
+# The stdlib parses ``filename*N`` continuation numbers with int(), which refuses
+# more than 4300 digits: reading this part's filename raises ValueError.
+UNREADABLE = b"attachment; filename*" + b"1" * 4301 + b"=x"
+
+
+class TestHostileMessages(unittest.TestCase):
+    """Every header is whatever the sender typed. Sync runs this ingest
+    unattended, so a message that raises out of it stops the whole account."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+        self.store = AttachmentStore(os.path.join(self.d, "store"))
+        self.addCleanup(self.store.close)
+
+    def _eml(self, name, raw):
+        path = os.path.join(self.d, name)
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        return path
+
+    def test_a_part_whose_headers_cannot_be_parsed_costs_only_that_part(self):
+        poison = self._eml(
+            "p.eml",
+            _raw_message(_part(UNREADABLE) + _part(b'attachment; filename="ok.bin"', b"OK")),
+        )
+        counts = ingest_eml([poison], self.store)
+        self.assertEqual(counts["attachments"], 1)
+        (meta,) = self.store.list_for(message_id="<p@work>")
+        self.assertEqual(meta.filename, "ok.bin")
+
+    def test_the_next_message_is_still_ingested(self):
+        poison = self._eml("p.eml", _raw_message(_part(UNREADABLE)))
+        good = self._eml(
+            "g.eml",
+            _raw_message(
+                _part(b'attachment; filename="g.bin"', b"GOOD"),
+                headers=b"Message-ID: <g@work>\r\nSubject: Fine\r\n",
+            ),
+        )
+        ingest_eml([poison, good], self.store)
+        self.assertEqual(len(self.store.list_for(message_id="<g@work>")), 1)
+
+    def test_an_unencodable_subject_does_not_cost_the_attachment(self):
+        """With no Message-ID the thread id is derived from the subject. One that
+        decodes to a lone surrogate made every part of the message unstorable."""
+        raw = _raw_message(
+            _part(b'attachment; filename="a.bin"'),
+            headers=b"Subject: =?utf-7?q?+2AA-?=\r\n",
+        )
+        counts = ingest_eml([self._eml("s.eml", raw)], self.store)
+        self.assertEqual((counts["attachments"], counts["bad_parts"]), (1, 0))
+        self.assertEqual(self.store.count(), 1)
+
+    def test_a_message_stuffed_with_parts_is_capped(self):
+        """A few megabytes of tiny parts became a file and a commit each: 100,000
+        of them took a minute and 400 MB of disk blocks."""
+        from src.attachments.ingest_eml import MAX_PARTS_PER_MESSAGE
+
+        many = b"".join(
+            _part(b'attachment; filename="f.bin"', str(i).encode())
+            for i in range(MAX_PARTS_PER_MESSAGE + 50)
+        )
+        counts = ingest_eml([self._eml("m.eml", _raw_message(many))], self.store)
+        self.assertEqual(counts["attachments"], MAX_PARTS_PER_MESSAGE)
+        self.assertEqual(self.store.count(), MAX_PARTS_PER_MESSAGE)
+
+
 if __name__ == "__main__":
     unittest.main()
