@@ -35,6 +35,43 @@ class TestAttachmentsCli(unittest.TestCase):
         ing.assert_called_once()
         store_cls.assert_called_once_with("/tmp/st")
 
+    def _build(self, *extra):
+        import tempfile
+
+        from src.attachments.store import AttachmentStore
+
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        prof = mock.Mock(selection_rules=[], blacklist=None, collection="c")
+        prof.resolved_root.return_value = "/root"
+        with (
+            mock.patch("src.cli.CorpusProfile.load", return_value=prof),
+            mock.patch("src.cli.resolve_index_files", return_value=([], [])),
+            mock.patch("src.onboard.record_profile_for_collection"),
+        ):
+            rc = cli.main(
+                ["attachments", "build", "--profile", "p.json", "--store", d, "--no-classify"]
+                + list(extra)
+            )
+        self.assertEqual(rc, 0)
+        store = AttachmentStore(d)
+        self.addCleanup(store.close)
+        store.put(
+            b"x", message_id="<m>", thread_id="t", filename="a", mime="text/plain",
+            size=1, source_type="eml", source_ref="/x",
+        )  # fmt: skip
+        return store
+
+    def test_a_full_build_records_that_the_store_is_complete(self):
+        """After it, an empty lookup means "no attachments"."""
+        self.assertIsNone(self._build().build_gap())
+
+    def test_a_limited_build_does_not(self):
+        store = self._build("--limit", "5")
+        store.mark_partial()
+        self.assertIsNone(store.build_gap())  # non-empty and never marked partial
+        self.assertIsNone(store.built_at())
+
     def test_get_text_routes(self):
         store = mock.Mock()
         store.fetch.return_value = {

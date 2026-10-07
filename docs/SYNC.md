@@ -145,7 +145,15 @@ fix them and a silent "deferred" every 12 hours would hide them forever:
 
 Both are reported as `index REFUSED (needs operator action)` and are checked
 *before* the delta is loaded, judged and OCR'd — so a refusal costs one round
-trip rather than repeating the whole delta's work on every tick.
+trip rather than repeating the whole delta's work on every tick. The one thing
+that does repeat is the attachment-store step, which runs ahead of these checks:
+each tick re-reads the pending files (a parse and a hash per message, no OCR and
+no model) and writes nothing it already holds.
+
+The attachment store has its own version of this. A lock or a full disk is an
+outage and is retried. A directory that cannot be written, a corrupt store index
+or an account with no collection fails the same way every time, so it is
+reported as `attachment store REFUSED (needs operator action)`.
 
 A message that cannot be parsed at all is **parked** in its own table with its
 error and counted by `--status`; the cursor still advances past it, so one
@@ -214,7 +222,17 @@ finds. Their *bytes* are written to the collection's attachment store
 
 Sync only stores what it brings in. Mail indexed in bulk, or synced before the
 store step existed, needs one `./mailrag attachments build --profile <p>` to
-catch up.
+catch up. A store that sync starts from empty is marked partial until that build
+runs, and until then `list_attachments` refuses to answer "none" for a thread it
+holds nothing for.
+
+New small inline images are also measured for the decoration filter, up to 500
+per run. If `tesseract` is missing from the job's `PATH` nothing is recorded for
+them, so a later run with a working `PATH` measures them.
+
+The scheduler unit carries `RAG_ATTACH_STORE` when it is set in the shell that
+runs `--install-agent`. Without it, sync uses the default directory, and it must
+be the one the MCP server reads.
 
 ### Known limitation: a degraded environment loses attachment text
 

@@ -274,6 +274,12 @@ List the files attached to a thread or a message (parity with the CLI
 > so new mail is listable as soon as it is searchable. Mail synced before this
 > behaviour existed is not backfilled: re-run `attachments build` once to pick
 > it up (it is idempotent and skips what the store already holds).
+>
+> If sync is the first thing to write a store, the store is marked partial.
+> Attachments it holds are listed as usual, but a lookup that finds nothing
+> raises the same actionable error as an empty store, because for older mail
+> "nothing stored" only means nobody ingested it. A full `attachments build`
+> (without `--limit`) clears the mark.
 
 > **Attachment contents are invisible to `search_email`, `answer_question` and
 > `grep_email`.** Those index message *bodies* only. So when the answer lives in

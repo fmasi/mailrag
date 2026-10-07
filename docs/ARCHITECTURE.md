@@ -288,11 +288,13 @@ makes a spreadsheet's contents findable by `search_email`. Attachment *bytes and
 go to a separate sha256-addressed store (`src/attachments/`), which is what
 `list_attachments` / `get_attachment` read. The split is deliberate — retrieval wants
 chunked text in Qdrant, an agent fetching a document wants the file — but it has a sharp
-edge: only the index path runs during `onboard` / `index` / `sync`, so a fully indexed
-corpus can have an empty attachment store, and every listing then returns nothing that
-looks exactly like "this thread has no attachments". Both tools now check the store and
-say so. Keeping the two in step is tracked in
-[#160](https://github.com/fmasi/mailrag/issues/160).
+edge: only the index path runs during `onboard` / `index`, so a fully indexed corpus can
+have an empty attachment store, and every listing then returns nothing that looks exactly
+like "this thread has no attachments". Both tools check the store and say so. `sync`
+writes both paths for the mail it brings in, and a store that sync started from empty is
+marked partial until one `attachments build` covers the older mail, so the tools keep
+refusing to read "nothing stored" as "no attachments" for it
+([#160](https://github.com/fmasi/mailrag/issues/160)).
 
 Judging which attachments are decoration is a **measure-then-judge** design: the store
 records signals per blob (OCR character count, word and digit counts, dimensions, status,

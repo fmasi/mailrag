@@ -163,3 +163,108 @@ class TestEnvironmentVerdictsAreNotCached(unittest.TestCase):
 
         src = inspect.getsource(store.AttachmentStore._extract_and_cache)
         self.assertIn("Status.BINARY", src)
+
+
+class TestBlobWritesAreAllOrNothing(unittest.TestCase):
+    """Sync writes this store unattended, so a disk that fills or a tick killed
+    mid-write must not leave a truncated blob that later puts trust."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.store = AttachmentStore(self.d)
+        self.addCleanup(self.store.close)
+
+    def _put(self, data, mid="<m1>"):
+        return self.store.put(
+            data,
+            message_id=mid,
+            thread_id="t1",
+            filename="a.bin",
+            mime="application/octet-stream",
+            size=len(data),
+            source_type="eml",
+            source_ref="/x/a.eml",
+        )
+
+    def test_a_truncated_blob_left_by_an_earlier_crash_is_replaced(self):
+        import hashlib
+
+        data = b"x" * 5000
+        path = self.store.path_for(hashlib.sha256(data).hexdigest())
+        os.makedirs(os.path.dirname(path))
+        with open(path, "wb") as fh:
+            fh.write(data[:100])
+        sha = self._put(data)
+        self.assertEqual(self.store.get_bytes(sha), data)
+
+    def test_a_failed_write_leaves_neither_a_blob_nor_a_row(self):
+        from unittest import mock
+
+        data = b"y" * 5000
+        with mock.patch("src.attachments.store.os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self._put(data)
+        self.assertEqual(self.store.count(), 0)
+        leftovers = [f for _, _, files in os.walk(os.path.join(self.d, "blobs")) for f in files]
+        self.assertEqual(leftovers, [])
+
+
+class TestBuildGap(unittest.TestCase):
+    """``count() == 0`` used to mean "never built". Once sync writes the store,
+    one synced attachment makes the count 1 while every older thread still has
+    nothing ingested, and an empty listing for them looks like "no attachments"."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.store = AttachmentStore(self.d)
+        self.addCleanup(self.store.close)
+
+    def _put(self, mid="<m1>"):
+        self.store.put(
+            b"data" + mid.encode(),
+            message_id=mid,
+            thread_id="t1",
+            filename="a.bin",
+            mime="application/octet-stream",
+            size=10,
+            source_type="eml",
+            source_ref="/x/a.eml",
+        )
+
+    def test_an_empty_store_has_a_gap(self):
+        self.assertEqual(self.store.build_gap(), "empty")
+
+    def test_a_store_first_filled_by_sync_still_has_a_gap(self):
+        self.store.mark_partial()
+        self._put()
+        self.assertEqual(self.store.build_gap(), "partial")
+
+    def test_a_full_build_closes_the_gap(self):
+        self.store.mark_partial()
+        self._put()
+        self.store.mark_built()
+        self.assertIsNone(self.store.build_gap())
+
+    def test_sync_writing_into_a_built_store_opens_no_gap(self):
+        self._put()
+        self.store.mark_built()
+        self.store.mark_partial()
+        self._put("<m2>")
+        self.assertIsNone(self.store.build_gap())
+
+    def test_a_store_built_before_the_marker_existed_is_trusted(self):
+        """Every store on disk today was filled by a build and carries no marker.
+        Sync topping one up must not start reporting it as never built."""
+        self._put()
+        self.store.mark_partial()
+        self._put("<m2>")
+        self.assertIsNone(self.store.build_gap())
+
+    def test_the_marker_survives_reopening(self):
+        self.store.mark_partial()
+        self._put()
+        self.store.close()
+        self.store = AttachmentStore(self.d)
+        self.assertEqual(self.store.build_gap(), "partial")

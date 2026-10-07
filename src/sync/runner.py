@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
@@ -459,15 +460,27 @@ def index_pending(
     # attachments are searchable but can never be listed or fetched, with nothing
     # to say so (#160). Failing here defers the whole stage instead: the write is
     # idempotent, the next tick retries it, and it costs no model load.
+    #
+    # It also runs before the indexer's own refusal checks, so while Qdrant is
+    # down or a collection is REFUSED each tick re-reads the pending files here.
+    # That is a parse and a hash per message, no OCR and no model, and it writes
+    # nothing the second time.
     try:
         stored = (attach_fn or _default_attach)(paths=list(by_path), collection=account.collection)
-    except Exception as exc:  # noqa: BLE001 — a full disk or a locked store, retried next tick
-        log.warning("attachment store unavailable (%s); %d message(s) deferred", exc, len(by_path))
-        report.skipped_stages.append("attachments")
-        report.messages.append(f"attachment store deferred: {exc}")
+    except sqlite3.OperationalError as exc:  # locked by a reader, disk full: retry
+        return _defer_attachments(report, exc, len(by_path))
+    except _ATTACH_PERMANENT as exc:
+        # Retrying cannot fix an unwritable directory, a corrupt index or a
+        # missing collection. Deferred, it would stall indexing forever behind a
+        # quiet "skipped" on every tick.
+        log.error("attachment store refused: %s", exc)
+        report.messages.append(f"attachment store REFUSED (needs operator action): {exc}")
+        report.errors += 1
         return report
+    except Exception as exc:  # noqa: BLE001 — anything else is treated as an outage
+        return _defer_attachments(report, exc, len(by_path))
     if stored:
-        report.messages.append(f"stored {stored} attachment(s)")
+        report.messages.append(f"stored {stored} new attachment(s)")
 
     # Below every early return: the delta is non-empty, so the model load is work
     # we are definitely going to use.
@@ -523,13 +536,39 @@ def index_pending(
     return report
 
 
+# Failures of the attachment step that the next tick would only repeat.
+# sqlite3.OperationalError (a lock, a full disk) is a DatabaseError too, so the
+# caller catches it first and retries.
+_ATTACH_PERMANENT = (
+    ValueError,
+    PermissionError,
+    NotADirectoryError,
+    IsADirectoryError,
+    sqlite3.DatabaseError,
+)
+
+# Small inline images measured per run. Each costs ~0.05s of OCR, and the work
+# list is everything in the store not yet measured, which after a build run with
+# --no-classify is the whole backlog. Capped, it drains over a few runs instead
+# of holding one tick for minutes.
+ATTACH_CLASSIFY_PER_RUN = 500
+
+
+def _defer_attachments(report: SyncReport, exc: Exception, n: int) -> SyncReport:
+    log.warning("attachment store unavailable (%s); %d message(s) deferred", exc, n)
+    report.skipped_stages.append("attachments")
+    report.messages.append(f"attachment store deferred: {exc}")
+    return report
+
+
 def _default_attach(*, paths, collection) -> int:
     """Write the delta's attachment bytes to the collection's store.
 
     The same ingest ``mailrag attachments build`` runs, over the same files, so a
     store filled by sync and one filled by a build hold the same rows. Returns
-    the number of attachment parts seen. Safe to repeat: blobs are
-    content-addressed and a (message, sha256) row is inserted once.
+    the number of rows this call added, so a repeat reports nothing. Safe to
+    repeat: blobs are content-addressed and a (message, sha256) row is inserted
+    once.
     """
     from src.attachments.classify import classify_blobs  # noqa: PLC0415
     from src.attachments.ingest_eml import ingest_eml  # noqa: PLC0415
@@ -543,17 +582,22 @@ def _default_attach(*, paths, collection) -> int:
 
     store = AttachmentStore(resolve_attach_store(collection=collection))
     try:
-        counts = ingest_eml(paths, store)
+        # Before the first row: a store sync starts from empty holds recent mail
+        # only, and the tools must keep saying so until a build covers the rest.
+        store.mark_partial()
+        before = store.count()
+        ingest_eml(paths, store)
+        added = store.count() - before
         try:
             # The cheap measurement the boilerplate filter reads. Not fatal: it
-            # works from the store's unmeasured blobs, so whatever this run
-            # misses the next one picks up.
-            classify_blobs(store)
+            # works from the store's unmeasured blobs, and neither a failure nor
+            # a missing OCR engine records anything, so a later run redoes it.
+            classify_blobs(store, limit=ATTACH_CLASSIFY_PER_RUN)
         except Exception as exc:  # noqa: BLE001
             log.warning("attachment classify skipped (%s); retried on the next run", exc)
     finally:
         store.close()
-    return counts["attachments"]
+    return added
 
 
 def _default_index(*, profile, embedder, paths, collection, embed_summary=True):

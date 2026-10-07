@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import plistlib
 import unittest
 from unittest import mock
@@ -48,6 +49,25 @@ class TestSyncCommand(unittest.TestCase):
         argv = sync_command(repo_root="/repo")
         self.assertNotIn("--account", argv)
         self.assertNotIn("--model", argv)
+
+
+class TestSchedulerEnvironmentCarriesTheStoreOverride(unittest.TestCase):
+    """A scheduled job starts from an almost-empty environment. With the store
+    override exported in the installing shell but absent from the unit, sync
+    would write one directory while the server read another."""
+
+    def test_an_override_set_at_install_time_reaches_the_unit(self):
+        from src.sync.schedule import scheduler_environment
+
+        with mock.patch.dict(os.environ, {"RAG_ATTACH_STORE": "/data/attachments"}):
+            self.assertEqual(scheduler_environment()["RAG_ATTACH_STORE"], "/data/attachments")
+
+    def test_nothing_is_invented_when_it_is_unset(self):
+        from src.sync.schedule import scheduler_environment
+
+        with mock.patch.dict(os.environ, clear=False) as env:
+            env.pop("RAG_ATTACH_STORE", None)
+            self.assertNotIn("RAG_ATTACH_STORE", scheduler_environment())
 
 
 class TestLaunchdPlist(unittest.TestCase):

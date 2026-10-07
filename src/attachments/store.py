@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS blob_signals (
     digits INTEGER, width INTEGER, height INTEGER, status TEXT, extractor TEXT,
     measured_at TEXT
 );
+CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS text_cache (
     sha256 TEXT, extractor TEXT, text TEXT, status TEXT,
     extractor_used TEXT, created_at TEXT,
@@ -213,6 +214,54 @@ class AttachmentStore:
         sql += " GROUP BY sha256"
         return {r[0]: r[1] for r in self._conn.execute(sql, params)}
 
+    # --- completeness -----------------------------------------------------
+    # Two writers fill this store: `attachments build`, over a whole profile,
+    # and sync, one delta at a time. Only the first makes an empty lookup mean
+    # "this thread has no attachments". A store sync started from empty holds
+    # recent mail only, and for anything older "nothing stored" means nobody
+    # ever looked. The markers below keep those two states apart.
+
+    def _meta(self, key: str) -> Optional[str]:
+        row = self._conn.execute("SELECT value FROM store_meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def _set_meta(self, key: str) -> None:
+        self._conn.execute(
+            "INSERT OR IGNORE INTO store_meta (key, value) VALUES (?, ?)",
+            (key, datetime.now(timezone.utc).isoformat()),
+        )
+        self._conn.commit()
+
+    def built_at(self) -> Optional[str]:
+        """When a full ``attachments build`` last completed here, or ``None``."""
+        return self._meta("built_at")
+
+    def mark_built(self) -> None:
+        """Record that a build over the whole profile completed."""
+        self._conn.execute("DELETE FROM store_meta WHERE key = 'built_at'")
+        self._set_meta("built_at")
+
+    def mark_partial(self) -> None:
+        """Called by sync before it writes. Marks a store that sync is starting
+        from EMPTY as partial. A store that already holds rows was filled by a
+        build (every store that predates these markers was), so it is left
+        alone, and so is one a build has completed on."""
+        if self.built_at() is None and self.count() == 0:
+            self._set_meta("partial_since")
+
+    def build_gap(self) -> Optional[str]:
+        """Why an empty lookup here cannot be read as "no attachments".
+
+        ``"empty"``: nothing was ever ingested. ``"partial"``: sync filled it
+        from empty and no build has covered the older mail. ``None``: a build
+        covered the corpus, so an empty lookup is a real answer.
+        """
+        if self.count() == 0:
+            return "empty"
+        if self._meta("partial_since") and self.built_at() is None:
+            return "partial"
+        return None
+
     def path_for(self, sha256: str) -> str:
         return os.path.join(self._blobs, sha256[:2], sha256)
 
@@ -231,10 +280,22 @@ class AttachmentStore:
     ) -> str:
         sha = hashlib.sha256(data).hexdigest()
         blob = self.path_for(sha)
-        if not os.path.exists(blob):
+        # All or nothing, and never trust a blob by its name alone. A write cut
+        # short (disk full, a scheduled run killed) used to leave a truncated
+        # file under the full content hash; every later put saw it "exists",
+        # skipped the write and filed a row for it, so the short bytes were
+        # served for good. Temp file + rename means a blob is either whole or
+        # absent, and the size check heals one left by an older version.
+        if not (os.path.exists(blob) and os.path.getsize(blob) == len(data)):
             os.makedirs(os.path.dirname(blob), exist_ok=True)
-            with open(blob, "wb") as fh:
-                fh.write(data)
+            tmp = f"{blob}.{os.getpid()}.tmp"
+            try:
+                with open(tmp, "wb") as fh:
+                    fh.write(data)
+                os.replace(tmp, blob)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
         self._conn.execute(
             """INSERT OR IGNORE INTO attachments
                (sha256, message_id, thread_id, filename, mime, size, source_type,

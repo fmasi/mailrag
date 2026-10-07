@@ -616,6 +616,10 @@ def _cmd_attachments_build(args):
                 progress=True,
             )
             print(f"classified: {stats.as_dict()}")
+        if not args.limit:
+            # Only a build over the whole profile makes an empty lookup mean "no
+            # attachments". A --limit run, like sync, covers part of the corpus.
+            store.mark_built()
     finally:
         store.close()
     return 0

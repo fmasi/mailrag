@@ -29,13 +29,17 @@ class _Email:
 
 
 class _Store:
-    def __init__(self, count=5, names=("deck.pptx",)):
+    def __init__(self, count=5, names=("deck.pptx",), gap=None):
         self._count = count
         self._names = list(names)
+        self._gap = gap
         self.calls = []
 
     def count(self):
         return self._count
+
+    def build_gap(self):
+        return self._gap or ("empty" if self.count() == 0 else None)
 
     def names_for(self, *, thread_id=None, message_ids=None):
         self.calls.append((thread_id, tuple(message_ids or ())))
@@ -57,6 +61,17 @@ class TestAttachmentNamesOnHits(unittest.TestCase):
         meta = server._thread_meta(_Ctx(emails=[_Email("<m1>")]), store=_Store(count=0))
         self.assertNotIn("attachment_names", meta)
 
+    def test_a_sync_only_store_names_what_it_has_and_claims_nothing_else(self):
+        """Sync filled a store that was never built. A thread it holds files for
+        is named. A thread it holds nothing for gets no field, because for older
+        mail "nothing stored" only means nobody ever ingested it."""
+        held = server._thread_meta(_Ctx(emails=[_Email("<m1>")]), store=_Store(gap="partial"))
+        self.assertEqual(held["attachment_names"], ["deck.pptx"])
+        unknown = server._thread_meta(
+            _Ctx(emails=[_Email("<m1>")]), store=_Store(names=(), gap="partial")
+        )
+        self.assertNotIn("attachment_names", unknown)
+
     def test_empty_list_still_means_genuinely_none(self):
         # With a populated store, [] is a real answer and must be reported.
         meta = server._thread_meta(_Ctx(emails=[_Email("<m1>")]), store=_Store(names=()))
@@ -77,6 +92,9 @@ class TestAttachmentNamesOnHits(unittest.TestCase):
         class Exploding:
             def count(self):
                 raise RuntimeError("db gone")
+
+            def build_gap(self):
+                return "empty" if self.count() == 0 else None
 
         meta = server._thread_meta(_Ctx(emails=[_Email("<m1>")]), store=Exploding())
         self.assertNotIn("attachment_names", meta)

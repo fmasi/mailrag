@@ -64,6 +64,13 @@ class _RunnerTest(unittest.TestCase):
             os.makedirs(os.path.join(self.maildir, sub))
         self.state = SyncState(os.path.join(self.d, "sync.db"))
         self.addCleanup(self.state.close)
+        # The index stage writes the attachment store. Pinned here as well as in
+        # conftest, so the module is safe under plain `python -m unittest` too.
+        patcher = mock.patch.dict(
+            os.environ, {"RAG_ATTACH_STORE": os.path.join(self.d, "attachments")}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.account = AccountConfig(
             id="acct",
             source="maildir",
@@ -587,11 +594,57 @@ class TestAttachmentStoreFollowsSync(_RunnerTest):
         # server refuses to run against.
         self.assertFalse(os.path.exists(os.path.join(root, "index.db")))
 
-    def test_the_report_counts_what_was_stored_without_naming_it(self):
+    def test_the_report_counts_new_rows_only(self):
+        """Counting parts SEEN made every retry tick of a Qdrant outage report
+        the same attachments as stored again."""
         self._deliver_with_attachment()
-        report = self._index()
-        self.assertIn("stored 1 attachment(s)", report.messages)
-        self.assertFalse([m for m in report.messages if "report.bin" in m])
+        down = lambda **k: (_ for _ in ()).throw(ConnectionError("qdrant down"))  # noqa: E731
+        first = self._index(index_fn=down)
+        again = self._index(index_fn=down)
+        self.assertIn("stored 1 new attachment(s)", first.messages)
+        self.assertFalse([m for m in again.messages if "stored" in m])
+
+    def test_a_cause_no_retry_can_fix_is_escalated_not_deferred(self):
+        """A store directory that cannot be written fails identically on every
+        tick. Filed as a deferral it stalled indexing forever behind a quiet
+        'skipped: attachments'."""
+        self._deliver_with_attachment()
+        reached = []
+        for exc in (PermissionError("read-only"), ValueError("no collection")):
+            with self.subTest(exc=type(exc).__name__):
+                report = self._index(
+                    attach_fn=lambda _e=exc, **kw: (_ for _ in ()).throw(_e),
+                    index_fn=lambda **k: reached.append(1) or (1, set()),
+                )
+                self.assertEqual(report.errors, 1)
+                self.assertTrue(
+                    [m for m in report.messages if "REFUSED (needs operator action)" in m]
+                )
+                self.assertNotIn("attachments", report.skipped_stages)
+        self.assertEqual(reached, [])
+
+    def test_sync_filling_an_unbuilt_store_leaves_it_marked_partial(self):
+        self._deliver_with_attachment()
+        self._index()
+        self.assertEqual(self._store().build_gap(), "partial")
+
+    def test_new_blobs_are_measured_in_a_bounded_pass(self):
+        from src.sync import runner
+
+        self._deliver_with_attachment()
+        with mock.patch("src.attachments.classify.classify_blobs") as classify:
+            self._index()
+        (store,), kwargs = classify.call_args
+        self.assertEqual(kwargs["limit"], runner.ATTACH_CLASSIFY_PER_RUN)
+
+    def test_a_failed_measurement_pass_does_not_fail_the_stage(self):
+        self._deliver_with_attachment()
+        with mock.patch(
+            "src.attachments.classify.classify_blobs", side_effect=RuntimeError("ocr exploded")
+        ):
+            report = self._index()
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(self._store().count(), 1)
 
     def test_a_store_failure_defers_the_index_and_says_so(self):
         """Indexing on regardless would mark the mail indexed and never revisit

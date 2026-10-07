@@ -285,10 +285,14 @@ def _attachment_names(ctx, store=None) -> Optional[List[str]]:
     if store is None:
         return None
     try:
-        if store.count() == 0:
+        gap = store.build_gap()
+        if gap == "empty":
             return None  # never ingested — say nothing rather than say "none"
         message_ids = [getattr(e, "message_id", "") for e in getattr(ctx, "emails", []) or []]
-        return store.names_for(thread_id=getattr(ctx, "thread_id", None), message_ids=message_ids)
+        names = store.names_for(thread_id=getattr(ctx, "thread_id", None), message_ids=message_ids)
+        # A sync-only store knows about recent mail. What it holds is worth
+        # naming; an empty answer from it is not a claim it can make.
+        return names if (names or gap is None) else None
     except Exception:
         # The attachment store is an optional companion to retrieval; search must
         # keep working when it is missing, just without this field.
@@ -672,7 +676,8 @@ def _require_populated_store(store) -> None:
     corpus with an empty store is the expected state until `attachments build`
     is run once. Sync writes it for the mail it brings in from then on.
     """
-    if store.count() == 0:
+    gap = store.build_gap()
+    if gap == "empty":
         raise ValueError(
             f"attachment store at {store.root!r} is empty — no attachments have been "
             "ingested, so every lookup returns nothing regardless of the thread. "
@@ -680,6 +685,14 @@ def _require_populated_store(store) -> None:
             "(A bulk index extracts attachment TEXT for search down a separate path "
             "and never writes this store, so attachment content can be searchable while "
             "this store is still empty. Sync fills it only for mail it brings in.)"
+        )
+    if gap == "partial":
+        raise ValueError(
+            f"attachment store at {store.root!r} holds only attachments from mail that "
+            "sync brought in. It was never built over the rest of the corpus, so finding "
+            "nothing for this lookup does not mean the mail has no attachments. Run "
+            "`mailrag attachments build --profile <corpus.profile.json>` once to cover "
+            "the older mail."
         )
 
 

@@ -23,6 +23,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+from src.attachments.extract.result import Status
 from src.attachments.signals import measure_blob
 
 # Only blobs below this are measured in bulk. Above it, extraction cost stops
@@ -96,7 +97,16 @@ def classify_blobs(
                 continue
             with open(path, "rb") as fh:
                 data = fh.read()
-            store.put_signals(sha256, measure_blob(data, mime, filename or "", extractor))
+            signals = measure_blob(data, mime, filename or "", extractor)
+            if signals.status == Status.OCR_UNAVAILABLE:
+                # A verdict on the environment, not on the blob. Recorded, it
+                # would take the blob off the work list for good, so one run
+                # without tesseract on PATH (a scheduled job, typically) would
+                # leave it unmeasured after the PATH is fixed. Same trap as the
+                # text cache (GH #37).
+                stats.skipped += 1
+                continue
+            store.put_signals(sha256, signals)
             stats.measured += 1
         except Exception:
             # A blob that cannot be measured simply keeps no signals, and the
