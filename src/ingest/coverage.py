@@ -77,7 +77,9 @@ def coverage(profiles: Sequence, root: str) -> Dict:
 
     return {
         "total": len(all_abs),
-        "claimed": len(claimed),
+        # Only what lies under the report root: a profile may select mail outside
+        # it, and counting that made "claimed" exceed the total it sits under.
+        "claimed": len(claimed & all_abs),
         "unclaimed": len(unclaimed),
         "per_profile": per_profile,
         "unclaimed_folders": folders,

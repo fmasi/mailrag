@@ -114,6 +114,26 @@ class TestCoverage(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HOME": parent}):
             self.assertEqual(coverage(self._profiles(), "~/" + name)["total"], 9)
 
+    def test_a_profile_rooted_through_a_symlink_claims_the_same_files(self):
+        """Profiles record the root as it was typed. Reached through a symlink,
+        none of a profile's paths matched the report's, and it claimed nothing."""
+        link = self.root + "-link"
+        os.symlink(self.root, link)
+        self.addCleanup(os.remove, link)
+        profiles = [
+            _Profile(link, [{"type": "prefix", "value": "Work/"}], "work"),
+            _Profile(link, [{"type": "prefix", "value": "Personal/iCloud/"}], "personal"),
+        ]
+        r = coverage(profiles, self.root)
+        self.assertEqual(r["unclaimed"], 4)
+        self.assertEqual(r["claimed"] + r["unclaimed"], r["total"])
+
+    def test_claimed_counts_only_files_under_the_report_root(self):
+        """A profile also selects mail outside the root being reported on. Counted,
+        it made "claimed" larger than the total it is printed under."""
+        r = coverage(self._profiles(), os.path.join(self.root, "Work"))
+        self.assertEqual((r["total"], r["claimed"], r["unclaimed"]), (3, 3, 0))
+
     def test_a_message_claimed_by_any_profile_is_not_unclaimed(self):
         # Corpora share a root, so "unclaimed" means no profile selects it —
         # not "this particular profile skipped it".
