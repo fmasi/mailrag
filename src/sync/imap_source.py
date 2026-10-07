@@ -100,10 +100,6 @@ class ImapSource:
                 self._client = IMAPClient(
                     self.host, port=self.port, ssl=self.ssl, timeout=self._timeout
                 )
-                # Keep the server's own offset on INTERNALDATE. The default hands
-                # back naive host-local times, which then depend on where the sync
-                # happens to run (#120). An attribute, not a constructor argument.
-                self._client.normalise_times = False
                 self._client.login(self.login, self._password)
             except Exception as exc:  # noqa: BLE001 — auth and transport failures alike
                 raise ImapError(f"IMAP login to {self.host} as {self.login} failed: {exc}") from exc
@@ -113,6 +109,11 @@ class ImapSource:
         # negotiated exactly like one we dialled ourselves.
         if self._caps is None:
             self._negotiate()
+        # Keep the server's own offset on INTERNALDATE. The default hands back
+        # naive host-local times, which then depend on where and when the sync
+        # happens to run (#120). An attribute, not a constructor argument, and set
+        # on every path out of here so an injected or re-dialled client gets it.
+        self._client.normalise_times = False
         return self._client
 
     def _negotiate(self) -> None:

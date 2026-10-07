@@ -541,15 +541,29 @@ class TestImapInternalDate(unittest.TestCase):
             src.capabilities()
         self.assertIs(src._client.normalise_times, False)
 
-    def test_the_real_parser_keeps_the_servers_offset_across_dst(self):
-        """The whole path with the real imapclient parser, on a host whose zone
-        has DST and a message dated in the other season. Normalising would use
-        the host's offset at fetch time and land an hour out; with the attribute
-        off the server's ``-0500`` survives and the instant is exact."""
+    def test_the_servers_offset_survives_the_real_parser_across_dst(self):
+        """The whole path on a host whose zone has DST: the source decides how the
+        client parses, and the real imapclient parser honours it. If the source
+        left the client normalising, the host's offset at fetch time would be
+        applied and the message dated in the other season would land an hour
+        out. One winter and one summer stamp, so one of them is always that
+        message whenever this runs."""
         try:
             from imapclient.response_parser import parse_fetch_response
         except ImportError:
             self.skipTest("imapclient is not installed")
+
+        class ParsingClient(FakeIMAPClient):
+            """An injected client that parses a canned FETCH the way the real one
+            does: with whatever ``normalise_times`` it has been left with."""
+
+            normalise_times = True  # imapclient's default
+            stamp = b""
+
+            def fetch(self, uids, parts):
+                raw = [b'1 (UID 1 INTERNALDATE "' + self.stamp + b'" BODY[] {2}', b"hi", b")"]
+                return parse_fetch_response([tuple(raw[:2]), raw[2]], self.normalise_times, True)
+
         os.environ["TZ"] = "Europe/London"
         time.tzset()
         for stamp, want in (
@@ -557,10 +571,14 @@ class TestImapInternalDate(unittest.TestCase):
             (b"15-Jul-2026 09:30:00 -0500", datetime(2026, 7, 15, 14, 30, tzinfo=timezone.utc)),
         ):
             with self.subTest(stamp=stamp):
-                parsed = parse_fetch_response(
-                    [b'1 (UID 7 INTERNALDATE "' + stamp + b'")'], False, True
-                )
-                self.assertEqual(self._fetched_date(parsed[7][b"INTERNALDATE"]), want)
+                client = ParsingClient(messages={"INBOX": {1: b"hi"}})
+                client.stamp = stamp
+                src = _source(client)
+                folder = src.open_folder(Folder("INBOX"))
+                (msg,) = list(src.fetch_delta(folder, src.initial_cursor(folder)))
+                self.assertEqual(msg.internal_date, want)
+                self.assertEqual(msg.internal_date.utcoffset(), timedelta(0))
+                self.assertIs(client.normalise_times, False)
 
 
 class TestStartFrom(_TmpTest):
