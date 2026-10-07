@@ -148,7 +148,7 @@ class TestBulkHeaderDetection(unittest.TestCase):
 
         raw = self.ALIAS + "\r\nHi.\r\n"
         with mock.patch(
-            "src.data.loaders.mail_archive_x.getaddresses", side_effect=RuntimeError("boom")
+            "src.data.loaders.mail_archive_x._bulk_by_headers", side_effect=RuntimeError("boom")
         ):
             self.assertTrue(self._load_one(raw).is_bulk)
 
@@ -192,6 +192,85 @@ class TestBulkHeaderDetection(unittest.TestCase):
         """A relay can add its own Precedence: list above the sender's."""
         raw = self.ALIAS + "Precedence: bulk\r\n" + "\r\nNotice.\r\n"
         self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_a_delivered_to_below_a_received_header_is_not_the_mailboxs(self):
+        """Some servers write no Delivered-To at final delivery. The topmost one
+        is then whatever the list host left on its way out, and its domain is
+        the list's. Only a Delivered-To above every Received header was written
+        by the last hop."""
+        raw = (
+            "Received: from lists.x.com by mx.example.com; Mon, 1 Jan 2026 10:00:00 +0000\r\n"
+            "Delivered-To: dev@lists.x.com\r\n"
+            "From: Someone <someone@x.com>\r\n"
+            "Subject: [dev] release plan\r\n"
+            "Precedence: list\r\n"
+            "List-Id: <dev.lists.x.com>\r\n"
+            "List-Unsubscribe: <https://lists.x.com/mailman/options/dev>\r\n"
+            "\r\nThoughts?\r\n"
+        )
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_an_alias_message_with_received_headers_below_is_still_a_relay(self):
+        raw = self.ALIAS.replace(
+            "From: A Customer",
+            "Received: by mx.example.com; Mon, 1 Jan 2026 10:00:00 +0000\r\nFrom: A Customer",
+        )
+        self.assertFalse(self._load_one(raw + "\r\nIt has not arrived.\r\n").is_bulk)
+
+    def test_an_unsubscribe_value_with_no_readable_host_is_bulk(self):
+        """Nothing to attribute to the relay, so it cannot be excused as its own."""
+        for value in ("<mailto:unsubscribe>", "=?utf-8?q?https=3A=2F=2Fmailer=2Ex=2Ecom?="):
+            with self.subTest(value=value):
+                raw = self.ALIAS + f"List-Unsubscribe: {value}\r\n\r\nOffers.\r\n"
+                self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_a_foreign_host_after_the_relays_in_one_header_is_bulk(self):
+        raw = (
+            self.ALIAS
+            + "List-Unsubscribe: <mailto:x+unsubscribe@googlegroups.com>, <https://mailer.x.com/u>\r\n"
+            + "\r\nOffers.\r\n"
+        )
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_a_list_id_without_angle_brackets_is_read(self):
+        raw = self.ALIAS.replace("List-ID: <support.example.com>", "List-ID: support.example.com")
+        self.assertFalse(self._load_one(raw + "\r\nIt has not arrived.\r\n").is_bulk)
+
+    def test_precedence_list_alone_is_bulk(self):
+        """No List-Id and no Delivered-To: nothing says relay."""
+        raw = "From: L <l@x.com>\r\nSubject: digest\r\nPrecedence: list\r\n\r\nItems.\r\n"
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_precedence_is_read_whatever_its_case_or_spacing(self):
+        raw = "From: N <n@x.com>\r\nSubject: notice\r\nPrecedence:   BULK  \r\n\r\nNotice.\r\n"
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_only_a_later_bulk_adds_a_flag_the_old_rule_did_not(self):
+        """The new rule may clear flags. The one flag it adds is for a
+        Precedence: bulk that is not the first Precedence header. A later
+        'list' changes nothing, as before."""
+        raw = (
+            "From: N <n@x.com>\r\nSubject: s\r\nPrecedence: junk\r\nPrecedence: list\r\n\r\nHi.\r\n"
+        )
+        self.assertFalse(self._load_one(raw).is_bulk)
+
+    def test_the_guards_fallback_is_the_old_rule_exactly(self):
+        from unittest import mock
+
+        cases = (
+            ("List-Unsubscribe: <https://x.com/u>\r\n", True),
+            ("Precedence: bulk\r\n", True),
+            ("Precedence: list\r\n", True),
+            ("", False),
+        )
+        for header, expected in cases:
+            with self.subTest(header=header.strip()):
+                raw = "From: N <n@x.com>\r\nSubject: s\r\n" + header + "\r\nHi.\r\n"
+                with mock.patch(
+                    "src.data.loaders.mail_archive_x._bulk_by_headers",
+                    side_effect=RuntimeError("boom"),
+                ):
+                    self.assertIs(self._load_one(raw).is_bulk, expected)
 
     def test_plain_human_email_is_not_bulk(self):
         raw = (

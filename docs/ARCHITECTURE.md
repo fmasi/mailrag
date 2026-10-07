@@ -96,9 +96,11 @@ domains, sender/subject regexes) plus a header-driven bulk filter
 (`List-Unsubscribe`, `Precedence: bulk` or `list`) with keep-guards so human mailing-list
 traffic and transactional receipts survive. Mail relayed by a group alias on the
 mailbox's own domain (`support@`, `contact@`) is not bulk: the group stamps it
-`Precedence: list`, but its `List-Id` sits on the domain of the final
-`Delivered-To`. A third-party list's does not. An announcement list run on the
-organisation's own domain does, and is treated as internal mail. Crucially this pass **tags** — it
+`Precedence: list`, but its `List-Id` sits on the mailbox's own domain, read
+from the `Delivered-To` that the final server writes above every `Received`
+header. Where that header is missing the plain rule applies. An announcement
+list run on the organisation's own domain also matches, and is treated as
+internal mail. Crucially this pass **tags** — it
 sets a `noise_candidate` flag and drops nothing. Cheap heuristics get to raise
 suspicion; only the LLM pass gets to condemn.
 
