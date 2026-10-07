@@ -236,6 +236,22 @@ class TestBulkHeaderDetection(unittest.TestCase):
         raw = self.ALIAS.replace("List-ID: <support.example.com>", "List-ID: support.example.com")
         self.assertFalse(self._load_one(raw + "\r\nIt has not arrived.\r\n").is_bulk)
 
+    def test_the_first_list_id_decides(self):
+        """A third-party list's message relayed on through the alias carries two
+        List-Id headers. The first one read is the one that counts, so a
+        foreign list above the group's stays bulk."""
+        raw = self.ALIAS.replace(
+            "List-ID: <support.example.com>",
+            "List-ID: Dev <dev.lists.x.com>\r\nList-ID: <support.example.com>",
+        )
+        self.assertTrue(self._load_one(raw + "\r\nThoughts?\r\n").is_bulk)
+
+    def test_the_first_angle_group_of_a_list_id_decides(self):
+        raw = self.ALIAS.replace(
+            "List-ID: <support.example.com>", "List-ID: <dev.lists.x.com> <support.example.com>"
+        )
+        self.assertTrue(self._load_one(raw + "\r\nThoughts?\r\n").is_bulk)
+
     def test_precedence_list_alone_is_bulk(self):
         """No List-Id and no Delivered-To: nothing says relay."""
         raw = "From: L <l@x.com>\r\nSubject: digest\r\nPrecedence: list\r\n\r\nItems.\r\n"
