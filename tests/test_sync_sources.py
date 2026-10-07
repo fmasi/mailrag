@@ -541,6 +541,27 @@ class TestImapInternalDate(unittest.TestCase):
             src.capabilities()
         self.assertIs(src._client.normalise_times, False)
 
+    def test_the_real_parser_keeps_the_servers_offset_across_dst(self):
+        """The whole path with the real imapclient parser, on a host whose zone
+        has DST and a message dated in the other season. Normalising would use
+        the host's offset at fetch time and land an hour out; with the attribute
+        off the server's ``-0500`` survives and the instant is exact."""
+        try:
+            from imapclient.response_parser import parse_fetch_response
+        except ImportError:
+            self.skipTest("imapclient is not installed")
+        os.environ["TZ"] = "Europe/London"
+        time.tzset()
+        for stamp, want in (
+            (b"15-Jan-2026 09:30:00 -0500", datetime(2026, 1, 15, 14, 30, tzinfo=timezone.utc)),
+            (b"15-Jul-2026 09:30:00 -0500", datetime(2026, 7, 15, 14, 30, tzinfo=timezone.utc)),
+        ):
+            with self.subTest(stamp=stamp):
+                parsed = parse_fetch_response(
+                    [b'1 (UID 7 INTERNALDATE "' + stamp + b'")'], False, True
+                )
+                self.assertEqual(self._fetched_date(parsed[7][b"INTERNALDATE"]), want)
+
 
 class TestStartFrom(_TmpTest):
     """`start_from` — begin where a backup export ended, instead of downloading

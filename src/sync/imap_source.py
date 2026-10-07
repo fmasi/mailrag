@@ -294,9 +294,15 @@ class ImapSource:
 def _as_utc(value) -> Optional[datetime]:
     """INTERNALDATE as a UTC instant.
 
-    A naive value is host-local wall-clock time (what imapclient returns when it
-    normalises), and ``astimezone`` reads it that way. Stamping UTC onto it
-    instead stored every date off by the host's offset (#120).
+    Exact only for an aware value, which is what the client returns now that
+    ``normalise_times`` is off: the server's own offset travels with it.
+
+    A naive value is a fallback for a client that still normalises. It is
+    host-local wall-clock time and ``astimezone`` reads it that way, which beats
+    stamping UTC onto it (#120, every date off by the host's offset) but is not
+    exact: imapclient normalises with the host's offset at FETCH time, so a
+    message dated in the other DST season comes out an hour wrong. Keep the
+    attribute off; this branch alone does not make the dates right.
     """
     if not isinstance(value, datetime):
         return None
