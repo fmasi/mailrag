@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from unittest import mock
 
@@ -257,6 +257,7 @@ class FakeIMAPClient:
         self.fail_fetch_after = None
         self.since_uids = None  # UIDs a `SINCE <date>` search should return
         self.fail_since = False
+        self.internal_date = datetime(2026, 1, 15, 9, 30, tzinfo=timezone.utc)
 
     def capabilities(self):
         return self._caps
@@ -299,7 +300,7 @@ class FakeIMAPClient:
         return {
             uid: {
                 b"BODY[]": store[uid],
-                b"INTERNALDATE": datetime(2026, 1, 15, 9, 30, tzinfo=timezone.utc),
+                b"INTERNALDATE": self.internal_date,
             }
             for uid in uids
             if uid in store
@@ -475,6 +476,70 @@ class TestImapSource(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestImapInternalDate(unittest.TestCase):
+    """INTERNALDATE reaches the ledger as a true UTC instant (#120).
+
+    The host runs at a fixed UTC+3 here. A naive value is local wall-clock time
+    (that is what imapclient hands back when it normalises), so stamping UTC on it
+    stores every date three hours ahead of the truth.
+    """
+
+    def setUp(self):
+        self._tz = os.environ.get("TZ")
+        os.environ["TZ"] = "Etc/GMT-3"  # POSIX sign is inverted: this is UTC+3, no DST
+        time.tzset()
+
+    def tearDown(self):
+        if self._tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self._tz
+        time.tzset()
+
+    def _fetched_date(self, internal_date):
+        client = FakeIMAPClient(messages={"INBOX": {1: _eml_bytes(message_id="<1@x>")}})
+        client.internal_date = internal_date
+        src = _source(client)
+        folder = src.open_folder(Folder("INBOX"))
+        (msg,) = list(src.fetch_delta(folder, src.initial_cursor(folder)))
+        return msg.internal_date
+
+    def test_a_naive_date_is_converted_from_host_local_time(self):
+        got = self._fetched_date(datetime(2026, 8, 11, 17, 8, 47))
+        self.assertEqual(got, datetime(2026, 8, 11, 14, 8, 47, tzinfo=timezone.utc))
+
+    def test_an_aware_date_is_normalised_to_utc(self):
+        plus3 = timezone(timedelta(hours=3))
+        got = self._fetched_date(datetime(2026, 8, 11, 17, 8, 47, tzinfo=plus3))
+        self.assertEqual(got, datetime(2026, 8, 11, 14, 8, 47, tzinfo=timezone.utc))
+        self.assertEqual(got.utcoffset(), timedelta(0))
+
+    def test_a_missing_date_stays_none(self):
+        self.assertIsNone(self._fetched_date(None))
+
+    def test_the_client_is_asked_for_the_servers_own_offset(self):
+        """normalise_times is an ATTRIBUTE on imapclient 3.x, not a constructor
+        argument. The stand-in keeps the real constructor signature so passing it
+        as a keyword fails here the way it would against a real server."""
+
+        class StrictClient:
+            def __init__(self, host, port=None, use_uid=True, ssl=True, stream=False,
+                         ssl_context=None, timeout=None):  # fmt: skip
+                self.normalise_times = True  # imapclient's default
+
+            def login(self, *_):
+                pass
+
+            def capabilities(self):
+                return ()
+
+        fake_module = mock.Mock(IMAPClient=StrictClient)
+        src = ImapSource(host="imap.example.com", login="u", password="p")
+        with mock.patch.dict("sys.modules", {"imapclient": fake_module}):
+            src.capabilities()
+        self.assertIs(src._client.normalise_times, False)
 
 
 class TestStartFrom(_TmpTest):

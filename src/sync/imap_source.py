@@ -100,6 +100,10 @@ class ImapSource:
                 self._client = IMAPClient(
                     self.host, port=self.port, ssl=self.ssl, timeout=self._timeout
                 )
+                # Keep the server's own offset on INTERNALDATE. The default hands
+                # back naive host-local times, which then depend on where the sync
+                # happens to run (#120). An attribute, not a constructor argument.
+                self._client.normalise_times = False
                 self._client.login(self.login, self._password)
             except Exception as exc:  # noqa: BLE001 — auth and transport failures alike
                 raise ImapError(f"IMAP login to {self.host} as {self.login} failed: {exc}") from exc
@@ -288,6 +292,12 @@ class ImapSource:
 
 
 def _as_utc(value) -> Optional[datetime]:
+    """INTERNALDATE as a UTC instant.
+
+    A naive value is host-local wall-clock time (what imapclient returns when it
+    normalises), and ``astimezone`` reads it that way. Stamping UTC onto it
+    instead stored every date off by the host's offset (#120).
+    """
     if not isinstance(value, datetime):
         return None
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
