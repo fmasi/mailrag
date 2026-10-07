@@ -109,6 +109,11 @@ class ImapSource:
         # negotiated exactly like one we dialled ourselves.
         if self._caps is None:
             self._negotiate()
+        # Keep the server's own offset on INTERNALDATE. The default hands back
+        # naive host-local times, which then depend on where and when the sync
+        # happens to run (#120). An attribute, not a constructor argument, and set
+        # on every path out of here so an injected or re-dialled client gets it.
+        self._client.normalise_times = False
         return self._client
 
     def _negotiate(self) -> None:
@@ -288,6 +293,18 @@ class ImapSource:
 
 
 def _as_utc(value) -> Optional[datetime]:
+    """INTERNALDATE as a UTC instant.
+
+    Exact only for an aware value, which is what the client returns now that
+    ``normalise_times`` is off: the server's own offset travels with it.
+
+    A naive value is a fallback for a client that still normalises. It is
+    host-local wall-clock time and ``astimezone`` reads it that way, which beats
+    stamping UTC onto it (#120, every date off by the host's offset) but is not
+    exact: imapclient normalises with the host's offset at FETCH time, so a
+    message dated in the other DST season comes out an hour wrong. Keep the
+    attribute off; this branch alone does not make the dates right.
+    """
     if not isinstance(value, datetime):
         return None
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
