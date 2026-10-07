@@ -593,6 +593,10 @@ def _cmd_attachments_build(args):
     record_profile_for_collection(prof.collection, args.profile)
     store = AttachmentStore(_attach_store_for(args, prof.collection))
     try:
+        # A fresh store is partial until this build finishes over the whole
+        # profile. Left unmarked, the rows from a --limit run or an interrupted
+        # one made it read as complete.
+        store.mark_partial()
         counts = ingest_eml(kept, store, progress=True)
         print(f"attachments: {counts}")
         if not args.no_classify:

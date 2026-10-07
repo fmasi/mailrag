@@ -467,18 +467,19 @@ def index_pending(
     # nothing the second time.
     try:
         stored = (attach_fn or _default_attach)(paths=list(by_path), collection=account.collection)
-    except sqlite3.OperationalError as exc:  # locked by a reader, disk full: retry
-        return _defer_attachments(report, exc, len(by_path))
-    except _ATTACH_PERMANENT as exc:
-        # Retrying cannot fix an unwritable directory, a corrupt index or a
-        # missing collection. Deferred, it would stall indexing forever behind a
-        # quiet "skipped" on every tick.
-        log.error("attachment store refused: %s", exc)
-        report.messages.append(f"attachment store REFUSED (needs operator action): {exc}")
-        report.errors += 1
+    except Exception as exc:  # noqa: BLE001 — sorted into refusal or outage just below
+        if _attach_failure_is_permanent(exc):
+            # Retrying cannot fix an unwritable directory, a corrupt index or a
+            # missing collection. Deferred, it would stall indexing forever
+            # behind a quiet "skipped" on every tick.
+            log.error("attachment store refused: %s", exc)
+            report.messages.append(f"attachment store REFUSED (needs operator action): {exc}")
+            report.errors += 1
+            return report
+        log.warning("attachment store unavailable (%s); %d message(s) deferred", exc, len(by_path))
+        report.skipped_stages.append("attachments")
+        report.messages.append(f"attachment store deferred: {exc}")
         return report
-    except Exception as exc:  # noqa: BLE001 — anything else is treated as an outage
-        return _defer_attachments(report, exc, len(by_path))
     if stored:
         report.messages.append(f"stored {stored} new attachment(s)")
 
@@ -536,29 +537,30 @@ def index_pending(
     return report
 
 
-# Failures of the attachment step that the next tick would only repeat.
-# sqlite3.OperationalError (a lock, a full disk) is a DatabaseError too, so the
-# caller catches it first and retries.
-_ATTACH_PERMANENT = (
-    ValueError,
-    PermissionError,
-    NotADirectoryError,
-    IsADirectoryError,
-    sqlite3.DatabaseError,
-)
+def _attach_failure_is_permanent(exc: Exception) -> bool:
+    """Would the next tick only repeat this failure of the attachment step?
+
+    Only failures of the STORE are listed. A bare ``ValueError`` is not: that is
+    what a single message's unstorable header raises, and treating it as a
+    refusal let one crafted email stop the whole account.
+    """
+    if isinstance(
+        exc, (PermanentIndexError, PermissionError, NotADirectoryError, IsADirectoryError)
+    ):
+        return True
+    if isinstance(exc, sqlite3.OperationalError):
+        # Locked by a reader or out of disk: an outage. Read-only or unopenable:
+        # nothing changes until someone fixes the directory.
+        primary = (getattr(exc, "sqlite_errorcode", None) or 0) & 0xFF
+        return primary in (sqlite3.SQLITE_READONLY, sqlite3.SQLITE_CANTOPEN)
+    return isinstance(exc, sqlite3.DatabaseError)  # corrupt, or not a database
+
 
 # Small inline images measured per run. Each costs ~0.05s of OCR, and the work
 # list is everything in the store not yet measured, which after a build run with
 # --no-classify is the whole backlog. Capped, it drains over a few runs instead
 # of holding one tick for minutes.
 ATTACH_CLASSIFY_PER_RUN = 500
-
-
-def _defer_attachments(report: SyncReport, exc: Exception, n: int) -> SyncReport:
-    log.warning("attachment store unavailable (%s); %d message(s) deferred", exc, n)
-    report.skipped_stages.append("attachments")
-    report.messages.append(f"attachment store deferred: {exc}")
-    return report
 
 
 def _default_attach(*, paths, collection) -> int:
@@ -578,7 +580,9 @@ def _default_attach(*, paths, collection) -> int:
     if not collection:
         # No collection resolves to the store ROOT: the pre-split shared layout,
         # where one corpus could list another's files.
-        raise ValueError("an account needs a collection before its attachments can be stored")
+        raise PermanentIndexError(
+            "an account needs a collection before its attachments can be stored"
+        )
 
     store = AttachmentStore(resolve_attach_store(collection=collection))
     try:

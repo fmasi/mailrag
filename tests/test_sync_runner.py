@@ -610,7 +610,9 @@ class TestAttachmentStoreFollowsSync(_RunnerTest):
         'skipped: attachments'."""
         self._deliver_with_attachment()
         reached = []
-        for exc in (PermissionError("read-only"), ValueError("no collection")):
+        from src.sync.runner import PermanentIndexError
+
+        for exc in (PermissionError("read-only"), PermanentIndexError("no collection")):
             with self.subTest(exc=type(exc).__name__):
                 report = self._index(
                     attach_fn=lambda _e=exc, **kw: (_ for _ in ()).throw(_e),
@@ -622,6 +624,120 @@ class TestAttachmentStoreFollowsSync(_RunnerTest):
                 )
                 self.assertNotIn("attachments", report.skipped_stages)
         self.assertEqual(reached, [])
+
+    def _deliver_raw(self, name, raw):
+        path = os.path.join(self.maildir, "cur", name)
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        os.utime(path, (1000, 1000))
+
+    def test_one_hostile_filename_does_not_stall_the_account(self):
+        """A filename that decodes to a lone surrogate cannot be bound by sqlite.
+        Raised out of the store step it was filed as REFUSED, before anything was
+        indexed, on every tick: one crafted email froze the whole account."""
+        poison = _eml_with_attachment("<poison@x>").replace(
+            b'filename="report.bin"', b'filename="=?utf-7?q?+2AA-?="'
+        )
+        self.assertIn(b"utf-7", poison)
+        self._deliver_raw("p1", poison)
+        self._deliver_raw("g1", _eml_with_attachment("<good@x>", b"good bytes\n"))
+        self._sync()
+        report = self._index()
+        self.assertEqual(report.indexed, 2)
+        self.assertEqual(report.errors, 0)
+        self.assertFalse([m for m in report.messages if "REFUSED" in m])
+        store = self._store()
+        self.assertEqual(len(store.list_for(message_id="<good@x>")), 1)
+        (meta,) = store.list_for(message_id="<poison@x>")
+        meta.filename.encode("utf-8")  # storable text, whatever it was turned into
+
+    def test_a_part_the_store_cannot_take_is_skipped_not_fatal(self):
+        """The safety net behind the scrub: whatever else in a message makes one
+        row unbindable costs that part, not the run."""
+        from src.attachments.ingest_eml import ingest_eml
+
+        self._deliver_with_attachment(name="a1", message_id="<a@x>")
+        self._deliver_with_attachment(name="b1", message_id="<b@x>", data=b"other\n")
+        paths = sorted(
+            r["eml_path"] for r in self.state.pending("acct", "indexed", judge_configured=False)
+        )
+        store = self._store()
+        real_put = store.put
+        calls = []
+
+        def flaky(data, **kw):
+            calls.append(1)
+            if len(calls) == 1:
+                raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "surrogates not allowed")
+            return real_put(data, **kw)
+
+        with mock.patch.object(store, "put", side_effect=flaky):
+            counts = ingest_eml(paths, store)
+        self.assertEqual(counts["attachments"], 1)
+        self.assertEqual(counts["bad_parts"], 1)
+        self.assertEqual(store.count(), 1)
+
+    def test_a_store_level_failure_still_stops_the_ingest(self):
+        from src.attachments.ingest_eml import ingest_eml
+
+        self._deliver_with_attachment()
+        paths = [
+            r["eml_path"] for r in self.state.pending("acct", "indexed", judge_configured=False)
+        ]
+        store = self._store()
+        with mock.patch.object(store, "put", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                ingest_eml(paths, store)
+
+    def _store_dir(self):
+        from src.attachments.location import resolve_attach_store
+
+        return resolve_attach_store(collection="test-collection")
+
+    def test_a_locked_store_is_retried(self):
+        """A real 'database is locked', as an MCP reader mid-query produces."""
+        import sqlite3
+
+        self._store()  # create it
+        db = os.path.join(self._store_dir(), "index.db")
+        holder = sqlite3.connect(db)
+        self.addCleanup(holder.close)
+        holder.execute("BEGIN EXCLUSIVE")
+        other = sqlite3.connect(db, timeout=0)
+        self.addCleanup(other.close)
+        with self.assertRaises(sqlite3.OperationalError) as ctx:
+            other.execute("INSERT INTO store_meta (key, value) VALUES ('k', 'v')")
+        locked = ctx.exception
+        holder.rollback()
+
+        self._deliver_with_attachment()
+        report = self._index(attach_fn=lambda **kw: (_ for _ in ()).throw(locked))
+        self.assertIn("attachments", report.skipped_stages)
+        self.assertEqual(report.errors, 0)
+
+    @unittest.skipIf(os.geteuid() == 0, "root can write a read-only database")
+    def test_a_read_only_store_is_refused_not_retried_forever(self):
+        self._store().close()
+        db = os.path.join(self._store_dir(), "index.db")
+        os.chmod(db, 0o444)
+        os.chmod(self._store_dir(), 0o555)
+        try:
+            self._deliver_with_attachment()
+            report = self._index()
+        finally:
+            os.chmod(self._store_dir(), 0o755)
+            os.chmod(db, 0o644)
+        self.assertTrue([m for m in report.messages if "REFUSED (needs operator action)" in m])
+        self.assertNotIn("attachments", report.skipped_stages)
+
+    def test_a_corrupt_store_index_is_refused(self):
+        os.makedirs(self._store_dir(), exist_ok=True)
+        with open(os.path.join(self._store_dir(), "index.db"), "wb") as fh:
+            fh.write(b"this is not a sqlite database, " * 40)
+        self._deliver_with_attachment()
+        report = self._index()
+        self.assertTrue([m for m in report.messages if "REFUSED (needs operator action)" in m])
+        self.assertEqual(report.indexed, 0)
 
     def test_sync_filling_an_unbuilt_store_leaves_it_marked_partial(self):
         self._deliver_with_attachment()
@@ -703,10 +819,18 @@ class TestAttachmentStoreFollowsSync(_RunnerTest):
     def test_an_account_with_no_collection_is_refused(self):
         """An empty collection resolves to the store ROOT, the shared pre-split
         layout where one corpus could list another's files."""
-        from src.sync.runner import _default_attach
+        from src.sync.runner import PermanentIndexError, _default_attach
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PermanentIndexError):
             _default_attach(paths=[], collection="")
+
+    def test_an_unexpected_error_is_an_outage_not_a_refusal(self):
+        """ValueError used to be on the permanent list, which is how a single
+        message's bad header became a refusal for the whole account."""
+        self._deliver_with_attachment()
+        report = self._index(attach_fn=lambda **kw: (_ for _ in ()).throw(ValueError("odd")))
+        self.assertIn("attachments", report.skipped_stages)
+        self.assertFalse([m for m in report.messages if "REFUSED" in m])
 
 
 class TestMultiAccount(_RunnerTest):

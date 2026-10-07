@@ -242,10 +242,11 @@ class AttachmentStore:
         self._set_meta("built_at")
 
     def mark_partial(self) -> None:
-        """Called by sync before it writes. Marks a store that sync is starting
-        from EMPTY as partial. A store that already holds rows was filled by a
-        build (every store that predates these markers was), so it is left
-        alone, and so is one a build has completed on."""
+        """Called by every writer before its first row. Marks a store that is
+        being filled from EMPTY as partial: sync only ever covers recent mail,
+        and a build may be limited or interrupted. A store that already holds
+        rows was filled by a build (every store that predates these markers
+        was), so it is left alone, and so is one a build has completed on."""
         if self.built_at() is None and self.count() == 0:
             self._set_meta("partial_since")
 

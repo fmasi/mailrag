@@ -31,13 +31,22 @@ def _decode_filename(raw: str | None) -> str:
     if not raw:
         return ""
     try:
-        return str(make_header(decode_header(raw)))
+        return _storable(str(make_header(decode_header(raw))))
     except Exception:
-        return raw
+        return _storable(raw)
+
+
+def _storable(text: str) -> str:
+    """Text that can always be written to the store.
+
+    A header is whatever the sender typed. An encoded-word such as
+    ``=?utf-7?q?+2AA-?=`` decodes to a lone surrogate, which is a valid Python
+    string and not valid UTF-8, so sqlite refuses to bind it."""
+    return text.encode("utf-8", "replace").decode("utf-8")
 
 
 def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[str, int]:
-    counts = {"emails": 0, "attachments": 0, "skipped": 0}
+    counts = {"emails": 0, "attachments": 0, "skipped": 0, "bad_parts": 0}
     paths = list(paths)
     bar = None
     if progress:
@@ -94,17 +103,27 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
             charset = part.get_content_charset()
             if charset and mime.startswith("text/"):
                 mime = f"{mime}; charset={charset}"
-            store.put(
-                data,
-                message_id=message_id,
-                thread_id=thread_id,
-                filename=filename or "(unnamed)",
-                mime=mime,
-                size=len(data),
-                source_type="eml",
-                source_ref=path,
-                inline=(disp == "inline"),
-            )
+            try:
+                store.put(
+                    data,
+                    message_id=message_id,
+                    thread_id=thread_id,
+                    filename=filename or "(unnamed)",
+                    mime=_storable(mime),
+                    size=len(data),
+                    source_type="eml",
+                    source_ref=path,
+                    inline=(disp == "inline"),
+                )
+            except ValueError:
+                # Something else in THIS message the store cannot represent (an
+                # id with an unencodable character, say). It costs this part.
+                # Raised, one crafted email would fail the whole ingest, and
+                # under sync that means the whole account, on every run. A
+                # failure of the store itself is an OSError or a sqlite error
+                # and still propagates.
+                counts["bad_parts"] += 1
+                continue
             counts["attachments"] += 1
         if bar:
             bar.update(1)

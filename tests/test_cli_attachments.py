@@ -66,10 +66,12 @@ class TestAttachmentsCli(unittest.TestCase):
         """After it, an empty lookup means "no attachments"."""
         self.assertIsNone(self._build().build_gap())
 
-    def test_a_limited_build_does_not(self):
+    def test_a_limited_build_on_a_fresh_store_leaves_it_partial(self):
+        """Rows from `--limit 5`, or from a build interrupted halfway, cover part
+        of the corpus. Unmarked, the store read as complete and every thread the
+        build never reached listed as having no attachments."""
         store = self._build("--limit", "5")
-        store.mark_partial()
-        self.assertIsNone(store.build_gap())  # non-empty and never marked partial
+        self.assertEqual(store.build_gap(), "partial")
         self.assertIsNone(store.built_at())
 
     def test_get_text_routes(self):

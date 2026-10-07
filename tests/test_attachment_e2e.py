@@ -92,7 +92,7 @@ class TestAttachmentPipelineE2E(unittest.TestCase):
             [(b"name,amount\nInvoice,99\n", "text", "csv", "ledger.csv")],
         )
         counts = ingest_eml([path], self.store)
-        self.assertEqual(counts, {"emails": 1, "attachments": 1, "skipped": 0})
+        self.assertEqual(counts, {"emails": 1, "attachments": 1, "skipped": 0, "bad_parts": 0})
 
         metas = self.store.list_for(message_id="<e2e-plain@work>")
         self.assertEqual(len(metas), 1)
