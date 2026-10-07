@@ -45,8 +45,11 @@ def coverage(profiles: Sequence, root: str) -> Dict:
     folders: Counter = Counter()
     for path in unclaimed:
         rel = os.path.relpath(path, root)
-        parts = rel.split(os.sep)
-        folders["/".join(parts[:2]) if len(parts) > 1 else "(root)"] += 1
+        # Group on the DIRECTORY, at most two levels deep. Taking the first two
+        # path components instead named a message sitting straight in a top-level
+        # folder after its own file, which is a subject line.
+        dirs = rel.split(os.sep)[:-1]
+        folders["/".join(dirs[:2]) if dirs else "(root)"] += 1
 
     return {
         "total": len(all_abs),

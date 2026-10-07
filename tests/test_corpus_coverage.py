@@ -58,6 +58,32 @@ class TestCoverage(unittest.TestCase):
         r = coverage(self._profiles(), self.root)
         self.assertEqual(r["unclaimed_folders"].most_common(1)[0], ("Personal/Ignored", 4))
 
+    def test_files_directly_in_a_top_level_folder_group_under_that_folder(self):
+        """A message sitting straight in ``Trash/`` belongs to the folder ``Trash``.
+        Grouping on the first two path components took its file name for a folder,
+        so 3,000 trashed messages printed as 3,000 one-message "folders", each
+        named after a subject line."""
+        d = os.path.join(self.root, "Trash")
+        os.makedirs(d)
+        for name in ("Quarterly numbers.eml", "Re- lunch.eml", "Invoice 7.eml"):
+            open(os.path.join(d, name), "wb").close()
+        r = coverage(self._profiles(), self.root)
+        self.assertEqual(r["unclaimed_folders"]["Trash"], 3)
+        self.assertFalse([f for f in r["unclaimed_folders"] if f.endswith(".eml")])
+        self.assertNotIn("Quarterly numbers", render(r, limit=50))
+
+    def test_a_message_at_the_corpus_root_is_reported_as_root(self):
+        open(os.path.join(self.root, "loose.eml"), "wb").close()
+        r = coverage(self._profiles(), self.root)
+        self.assertEqual(r["unclaimed_folders"]["(root)"], 1)
+
+    def test_deeper_folders_still_collapse_to_two_levels(self):
+        d = os.path.join(self.root, "Personal", "Ignored", "2019", "Q1")
+        os.makedirs(d)
+        open(os.path.join(d, "old.eml"), "wb").close()
+        r = coverage(self._profiles(), self.root)
+        self.assertEqual(r["unclaimed_folders"]["Personal/Ignored"], 5)
+
     def test_a_message_claimed_by_any_profile_is_not_unclaimed(self):
         # Corpora share a root, so "unclaimed" means no profile selects it —
         # not "this particular profile skipped it".
