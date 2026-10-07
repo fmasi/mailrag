@@ -7,7 +7,7 @@ import email.header
 import os
 import re
 from email import policy
-from email.utils import parsedate_to_datetime
+from email.utils import getaddresses, parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
 
@@ -126,6 +126,68 @@ from src.data import calendar_summary
 from src.data.body_cleanup import clean_body
 from src.data.loaders.base import EmailLoader
 from src.data.models import NormalizedEmail
+
+# An unsubscribe link on one of these hosts was added by the group relay itself.
+_RELAY_UNSUBSCRIBE_HOSTS = ("googlegroups.com", "groups.google.com")
+_HOST_IN_HEADER = re.compile(r"(?:@|://)([A-Za-z0-9.-]+)")
+
+
+def _on_domain(host: str, domain: str) -> bool:
+    """*host* is *domain* or a subdomain of it, matched at a label boundary."""
+    host, domain = host.strip(". ").lower(), domain.strip(". ").lower()
+    return bool(domain) and (host == domain or host.endswith("." + domain))
+
+
+def _is_bulk(msg) -> bool:
+    """Does this message carry the header markers of bulk mail?
+
+    ``Precedence: bulk``, a ``List-Unsubscribe`` link, or ``Precedence: list``:
+    marketing and newsletter mail carries these and person-to-person mail
+    essentially never does.
+
+    With one exception, which is most of a business mailbox. A group used as a
+    shared address (``support@``, ``contact@``) relays ordinary correspondence
+    and stamps every message with ``Precedence: list``, a ``List-Id`` on the
+    organisation's own domain, and usually its own unsubscribe link. That is a
+    relay, not a list anyone subscribed to. It is recognised by the ``List-Id``
+    sitting on the domain of ``Delivered-To``, the one header here written by
+    the receiving server and not by the sender. Without a ``Delivered-To`` there
+    is no own domain to compare with, and the markers keep their plain meaning.
+
+    A sender can forge an own-domain ``List-Id`` to dodge this flag. All that
+    buys is being treated like any other message, which the LLM pass still
+    judges.
+    """
+    try:
+        precedence = str(msg.get("Precedence") or "").strip().lower()
+        if precedence == "bulk":
+            return True
+        unsubscribe = msg.get_all("List-Unsubscribe") or []
+        if not unsubscribe and precedence != "list":
+            return False
+
+        # Every Delivered-To: a forwarded mailbox has one per hop, and each was
+        # written by a server that accepted the message for that address.
+        delivered = getaddresses([str(v) for v in msg.get_all("Delivered-To") or []])
+        own = {a.rsplit("@", 1)[1] for _, a in delivered if "@" in a}
+        list_id = str(msg.get("List-Id") or "")
+        angle = re.search(r"<([^<>]+)>", list_id)
+        list_host = angle.group(1) if angle else list_id
+        if not any(_on_domain(list_host, d) for d in own):
+            return True
+
+        # Relayed by the organisation's own group. Its own unsubscribe link is
+        # plumbing. Any other one came with the message, from a bulk sender
+        # that wrote to the alias.
+        for value in unsubscribe:
+            for host in _HOST_IN_HEADER.findall(str(value)):
+                if not any(_on_domain(host, d) for d in (*_RELAY_UNSUBSCRIBE_HOSTS, *own)):
+                    return True
+        return False
+    except Exception:  # noqa: BLE001 — sender-typed headers; when unsure, keep the old answer
+        return msg.get("List-Unsubscribe") is not None or str(
+            msg.get("Precedence") or ""
+        ).strip().lower() in ("bulk", "list")
 
 
 class MailArchiveXLoader(EmailLoader):
@@ -317,11 +379,9 @@ class MailArchiveXLoader(EmailLoader):
         in_reply_to = " ".join(str(msg.get("In-Reply-To") or "").split())
         references = " ".join(str(msg.get("References") or "").split())
 
-        # Bulk-mail markers (RFC 2369 List-Unsubscribe, RFC 2076 Precedence):
-        # marketing / newsletter mail carries these, human mail essentially
-        # never does. Surfaced so the conservative Pass-1 noise filter can act.
-        precedence = str(msg.get("Precedence") or "").strip().lower()
-        is_bulk = msg.get("List-Unsubscribe") is not None or precedence in ("bulk", "list")
+        # Bulk-mail markers (RFC 2369 List-Unsubscribe, RFC 2076 Precedence).
+        # Surfaced so the conservative Pass-1 noise filter can act.
+        is_bulk = _is_bulk(msg)
 
         # Parse date to datetime if possible.
         date_obj = None

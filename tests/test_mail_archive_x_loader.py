@@ -70,6 +70,77 @@ class TestBulkHeaderDetection(unittest.TestCase):
         )
         self.assertTrue(self._load_one(raw).is_bulk)
 
+    # --- a group alias is a relay, not a newsletter (#216) -----------------
+    #
+    # A Google Group used as a shared address (support@, contact@) stamps every
+    # message it relays with Precedence: list, a List-Id on the organisation's
+    # own domain and its own unsubscribe link. On a business mailbox that was 89%
+    # of the mail, all of it ordinary correspondence.
+
+    ALIAS = (
+        "Delivered-To: alice@example.com\r\n"
+        "From: A Customer <customer@x.com>\r\n"
+        "To: support@example.com\r\n"
+        "Subject: Where is my order?\r\n"
+        "Precedence: list\r\n"
+        "Mailing-list: list support@example.com; contact support+owners@example.com\r\n"
+        "List-ID: <support.example.com>\r\n"
+        "X-Google-Group-Id: 123456789\r\n"
+    )
+    GROUP_UNSUB = (
+        "List-Unsubscribe: <mailto:googlegroups-manage+123+unsubscribe@googlegroups.com>,\r\n"
+        " <https://groups.google.com/a/example.com/group/support/subscribe>\r\n"
+    )
+
+    def test_mail_relayed_by_an_own_domain_alias_is_not_bulk(self):
+        self.assertFalse(self._load_one(self.ALIAS + "\r\nIt has not arrived.\r\n").is_bulk)
+
+    def test_the_aliases_own_unsubscribe_link_does_not_make_it_bulk(self):
+        raw = self.ALIAS + self.GROUP_UNSUB + "\r\nIt has not arrived.\r\n"
+        self.assertFalse(self._load_one(raw).is_bulk)
+
+    def test_a_newsletter_relayed_through_the_alias_is_still_bulk(self):
+        """Marketing mail sent TO the alias keeps its sender's unsubscribe link."""
+        raw = (
+            self.ALIAS
+            + "List-Unsubscribe: <https://mailer.x.com/unsub?id=1>\r\n"
+            + "\r\nSpring offers.\r\n"
+        )
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_precedence_bulk_wins_even_through_an_alias(self):
+        raw = self.ALIAS.replace("Precedence: list", "Precedence: bulk") + "\r\nNotice.\r\n"
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_a_third_party_list_is_still_bulk(self):
+        """A discussion list elsewhere has its List-Id on someone else's domain."""
+        raw = (
+            "Delivered-To: alice@example.com\r\n"
+            "From: Someone <someone@x.com>\r\n"
+            "Subject: [dev] release plan\r\n"
+            "Precedence: list\r\n"
+            "List-ID: <dev.lists.x.com>\r\n"
+            "\r\nThoughts?\r\n"
+        )
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_without_delivered_to_there_is_no_own_domain_to_trust(self):
+        """Nothing anchors "own domain", so the header keeps its old meaning."""
+        raw = self.ALIAS.replace("Delivered-To: alice@example.com\r\n", "") + "\r\nHi.\r\n"
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_a_list_id_that_only_resembles_the_domain_is_not_an_alias(self):
+        """The sender writes List-Id. A suffix match must stop at a label
+        boundary, or 'notexample.com' would pass for 'example.com'."""
+        raw = (
+            self.ALIAS.replace("<support.example.com>", "<support.notexample.com>") + "\r\nHi.\r\n"
+        )
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_an_unparseable_list_header_falls_back_to_bulk(self):
+        raw = self.ALIAS.replace("<support.example.com>", "=?utf-8?q?=ff=fe?=") + "\r\nHi.\r\n"
+        self.assertTrue(self._load_one(raw).is_bulk)
+
     def test_plain_human_email_is_not_bulk(self):
         raw = (
             "From: Alice <alice@example.com>\r\n"
