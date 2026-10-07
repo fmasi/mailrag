@@ -295,36 +295,50 @@ def execute_plan(
     Returns a process exit code (0 done, 1 user-aborted). The profile is saved
     on every exit path — including a handler raising — so partial progress
     (scope rules, calibration) is kept. The save merges with whatever another
-    command wrote meanwhile; only both changing the same field makes it raise
-    ``ProfileChangedError``."""
+    command wrote meanwhile. If both changed the same field, that field keeps
+    the other command's value, the rest is saved, the log names the field and
+    the run returns 1 rather than report itself complete."""
+    saved = True
     try:
-        for index, step in enumerate(planned):
-            if step.skipped:
-                ui.on_step_skip(index, step)
-                ui.log(f"skip {step.verb} (optional, not implemented yet)")
-                continue
-            if step.verb == "calibrate":
-                ui.on_step_start(index, step)
-                if run_calibrate_gate(prof, handlers["calibrate"], ui) == "abort":
-                    ui.log("aborted at the calibration gate")
-                    return 1
-                ui.on_step_done(index, step, None)
-                continue
-            if step.verb == "summarize" and not ui.confirm_spend():
-                ui.log("stopped before the LLM summary pass")
-                return 1
-            ui.on_step_start(index, step)
-            result = handlers[step.verb](prof, **step.params)
-            ui.on_step_done(index, step, result)
-        return 0
+        code = _run_planned(prof, planned, handlers, ui)
     finally:
+        # No ``return`` in here and nothing allowed to raise out of it: either
+        # would replace an exception a handler raised.
         try:
             prof.save(profile_path)
         except ProfileChangedError as exc:
-            # Raised from a ``finally`` it would replace whatever the run itself
-            # raised or returned. Everything but the contested field was saved,
-            # so say which one and let the run's own outcome stand.
-            ui.log(f"profile not fully saved: {exc}")
+            saved = False
+            # Field names only. The log renders markup and the exception text
+            # carries the profile path, which may hold brackets.
+            ui.log(
+                f"profile not fully saved: another command changed {', '.join(exc.fields)} "
+                "during this run. Its value was kept; re-run that step to redo it."
+            )
+    return code if saved else 1
+
+
+def _run_planned(
+    prof: Any, planned: Sequence[PlannedStep], handlers: Dict[str, Handler], ui: WizardUI
+) -> int:
+    for index, step in enumerate(planned):
+        if step.skipped:
+            ui.on_step_skip(index, step)
+            ui.log(f"skip {step.verb} (optional, not implemented yet)")
+            continue
+        if step.verb == "calibrate":
+            ui.on_step_start(index, step)
+            if run_calibrate_gate(prof, handlers["calibrate"], ui) == "abort":
+                ui.log("aborted at the calibration gate")
+                return 1
+            ui.on_step_done(index, step, None)
+            continue
+        if step.verb == "summarize" and not ui.confirm_spend():
+            ui.log("stopped before the LLM summary pass")
+            return 1
+        ui.on_step_start(index, step)
+        result = handlers[step.verb](prof, **step.params)
+        ui.on_step_done(index, step, result)
+    return 0
 
 
 def short_result(result: Any, limit: int = 140) -> str:

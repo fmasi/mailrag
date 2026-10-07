@@ -318,7 +318,7 @@ class TestTheTuiSurvivesAConflict(_Tmp):
     """execute_plan saves in a ``finally``. A conflict raised there replaced the
     run's own outcome with a stack trace in the middle of the screen."""
 
-    def test_a_conflict_at_the_final_save_is_logged_and_the_run_still_returns(self):
+    def test_a_conflict_at_the_final_save_is_logged_and_the_run_is_not_reported_complete(self):
         from src.tui import flow
 
         prof = CorpusProfile.load(self.path)
@@ -330,10 +330,37 @@ class TestTheTuiSurvivesAConflict(_Tmp):
         step = mock.Mock(verb="measure", skipped=False, params={})
         ui = mock.Mock()
         rc = flow.execute_plan(prof, self.path, [step], {"measure": measure}, ui)
-        self.assertEqual(rc, 0)
+        # Not 0: the screen prints "complete, profile saved" for 0, and `mailrag
+        # run` already exits 1 for the same event.
+        self.assertEqual(rc, 1)
         logged = " ".join(str(c.args[0]) for c in ui.log.call_args_list)
         self.assertIn("chunk_size", logged)
+        # The log renders markup, and a path may hold brackets. Fields only.
+        self.assertNotIn(self.dir, logged)
         self.assertEqual(self._on_disk()["chunk_size"], 256)
+
+    def test_a_clean_run_still_returns_zero(self):
+        from src.tui import flow
+
+        prof = CorpusProfile.load(self.path)
+        step = mock.Mock(verb="measure", skipped=False, params={})
+        rc = flow.execute_plan(
+            prof,
+            self.path,
+            [step],
+            {"measure": lambda p: setattr(p, "chunk_size", 384)},
+            mock.Mock(),
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._on_disk()["chunk_size"], 384)
+
+    def test_the_error_carries_the_contested_fields(self):
+        mine = CorpusProfile.load(self.path)
+        self._other_command_records(chunk_size=256)
+        mine.chunk_size = 384
+        with self.assertRaises(ProfileChangedError) as ctx:
+            mine.save(self.path)
+        self.assertEqual(ctx.exception.fields, ["chunk_size"])
 
     def test_a_handlers_own_exception_is_not_hidden_by_it(self):
         from src.tui import flow

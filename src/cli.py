@@ -65,11 +65,10 @@ def _cmd_index(args):
         noise_min_confidence=args.noise_confidence,
         allow_legacy_append=args.allow_legacy_append,
     )
-    # Deliberately does not write the profile back: build only READS it, and an index
-    # run is long. Saving a profile loaded an hour ago writes back a stale copy
-    # and silently reverts anything another command recorded meanwhile — a
-    # calibrate that finished mid-build had its result discarded exactly this
-    # way. A command that does not change the profile must not rewrite it.
+    # Deliberately does not write the profile back: build only READS it. It used
+    # to save the copy it had loaded before an hours-long run, which reverted a
+    # calibrate that finished in between. save() merges now, so that particular
+    # loss cannot recur, but a command that changes nothing has nothing to save.
     print(f"DONE: {res.chunks} chunks -> '{res.collection}'")
     return 0
 

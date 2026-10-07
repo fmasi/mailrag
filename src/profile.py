@@ -13,7 +13,14 @@ from typing import Optional
 
 
 class ProfileChangedError(RuntimeError):
-    """Another command changed the same profile field this one is trying to save."""
+    """Another command changed the same profile field this one is trying to save.
+
+    ``fields`` names what was contested, for a caller that wants to say so
+    without the file path the message carries."""
+
+    def __init__(self, message: str, fields: Optional[list] = None):
+        super().__init__(message)
+        self.fields = list(fields or [])
 
 
 # Stamped on every save, so it always differs and says nothing about who
@@ -174,7 +181,8 @@ class CorpusProfile:
                 f"{full}: another command changed {', '.join(sorted(conflicts))} while this "
                 "one was running, and this one changed it too. The other command's value "
                 "was kept for that field and everything else was saved. Re-run this "
-                "command to redo that part on top of it."
+                "command to redo that part on top of it.",
+                fields=sorted(conflicts),
             )
 
     def resolved_root(self) -> str:
