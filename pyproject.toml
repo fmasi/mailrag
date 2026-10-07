@@ -39,7 +39,7 @@ datasets = "^5.0.1"
 huggingface-hub = "^1.4.1"
 python-dotenv = "^1.2.1"
 pydantic = "^2.12.5"
-rich = "^14.0.0"
+rich = ">=14,<16"
 # PINNED BELOW 1.19 — do not widen to a caret without re-running the suite.
 # qdrant-client 1.19.0 deleted `IDF_EMBEDDING_MODELS` from
 # qdrant_client.qdrant_fastembed (it had already been emptied to a zero-length
