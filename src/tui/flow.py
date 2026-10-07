@@ -314,6 +314,12 @@ def execute_plan(
                 f"profile not fully saved: another command changed {', '.join(exc.fields)} "
                 "during this run. Its value was kept; re-run that step to redo it."
             )
+        except OSError as exc:
+            # A full disk, a read-only profile, a directory that went away. Same
+            # rule: it must not replace what a handler raised. The reason is
+            # logged without the path, for the same markup reason as above.
+            saved = False
+            ui.log(f"profile not saved: {exc.strerror or type(exc).__name__}")
     return code if saved else 1
 
 

@@ -1151,7 +1151,9 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (ValueError, ProfileChangedError) as e:
+    except (ValueError, ProfileChangedError, PermissionError) as e:
+        # PermissionError: a profile its owner made read-only is refused by
+        # save(), and that is an answer for the user, not a stack trace.
         print(f"error: {e}", file=sys.stderr)
         return 1
 

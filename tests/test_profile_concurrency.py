@@ -172,6 +172,29 @@ class TestARealConflictIsRefused(_Tmp):
         self.assertIn("error: profile changed: chunk_size", err.getvalue())
 
 
+class TestTheCliReportsASaveItCannotMake(_Tmp):
+    @unittest.skipIf(os.geteuid() == 0, "root can write a read-only file")
+    def test_a_read_only_profile_is_an_error_line_not_a_traceback(self):
+        from src import cli
+
+        def measure(args):
+            prof = CorpusProfile.load(args.profile)
+            prof.chunk_size = 384
+            prof.save(args.profile)
+            return 0
+
+        os.chmod(self.path, 0o400)
+        err = io.StringIO()
+        try:
+            with mock.patch.object(cli, "_cmd_measure", measure), redirect_stderr(err):
+                rc = cli.main(["measure", "--profile", self.path])
+        finally:
+            os.chmod(self.path, 0o600)
+        self.assertEqual(rc, 1)
+        self.assertIn("error:", err.getvalue())
+        self.assertIn("read-only", err.getvalue())
+
+
 class TestOrdinaryUseUnaffected(_Tmp):
     def test_repeated_saves_from_one_instance_are_fine(self):
         prof = CorpusProfile.load(self.path)
@@ -338,6 +361,34 @@ class TestTheTuiSurvivesAConflict(_Tmp):
         # The log renders markup, and a path may hold brackets. Fields only.
         self.assertNotIn(self.dir, logged)
         self.assertEqual(self._on_disk()["chunk_size"], 256)
+
+    def test_a_failed_save_does_not_replace_the_handlers_exception(self):
+        """Any failure of the final save, not only a conflict. A full disk or a
+        read-only profile raised from the ``finally`` put the save's traceback in
+        the run log where the handler's own belonged."""
+        from src.tui import flow
+
+        prof = CorpusProfile.load(self.path)
+
+        def measure(p):
+            raise RuntimeError("handler failed")
+
+        step = mock.Mock(verb="measure", skipped=False, params={})
+        ui = mock.Mock()
+        with mock.patch.object(CorpusProfile, "save", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(RuntimeError, "handler failed"):
+                flow.execute_plan(prof, self.path, [step], {"measure": measure}, ui)
+        self.assertIn("profile not saved", " ".join(str(c.args[0]) for c in ui.log.call_args_list))
+
+    def test_a_failed_save_after_a_clean_run_is_not_reported_complete(self):
+        from src.tui import flow
+
+        prof = CorpusProfile.load(self.path)
+        step = mock.Mock(verb="measure", skipped=False, params={})
+        ui = mock.Mock()
+        with mock.patch.object(CorpusProfile, "save", side_effect=PermissionError("read-only")):
+            rc = flow.execute_plan(prof, self.path, [step], {"measure": lambda p: None}, ui)
+        self.assertEqual(rc, 1)
 
     def test_a_clean_run_still_returns_zero(self):
         from src.tui import flow
