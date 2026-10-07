@@ -22,6 +22,7 @@ from src.ingest.selection import discover_structure, list_eml_relpaths
 from src.persona.registry import Persona, Registry
 from src.persona.runner import build_handlers
 from src.persona.wizard import read_recommendation
+from src.profile import ProfileChangedError
 
 __all__ = [
     "LLM_STEPS",
@@ -317,7 +318,13 @@ def execute_plan(
             ui.on_step_done(index, step, result)
         return 0
     finally:
-        prof.save(profile_path)
+        try:
+            prof.save(profile_path)
+        except ProfileChangedError as exc:
+            # Raised from a ``finally`` it would replace whatever the run itself
+            # raised or returned. Everything but the contested field was saved,
+            # so say which one and let the run's own outcome stand.
+            ui.log(f"profile not fully saved: {exc}")
 
 
 def short_result(result: Any, limit: int = 140) -> str:

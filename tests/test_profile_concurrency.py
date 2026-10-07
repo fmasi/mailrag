@@ -119,6 +119,32 @@ class TestARealConflictIsRefused(_Tmp):
         self.assertNotIn("Theirs", str(ctx.exception))
         self.assertNotIn("Mine", str(ctx.exception))
 
+    def test_a_conflict_on_one_field_still_saves_the_others(self):
+        """A persona run changes several fields and saves once, after the index
+        is built. Refusing the whole save over one contested field threw away
+        the rest, and "re-run" then meant rebuilding the index."""
+        run = CorpusProfile.load(self.path)
+        self._other_command_records(chunk_size=256)
+        run.selection_rules = [{"type": "prefix", "value": "Inbox/"}]
+        run.calibration = CALIBRATION
+        run.chunk_size = 384
+        with self.assertRaises(ProfileChangedError) as ctx:
+            run.save(self.path)
+        disk = self._on_disk()
+        self.assertEqual(disk["selection_rules"], [{"type": "prefix", "value": "Inbox/"}])
+        self.assertEqual(disk["calibration"], CALIBRATION)
+        self.assertEqual(disk["chunk_size"], 256, "the contested field keeps the other value")
+        self.assertIn("chunk_size", str(ctx.exception))
+        self.assertNotIn("calibration", str(ctx.exception))
+
+    def test_after_a_conflict_a_second_save_does_not_sneak_the_field_in(self):
+        mine = self._conflict()
+        with self.assertRaises(ProfileChangedError):
+            mine.save(self.path)
+        with self.assertRaises(ProfileChangedError):
+            mine.save(self.path)
+        self.assertEqual(self._on_disk()["chunk_size"], 256)
+
     def test_both_arriving_at_the_same_value_is_not_a_conflict(self):
         mine = CorpusProfile.load(self.path)
         self._other_command_records(chunk_size=256)
@@ -176,6 +202,52 @@ class TestOrdinaryUseUnaffected(_Tmp):
         prof.chunk_size = 384
         prof.save(self.path)
         self.assertEqual(self._on_disk()["chunk_size"], 384)
+
+    def test_a_symlinked_profile_stays_a_link_and_still_merges(self):
+        """Renaming over the link replaced it with a plain file, left the real
+        profile stale, and made the next save skip the merge and write whole."""
+        link = os.path.join(self.dir, "link.profile.json")
+        os.symlink(self.path, link)
+        holder = CorpusProfile.load(link)
+        other = CorpusProfile.load(link)
+        other.calibration = CALIBRATION
+        other.save(link)
+        holder.chunk_size = 384
+        holder.save(link)
+        self.assertTrue(os.path.islink(link))
+        self.assertEqual(self._on_disk()["calibration"], CALIBRATION)
+        self.assertEqual(self._on_disk()["chunk_size"], 384)
+
+    def test_a_save_keeps_the_files_permissions(self):
+        os.chmod(self.path, 0o600)
+        prof = CorpusProfile.load(self.path)
+        prof.chunk_size = 384
+        prof.save(self.path)
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+
+    @unittest.skipIf(os.geteuid() == 0, "root can write a read-only file")
+    def test_a_read_only_profile_is_still_refused(self):
+        """A rename only needs the directory to be writable, so it would have
+        gone straight through a file its owner had locked."""
+        prof = CorpusProfile.load(self.path)
+        os.chmod(self.path, 0o444)
+        prof.chunk_size = 384
+        try:
+            with self.assertRaises(PermissionError):
+                prof.save(self.path)
+        finally:
+            os.chmod(self.path, 0o644)
+        self.assertEqual(self._on_disk()["chunk_size"], 512)
+
+    def test_a_file_that_is_no_longer_a_profile_is_overwritten(self):
+        prof = CorpusProfile.load(self.path)
+        for junk in ("[]", "null", "", "{not json"):
+            with self.subTest(junk=junk):
+                with open(self.path, "w", encoding="utf-8") as fh:
+                    fh.write(junk)
+                prof.chunk_size = 384
+                prof.save(self.path)
+                self.assertEqual(self._on_disk()["chunk_size"], 384)
 
     def test_bookkeeping_never_reaches_the_file(self):
         CorpusProfile.load(self.path).save(self.path)
@@ -240,6 +312,42 @@ class TestIndexDoesNotWriteTheProfile(unittest.TestCase):
                 after = fh.read()
         self.assertEqual(rc, 0)
         self.assertEqual(before, after)
+
+
+class TestTheTuiSurvivesAConflict(_Tmp):
+    """execute_plan saves in a ``finally``. A conflict raised there replaced the
+    run's own outcome with a stack trace in the middle of the screen."""
+
+    def test_a_conflict_at_the_final_save_is_logged_and_the_run_still_returns(self):
+        from src.tui import flow
+
+        prof = CorpusProfile.load(self.path)
+        self._other_command_records(chunk_size=256)
+
+        def measure(p):
+            p.chunk_size = 384
+
+        step = mock.Mock(verb="measure", skipped=False, params={})
+        ui = mock.Mock()
+        rc = flow.execute_plan(prof, self.path, [step], {"measure": measure}, ui)
+        self.assertEqual(rc, 0)
+        logged = " ".join(str(c.args[0]) for c in ui.log.call_args_list)
+        self.assertIn("chunk_size", logged)
+        self.assertEqual(self._on_disk()["chunk_size"], 256)
+
+    def test_a_handlers_own_exception_is_not_hidden_by_it(self):
+        from src.tui import flow
+
+        prof = CorpusProfile.load(self.path)
+        self._other_command_records(chunk_size=256)
+
+        def measure(p):
+            p.chunk_size = 384
+            raise RuntimeError("handler failed")
+
+        step = mock.Mock(verb="measure", skipped=False, params={})
+        with self.assertRaisesRegex(RuntimeError, "handler failed"):
+            flow.execute_plan(prof, self.path, [step], {"measure": measure}, mock.Mock())
 
 
 if __name__ == "__main__":
