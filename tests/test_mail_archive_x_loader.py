@@ -137,8 +137,60 @@ class TestBulkHeaderDetection(unittest.TestCase):
         )
         self.assertTrue(self._load_one(raw).is_bulk)
 
-    def test_an_unparseable_list_header_falls_back_to_bulk(self):
+    def test_a_list_id_that_is_not_a_host_is_not_an_alias(self):
         raw = self.ALIAS.replace("<support.example.com>", "=?utf-8?q?=ff=fe?=") + "\r\nHi.\r\n"
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_if_the_headers_cannot_be_read_the_old_rule_answers(self):
+        """The guard around sender-typed headers. When the new logic fails, a
+        message with list markers is bulk, as it always was."""
+        from unittest import mock
+
+        raw = self.ALIAS + "\r\nHi.\r\n"
+        with mock.patch(
+            "src.data.loaders.mail_archive_x.getaddresses", side_effect=RuntimeError("boom")
+        ):
+            self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_only_the_receiving_servers_delivered_to_counts(self):
+        """A list host leaves its own Delivered-To lower down in the message
+        (Postfix with Mailman does). Trusting every one let a third-party list,
+        or a newsletter that adds the header itself, pass for an own-domain
+        alias. Only the topmost was written by the server that took final
+        delivery."""
+        raw = (
+            "Delivered-To: alice@example.com\r\n"
+            "Delivered-To: dev@x.com\r\n"
+            "From: Someone <someone@x.com>\r\n"
+            "Subject: [dev] release plan\r\n"
+            "Precedence: list\r\n"
+            "List-Id: Dev <dev.x.com>\r\n"
+            "List-Unsubscribe: <https://mail.x.com/mailman/options/dev>\r\n"
+            "\r\nThoughts?\r\n"
+        )
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_an_unsubscribe_link_on_the_own_domain_is_the_relays(self):
+        """Mailman on the organisation's own host, relaying an internal alias."""
+        raw = (
+            self.ALIAS
+            + "List-Unsubscribe: <mailto:support-leave@lists.example.com>\r\n"
+            + "\r\nIt has not arrived.\r\n"
+        )
+        self.assertFalse(self._load_one(raw).is_bulk)
+
+    def test_a_foreign_link_in_a_second_unsubscribe_header_is_bulk(self):
+        raw = (
+            self.ALIAS
+            + self.GROUP_UNSUB
+            + "List-Unsubscribe: <mailto:leave@mailer.x.com>\r\n"
+            + "\r\nSpring offers.\r\n"
+        )
+        self.assertTrue(self._load_one(raw).is_bulk)
+
+    def test_any_precedence_bulk_header_wins(self):
+        """A relay can add its own Precedence: list above the sender's."""
+        raw = self.ALIAS + "Precedence: bulk\r\n" + "\r\nNotice.\r\n"
         self.assertTrue(self._load_one(raw).is_bulk)
 
     def test_plain_human_email_is_not_bulk(self):

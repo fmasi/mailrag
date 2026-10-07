@@ -150,30 +150,33 @@ def _is_bulk(msg) -> bool:
     and stamps every message with ``Precedence: list``, a ``List-Id`` on the
     organisation's own domain, and usually its own unsubscribe link. That is a
     relay, not a list anyone subscribed to. It is recognised by the ``List-Id``
-    sitting on the domain of ``Delivered-To``, the one header here written by
-    the receiving server and not by the sender. Without a ``Delivered-To`` there
-    is no own domain to compare with, and the markers keep their plain meaning.
+    sitting on the domain of the topmost ``Delivered-To``, the one written by
+    the server that took final delivery. Lower ones are not trusted: a list host
+    leaves its own there, and a sender can add one. Without a ``Delivered-To``
+    there is no own domain to compare with, and the markers keep their plain
+    meaning. That includes a mailbox forwarded from another domain.
 
     A sender can forge an own-domain ``List-Id`` to dodge this flag. All that
     buys is being treated like any other message, which the LLM pass still
     judges.
     """
     try:
-        precedence = str(msg.get("Precedence") or "").strip().lower()
-        if precedence == "bulk":
+        # Every Precedence header: a relay can put its own "list" above the
+        # sender's "bulk".
+        precedence = {str(v).strip().lower() for v in msg.get_all("Precedence") or []}
+        if "bulk" in precedence:
             return True
         unsubscribe = msg.get_all("List-Unsubscribe") or []
-        if not unsubscribe and precedence != "list":
+        if not unsubscribe and "list" not in precedence:
             return False
 
-        # Every Delivered-To: a forwarded mailbox has one per hop, and each was
-        # written by a server that accepted the message for that address.
-        delivered = getaddresses([str(v) for v in msg.get_all("Delivered-To") or []])
-        own = {a.rsplit("@", 1)[1] for _, a in delivered if "@" in a}
+        # Headers are prepended hop by hop, so the first Delivered-To is the
+        # final one.
+        delivered = getaddresses([str(msg.get("Delivered-To") or "")])
+        own = next((a.rsplit("@", 1)[1] for _, a in delivered if "@" in a), "")
         list_id = str(msg.get("List-Id") or "")
         angle = re.search(r"<([^<>]+)>", list_id)
-        list_host = angle.group(1) if angle else list_id
-        if not any(_on_domain(list_host, d) for d in own):
+        if not _on_domain(angle.group(1) if angle else list_id, own):
             return True
 
         # Relayed by the organisation's own group. Its own unsubscribe link is
@@ -181,7 +184,7 @@ def _is_bulk(msg) -> bool:
         # that wrote to the alias.
         for value in unsubscribe:
             for host in _HOST_IN_HEADER.findall(str(value)):
-                if not any(_on_domain(host, d) for d in (*_RELAY_UNSUBSCRIBE_HOSTS, *own)):
+                if not any(_on_domain(host, d) for d in (*_RELAY_UNSUBSCRIBE_HOSTS, own)):
                     return True
         return False
     except Exception:  # noqa: BLE001 — sender-typed headers; when unsure, keep the old answer
