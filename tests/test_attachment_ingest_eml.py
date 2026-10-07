@@ -164,6 +164,7 @@ class TestHostileMessages(unittest.TestCase):
         )
         counts = ingest_eml([poison], self.store)
         self.assertEqual(counts["attachments"], 1)
+        self.assertEqual(counts["bad_parts"], 1, "a dropped part must be counted somewhere")
         (meta,) = self.store.list_for(message_id="<p@work>")
         self.assertEqual(meta.filename, "ok.bin")
 
@@ -202,6 +203,27 @@ class TestHostileMessages(unittest.TestCase):
         counts = ingest_eml([self._eml("m.eml", _raw_message(many))], self.store)
         self.assertEqual(counts["attachments"], MAX_PARTS_PER_MESSAGE)
         self.assertEqual(self.store.count(), MAX_PARTS_PER_MESSAGE)
+        self.assertEqual(counts["bad_parts"], 50, "parts past the cap are counted, not lost")
+
+    def test_sender_typed_text_is_stored_at_a_bounded_length(self):
+        """A 100 KB subject on a message with no Message-ID became the thread id
+        on every one of its rows: a 153 KB email grew the index by 103 MB, and
+        long filenames put a megabyte of names on a single search hit."""
+        raw = _raw_message(
+            _part(b'attachment; filename="' + b"n" * 5000 + b'.bin"'),
+            headers=b"Subject: " + b"s" * 100_000 + b"\r\n",
+        )
+        ingest_eml([self._eml("big.eml", raw)], self.store)
+        (meta,) = self.store.list_for()
+        self.assertLessEqual(len(meta.filename), 512)
+        self.assertLessEqual(len(meta.thread_id), 1024)
+        self.assertLessEqual(len(meta.message_id), 1024)
+
+    def test_an_ordinary_id_and_name_are_stored_unchanged(self):
+        raw = _raw_message(_part(b'attachment; filename="report.pdf"'))
+        ingest_eml([self._eml("ok.eml", raw)], self.store)
+        (meta,) = self.store.list_for(message_id="<p@work>")
+        self.assertEqual(meta.filename, "report.pdf")
 
 
 if __name__ == "__main__":

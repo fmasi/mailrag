@@ -228,8 +228,9 @@ runs, and until then `list_attachments` refuses to answer "none" for a thread it
 holds nothing for.
 
 A message cannot stop this step. A part whose headers the parser rejects is
-skipped, at most 500 parts are taken from one message, and whatever could not be
-stored is counted in the log without naming the message.
+skipped, at most 500 parts are taken from one message, and names and ids are
+stored at a bounded length. Every part dropped for any of those reasons is
+counted in the log, without naming the message.
 
 New small inline images are also measured for the decoration filter, up to 500
 per run. If `tesseract` is missing from the job's `PATH` nothing is recorded for
