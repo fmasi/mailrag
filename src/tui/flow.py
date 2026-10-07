@@ -293,7 +293,9 @@ def execute_plan(
 
     Returns a process exit code (0 done, 1 user-aborted). The profile is saved
     on every exit path — including a handler raising — so partial progress
-    (scope rules, calibration) is never discarded."""
+    (scope rules, calibration) is kept. The save merges with whatever another
+    command wrote meanwhile; only both changing the same field makes it raise
+    ``ProfileChangedError``."""
     try:
         for index, step in enumerate(planned):
             if step.skipped:

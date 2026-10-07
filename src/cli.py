@@ -38,7 +38,7 @@ from src.pipeline import pass2 as pass2_stage
 from src.pipeline import profile as profile_stage
 from src.pipeline import prune as prune_stage
 from src.pipeline import select as select_stage
-from src.profile import CorpusProfile
+from src.profile import CorpusProfile, ProfileChangedError
 
 
 def _add_profile_arg(p):
@@ -1152,7 +1152,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except ValueError as e:
+    except (ValueError, ProfileChangedError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

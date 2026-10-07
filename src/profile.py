@@ -10,7 +10,18 @@ from typing import Optional
 
 
 class ProfileChangedError(RuntimeError):
-    """The profile file was rewritten by someone else since it was loaded."""
+    """Another command changed the same profile field this one is trying to save."""
+
+
+# Stamped on every save, so it always differs and says nothing about who
+# changed what.
+_BOOKKEEPING = ("updated_at",)
+
+
+def _frozen(value) -> str:
+    """A field's value as comparable text. Taken as a copy on purpose: commands
+    change lists and dicts in place, and a snapshot sharing them never differs."""
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 @dataclass
@@ -27,36 +38,90 @@ class CorpusProfile:
     calibration: Optional[dict] = None  # written by 1b's calibrate gate
     updated_at: Optional[str] = None
 
-    # mtime of the file this instance was loaded from, so save() can tell that
-    # someone else rewrote it meanwhile. Not a profile field: excluded from the
-    # serialised form because save() skips underscore-prefixed fields.
-    _loaded_mtime: Optional[float] = field(default=None, repr=False, compare=False)
+    # What the file held when this instance read it, and which file that was, so
+    # save() can tell this command's changes from someone else's. Bookkeeping,
+    # not profile data: underscore-prefixed fields are never read from or
+    # written to the file.
+    _loaded: Optional[dict] = field(default=None, repr=False, compare=False)
+    _loaded_path: Optional[str] = field(default=None, repr=False, compare=False)
+
+    @classmethod
+    def _data_fields(cls) -> list:
+        return [f.name for f in fields(cls) if not f.name.startswith("_")]
+
+    def _snapshot(self) -> dict:
+        return {name: _frozen(getattr(self, name)) for name in self._data_fields()}
 
     @classmethod
     def load(cls, path: str) -> "CorpusProfile":
         full = os.path.expanduser(path)
         with open(full, encoding="utf-8") as fh:
             data = json.load(fh)
-        known = {f.name for f in fields(cls)}
+        known = set(cls._data_fields())
         prof = cls(**{k: v for k, v in data.items() if k in known})
-        try:
-            prof._loaded_mtime = os.path.getmtime(full)
-        except OSError:
-            prof._loaded_mtime = None
+        prof._loaded = prof._snapshot()
+        prof._loaded_path = os.path.realpath(full)
         return prof
+
+    def _merge_from_disk(self, full: str) -> None:
+        """Take over the fields someone else changed since this instance loaded.
+
+        Three values per field: what was loaded, what this instance holds now,
+        what the file holds now. Only the file moved: keep the file's. Only this
+        instance moved: keep this one's. Both moved, to different values: that
+        is a real conflict and nothing here can pick a winner.
+        """
+        try:
+            theirs = CorpusProfile.load(full)
+        except FileNotFoundError:
+            return  # deleted since: nothing to merge with, write it again
+        except (OSError, ValueError, TypeError):
+            return  # unreadable: there is no result in it to protect
+        loaded = self._loaded or {}
+        on_disk = theirs._snapshot()
+        conflicts = []
+        for name in self._data_fields():
+            if name in _BOOKKEEPING:
+                continue
+            base = loaded.get(name)
+            mine = _frozen(getattr(self, name))
+            other = on_disk[name]
+            if other == base or other == mine:
+                continue
+            if mine == base:
+                setattr(self, name, getattr(theirs, name))
+            else:
+                conflicts.append(name)
+        if conflicts:
+            raise ProfileChangedError(
+                f"{full}: another command changed {', '.join(sorted(conflicts))} while this "
+                "one was running, and this one changed it too. Nothing was written, so the "
+                "other command's value is still in the file. Re-run this command to redo "
+                "its part on top of it."
+            )
 
     def save(self, path: str, *, force: bool = False) -> None:
         """Write the profile, stamping ``updated_at``.
 
-        Refuses when the file changed on disk since this instance loaded it,
-        unless ``force``. A command holds a profile in memory for as long as it
-        runs — an index build, minutes to hours — and writing it back at the end
-        silently reverts whatever another command recorded in between. A
-        calibrate that finished mid-build lost its result exactly that way, and
-        the loss was invisible: the file simply held older numbers. Detecting it
-        is cheap; recovering a result nobody noticed was discarded is not.
+        A command holds a profile in memory for as long as it runs, which for
+        an index build is minutes to hours. Writing that copy back whole reverts
+        whatever another command recorded in between: a calibrate that finished
+        mid-build lost its result exactly that way, and the loss was invisible,
+        because the file simply held older numbers.
 
-        The field existed but nothing ever set it, so every profile on disk
+        So a save to the file this instance was loaded from writes only the
+        fields this instance changed, and keeps the rest as the file has them
+        now. Two commands that changed different fields both keep their result.
+        Two that changed the same field raise :class:`ProfileChangedError`
+        rather than have the later one win silently. ``force`` writes this copy
+        as it stands. A profile that was never loaded, or one saved under
+        another name, has nothing to merge with and is written whole.
+
+        The change is detected from the file's content, not its mtime: a rewrite
+        inside one clock tick, or a file restored with an older stamp, is still
+        a change.
+
+        ``updated_at`` existed but nothing ever set it, so every profile on disk
         reported ``None`` — a provenance field carrying no provenance. Selection
         rules are a point-in-time snapshot of an interactive choice, and mail
         arrives continuously, so "when was this last decided" is exactly the
@@ -65,27 +130,24 @@ class CorpusProfile:
         from datetime import datetime, timezone
 
         full = os.path.expanduser(path)
-        if not force and self._loaded_mtime is not None:
-            try:
-                current = os.path.getmtime(full)
-            except OSError:
-                current = None
-            if current is not None and current > self._loaded_mtime:
-                raise ProfileChangedError(
-                    f"{full} changed on disk since it was loaded; refusing to overwrite "
-                    "it with a stale copy. Another command (calibrate, scope, prune) "
-                    "probably wrote it while this one was running. Re-run this command, "
-                    "or pass force=True if the in-memory copy is the one you want."
-                )
+        target = os.path.realpath(full)
+        if not force and self._loaded is not None and self._loaded_path == target:
+            self._merge_from_disk(full)
 
         self.updated_at = datetime.now(timezone.utc).isoformat()
-        data = {f.name: getattr(self, f.name) for f in fields(self) if not f.name.startswith("_")}
-        with open(full, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
+        data = {name: getattr(self, name) for name in self._data_fields()}
+        # Temp file + rename: a reader (another command's merge, the long-lived
+        # MCP server) sees the old profile or the new one, never a truncated one.
+        tmp = f"{full}.{os.getpid()}.tmp"
         try:
-            self._loaded_mtime = os.path.getmtime(full)
-        except OSError:
-            pass
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2)
+            os.replace(tmp, full)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        self._loaded = self._snapshot()
+        self._loaded_path = target
 
     def resolved_root(self) -> str:
         return os.path.abspath(os.path.expanduser(self.root))
