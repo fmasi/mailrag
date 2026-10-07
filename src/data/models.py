@@ -47,7 +47,7 @@ class NormalizedEmail:
     in_reply_to: Optional[str] = None
     references: Optional[str] = None
     summary: Optional[str] = None  # LLM Pass-2 enrichment; payload-only
-    is_bulk: bool = False  # bulk-mail header marker (List-Unsubscribe / Precedence:bulk)
+    is_bulk: bool = False  # bulk-mail header marker (see loaders.mail_archive_x._is_bulk)
     noise_candidate: bool = False  # bulk rule would drop it; kept for the no-LLM vector hunt
 
     # Example usage:

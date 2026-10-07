@@ -93,8 +93,16 @@ full-scale sweep.
 **Pass-1 — rules and headers, no LLM** (`src/data/noise_filter.py`,
 `src/pipeline/pass1.py`). Curated rules in `config/noise_rules.yaml` (sender
 domains, sender/subject regexes) plus a header-driven bulk filter
-(`List-Unsubscribe`, `Precedence: bulk`) with keep-guards so human mailing-list
-traffic and transactional receipts survive. Crucially this pass **tags** — it
+(`List-Unsubscribe`, `Precedence: bulk` or `list`) with keep-guards so human mailing-list
+traffic and transactional receipts survive. Mail relayed by a group alias on the
+mailbox's own domain (`support@`, `contact@`) is not bulk: the group stamps it
+`Precedence: list`, but its `List-Id` sits on the mailbox's own domain, read
+from the `Delivered-To` that the final server writes above every `Received`
+header. It stays bulk if it is `Precedence: bulk` or brings an unsubscribe link
+from somewhere else, which is what a newsletter sent to the alias looks like.
+Where the `Delivered-To` is missing the plain rule applies. Any list or
+notification stream hosted on the mailbox's own domain matches too, and is
+treated as internal mail. Crucially this pass **tags** — it
 sets a `noise_candidate` flag and drops nothing. Cheap heuristics get to raise
 suspicion; only the LLM pass gets to condemn.
 
