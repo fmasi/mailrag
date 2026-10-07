@@ -179,7 +179,7 @@ torch = "^2.13.0"
 #   setuptools — via llama-index-core (and formerly capped by torch, see above).
 #                GHSA-h35f-9h28-mq5c fixed in 83.0.0.
 setuptools = "^83.0.0"
-#   pyjwt — via mcp (pyjwt[crypto]). 2.13.0 is affected by sixteen advisories
+#   pyjwt — via mcp (pyjwt[crypto]). 2.13.0 is affected by fourteen advisories
 #           (PYSEC-2026-4140..4152, -4183). Most are fixed in 2.14.0, including
 #           GHSA-gvp8-978c-rx2q (CVE-2026-103001: decode() mutating a reused
 #           options dict, a silent claim-verification bypass, last affected
