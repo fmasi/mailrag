@@ -45,6 +45,37 @@ class TestStorePathsAreSeparate(unittest.TestCase):
         self.assertTrue(server._safe_dirname("!!!"))
 
 
+class TestEveryCallerResolvesTheSameStore(unittest.TestCase):
+    """The build verb, the server and sync must agree on the directory. The CLI
+    used to ignore ``$RAG_ATTACH_STORE``, so with the override set a build filled
+    ``~/.mailrag`` while the server read somewhere else."""
+
+    def _args(self, store):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(store=store)
+
+    def test_the_cli_follows_the_env_override_like_the_server(self):
+        from src import cli
+
+        with mock.patch.dict(os.environ, {"RAG_ATTACH_STORE": "/env/store"}):
+            got = cli._attach_store_for(self._args(cli._DEFAULT_ATTACH_STORE), "personal-rag")
+            self.assertEqual(got, server.resolve_attach_store(collection="personal-rag"))
+        self.assertEqual(got, "/env/store/personal-rag")
+
+    def test_an_explicit_cli_store_still_wins_over_the_env(self):
+        from src import cli
+
+        with mock.patch.dict(os.environ, {"RAG_ATTACH_STORE": "/env/store"}):
+            self.assertEqual(cli._attach_store_for(self._args("/mine"), "personal-rag"), "/mine")
+
+    def test_the_cli_still_refuses_to_guess_a_collection(self):
+        from src import cli
+
+        with self.assertRaises(ValueError):
+            cli._attach_store_for(self._args(cli._DEFAULT_ATTACH_STORE), "")
+
+
 class TestNoCrossCorpusReads(unittest.TestCase):
     """The property that matters: one corpus cannot see the other's rows."""
 

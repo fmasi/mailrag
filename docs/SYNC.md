@@ -135,6 +135,7 @@ and anything it couldn't do is picked up next time:
 | Network / IMAP | warn, exit cleanly, retry on the next tick |
 | LLM endpoint | mail is still fetched and spooled; judging deferred, and indexing waits with it. An endpoint outage is distinguished from a per-message failure (`classify_failure`) and never consumes a message's retry budget — otherwise a weekend with LM Studio closed would abandon the whole backlog |
 | Qdrant | mail is still fetched and judged; indexing deferred |
+| Attachment store (disk full, locked) | mail is still fetched and judged; the store write is retried on the next tick and **indexing waits for it**, so a message never becomes searchable by an attachment that cannot be listed or fetched |
 
 Two failures are deliberately *not* treated as outages, because retrying cannot
 fix them and a silent "deferred" every 12 hours would hide them forever:
@@ -144,7 +145,16 @@ fix them and a silent "deferred" every 12 hours would hide them forever:
 
 Both are reported as `index REFUSED (needs operator action)` and are checked
 *before* the delta is loaded, judged and OCR'd — so a refusal costs one round
-trip rather than repeating the whole delta's work on every tick.
+trip rather than repeating the whole delta's work on every tick. The one thing
+that does repeat is the attachment-store step, which runs ahead of these checks:
+each tick re-reads the pending files (a parse and a hash per message, no model)
+and writes nothing it already holds. OCR runs only for small images it has not
+measured yet, so a repeat tick has none left to do.
+
+The attachment store has its own version of this. A lock or a full disk is an
+outage and is retried. A directory that cannot be written, a corrupt store index
+or an account with no collection fails the same way every time, so it is
+reported as `attachment store REFUSED (needs operator action)`.
 
 A message that cannot be parsed at all is **parked** in its own table with its
 error and counted by `--status`; the cursor still advances past it, so one
@@ -202,6 +212,33 @@ message left in the queue may be one your model reliably chokes on, which is the
 they are abandoned after three attempts; probe fails, nothing is charged and the
 stage is deferred. Transport failures are classified as outages up front and
 never consume a retry budget at all.
+
+### Attachments: text to the index, bytes to the store
+
+A synced message's attachments travel two paths in the index stage. Their
+extracted *text* is chunked into the collection, which is what `search_email`
+finds. Their *bytes* are written to the collection's attachment store
+(`~/.mailrag/attachments/<collection>/`), which is what `list_attachments` and
+`get_attachment` read. The store write runs first and is idempotent.
+
+Sync only stores what it brings in. Mail indexed in bulk, or synced before the
+store step existed, needs one `./mailrag attachments build --profile <p>` to
+catch up. A store that sync starts from empty is marked partial until that build
+runs, and until then `list_attachments` refuses to answer "none" for a thread it
+holds nothing for.
+
+A message cannot stop this step. A part whose headers the parser rejects is
+skipped, at most 500 parts are taken from one message, and names and ids are
+stored at a bounded length. Every part dropped for any of those reasons is
+counted in the log, without naming the message.
+
+New small inline images are also measured for the decoration filter, up to 500
+per run. If `tesseract` is missing from the job's `PATH` nothing is recorded for
+them, so a later run with a working `PATH` measures them.
+
+The scheduler unit carries `RAG_ATTACH_STORE` when it is set in the shell that
+runs `--install-agent`. Without it, sync uses the default directory, and it must
+be the one the MCP server reads.
 
 ### Known limitation: a degraded environment loses attachment text
 

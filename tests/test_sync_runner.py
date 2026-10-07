@@ -64,6 +64,13 @@ class _RunnerTest(unittest.TestCase):
             os.makedirs(os.path.join(self.maildir, sub))
         self.state = SyncState(os.path.join(self.d, "sync.db"))
         self.addCleanup(self.state.close)
+        # The index stage writes the attachment store. Pinned here as well as in
+        # conftest, so the module is safe under plain `python -m unittest` too.
+        patcher = mock.patch.dict(
+            os.environ, {"RAG_ATTACH_STORE": os.path.join(self.d, "attachments")}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.account = AccountConfig(
             id="acct",
             source="maildir",
@@ -515,6 +522,315 @@ class TestIndexStage(_RunnerTest):
         )
         self.assertEqual(report.indexed, 1)
         self.assertEqual(self.state.counts("acct")["pending_index"], 0)
+
+
+def _eml_with_attachment(message_id: str, data: bytes = b"quarterly figures\n") -> bytes:
+    m = EmailMessage()
+    m["From"] = "alice@example.com"
+    m["To"] = "bob@example.com"
+    m["Subject"] = "Report"
+    m["Message-ID"] = message_id
+    m["Date"] = "Tue, 15 Jan 2026 09:30:00 +0000"
+    m.set_content("See attached.")
+    m.add_attachment(data, maintype="application", subtype="octet-stream", filename="report.bin")
+    return bytes(m)
+
+
+class TestAttachmentStoreFollowsSync(_RunnerTest):
+    """Sync keeps the attachment store as fresh as the index (#160).
+
+    Attachment TEXT reached the vector index on every sync, but the bytes behind
+    ``list_attachments`` / ``get_attachment`` were only ever written by the manual
+    ``attachments build``. Mail synced after that build was searchable by its
+    attachment content and had no attachment anyone could list or fetch.
+    """
+
+    def _profile(self):
+        return mock.Mock(pass2_cache=None, chunk_size=512, chunk_overlap=64, qdrant_url="http://x")
+
+    def _deliver_with_attachment(self, name="m1", message_id="<a@x>", data=b"quarterly figures\n"):
+        path = os.path.join(self.maildir, "cur", name)
+        with open(path, "wb") as fh:
+            fh.write(_eml_with_attachment(message_id, data))
+        os.utime(path, (1000, 1000))
+        self._sync()
+
+    def _index(self, **kw):
+        kw.setdefault("index_fn", lambda **k: (1, self._keys_for(k["paths"])))
+        return index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder_factory=lambda: mock.Mock(),
+            require_judged=False,
+            **kw,
+        )
+
+    def _store(self, collection="test-collection"):
+        from src.attachments.location import resolve_attach_store
+        from src.attachments.store import AttachmentStore
+
+        store = AttachmentStore(resolve_attach_store(collection=collection))
+        self.addCleanup(store.close)
+        return store
+
+    def test_indexing_a_message_stores_its_attachment_bytes(self):
+        self._deliver_with_attachment(data=b"quarterly figures\n")
+        self._index()
+        store = self._store()
+        self.assertEqual(store.count(), 1)
+        (meta,) = store.list_for(message_id="<a@x>", include_boilerplate=True)
+        self.assertEqual(meta.filename, "report.bin")
+        self.assertEqual(store.get_bytes(meta.sha256), b"quarterly figures\n")
+
+    def test_the_bytes_land_only_in_the_accounts_own_collection_store(self):
+        from src.attachments.location import resolve_attach_store
+
+        self._deliver_with_attachment()
+        self._index()
+        root = resolve_attach_store()
+        self.assertEqual(os.listdir(root), ["test-collection"])
+        # No flat index.db at the root: that is the legacy shared store the
+        # server refuses to run against.
+        self.assertFalse(os.path.exists(os.path.join(root, "index.db")))
+
+    def test_the_report_counts_new_rows_only(self):
+        """Counting parts SEEN made every retry tick of a Qdrant outage report
+        the same attachments as stored again."""
+        self._deliver_with_attachment()
+        down = lambda **k: (_ for _ in ()).throw(ConnectionError("qdrant down"))  # noqa: E731
+        first = self._index(index_fn=down)
+        again = self._index(index_fn=down)
+        self.assertIn("stored 1 new attachment(s)", first.messages)
+        self.assertFalse([m for m in again.messages if "stored" in m])
+
+    def test_a_cause_no_retry_can_fix_is_escalated_not_deferred(self):
+        """A store directory that cannot be written fails identically on every
+        tick. Filed as a deferral it stalled indexing forever behind a quiet
+        'skipped: attachments'."""
+        self._deliver_with_attachment()
+        reached = []
+        from src.sync.runner import PermanentIndexError
+
+        for exc in (PermissionError("read-only"), PermanentIndexError("no collection")):
+            with self.subTest(exc=type(exc).__name__):
+                report = self._index(
+                    attach_fn=lambda _e=exc, **kw: (_ for _ in ()).throw(_e),
+                    index_fn=lambda **k: reached.append(1) or (1, set()),
+                )
+                self.assertEqual(report.errors, 1)
+                self.assertTrue(
+                    [m for m in report.messages if "REFUSED (needs operator action)" in m]
+                )
+                self.assertNotIn("attachments", report.skipped_stages)
+        self.assertEqual(reached, [])
+
+    def _deliver_raw(self, name, raw):
+        path = os.path.join(self.maildir, "cur", name)
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        os.utime(path, (1000, 1000))
+
+    def test_one_hostile_filename_does_not_stall_the_account(self):
+        """A filename that decodes to a lone surrogate cannot be bound by sqlite.
+        Raised out of the store step it was filed as REFUSED, before anything was
+        indexed, on every tick: one crafted email froze the whole account."""
+        poison = _eml_with_attachment("<poison@x>").replace(
+            b'filename="report.bin"', b'filename="=?utf-7?q?+2AA-?="'
+        )
+        self.assertIn(b"utf-7", poison)
+        self._deliver_raw("p1", poison)
+        self._deliver_raw("g1", _eml_with_attachment("<good@x>", b"good bytes\n"))
+        self._sync()
+        report = self._index()
+        self.assertEqual(report.indexed, 2)
+        self.assertEqual(report.errors, 0)
+        self.assertFalse([m for m in report.messages if "REFUSED" in m])
+        store = self._store()
+        self.assertEqual(len(store.list_for(message_id="<good@x>")), 1)
+        (meta,) = store.list_for(message_id="<poison@x>")
+        meta.filename.encode("utf-8")  # storable text, whatever it was turned into
+
+    def test_a_part_the_store_cannot_take_is_skipped_not_fatal(self):
+        """The safety net behind the scrub: whatever else in a message makes one
+        row unbindable costs that part, not the run."""
+        from src.attachments.ingest_eml import ingest_eml
+
+        self._deliver_with_attachment(name="a1", message_id="<a@x>")
+        self._deliver_with_attachment(name="b1", message_id="<b@x>", data=b"other\n")
+        paths = sorted(
+            r["eml_path"] for r in self.state.pending("acct", "indexed", judge_configured=False)
+        )
+        store = self._store()
+        real_put = store.put
+        calls = []
+
+        def flaky(data, **kw):
+            calls.append(1)
+            if len(calls) == 1:
+                raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "surrogates not allowed")
+            return real_put(data, **kw)
+
+        with mock.patch.object(store, "put", side_effect=flaky):
+            counts = ingest_eml(paths, store)
+        self.assertEqual(counts["attachments"], 1)
+        self.assertEqual(counts["bad_parts"], 1)
+        self.assertEqual(store.count(), 1)
+
+    def test_a_store_level_failure_still_stops_the_ingest(self):
+        from src.attachments.ingest_eml import ingest_eml
+
+        self._deliver_with_attachment()
+        paths = [
+            r["eml_path"] for r in self.state.pending("acct", "indexed", judge_configured=False)
+        ]
+        store = self._store()
+        with mock.patch.object(store, "put", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                ingest_eml(paths, store)
+
+    def _store_dir(self):
+        from src.attachments.location import resolve_attach_store
+
+        return resolve_attach_store(collection="test-collection")
+
+    def test_a_locked_store_is_retried(self):
+        """A real 'database is locked', as an MCP reader mid-query produces."""
+        import sqlite3
+
+        self._store()  # create it
+        db = os.path.join(self._store_dir(), "index.db")
+        holder = sqlite3.connect(db)
+        self.addCleanup(holder.close)
+        holder.execute("BEGIN EXCLUSIVE")
+        other = sqlite3.connect(db, timeout=0)
+        self.addCleanup(other.close)
+        with self.assertRaises(sqlite3.OperationalError) as ctx:
+            other.execute("INSERT INTO store_meta (key, value) VALUES ('k', 'v')")
+        locked = ctx.exception
+        holder.rollback()
+
+        self._deliver_with_attachment()
+        report = self._index(attach_fn=lambda **kw: (_ for _ in ()).throw(locked))
+        self.assertIn("attachments", report.skipped_stages)
+        self.assertEqual(report.errors, 0)
+
+    @unittest.skipIf(os.geteuid() == 0, "root can write a read-only database")
+    def test_a_read_only_store_is_refused_not_retried_forever(self):
+        self._store().close()
+        db = os.path.join(self._store_dir(), "index.db")
+        os.chmod(db, 0o400)
+        os.chmod(self._store_dir(), 0o500)
+        try:
+            self._deliver_with_attachment()
+            report = self._index()
+        finally:
+            os.chmod(self._store_dir(), 0o700)
+            os.chmod(db, 0o600)
+        self.assertTrue([m for m in report.messages if "REFUSED (needs operator action)" in m])
+        self.assertNotIn("attachments", report.skipped_stages)
+
+    def test_a_corrupt_store_index_is_refused(self):
+        os.makedirs(self._store_dir(), exist_ok=True)
+        with open(os.path.join(self._store_dir(), "index.db"), "wb") as fh:
+            fh.write(b"this is not a sqlite database, " * 40)
+        self._deliver_with_attachment()
+        report = self._index()
+        self.assertTrue([m for m in report.messages if "REFUSED (needs operator action)" in m])
+        self.assertEqual(report.indexed, 0)
+
+    def test_sync_filling_an_unbuilt_store_leaves_it_marked_partial(self):
+        self._deliver_with_attachment()
+        self._index()
+        self.assertEqual(self._store().build_gap(), "partial")
+
+    def test_new_blobs_are_measured_in_a_bounded_pass(self):
+        from src.sync import runner
+
+        self._deliver_with_attachment()
+        with mock.patch("src.attachments.classify.classify_blobs") as classify:
+            self._index()
+        (store,), kwargs = classify.call_args
+        self.assertEqual(kwargs["limit"], runner.ATTACH_CLASSIFY_PER_RUN)
+
+    def test_a_failed_measurement_pass_does_not_fail_the_stage(self):
+        self._deliver_with_attachment()
+        with mock.patch(
+            "src.attachments.classify.classify_blobs", side_effect=RuntimeError("ocr exploded")
+        ):
+            report = self._index()
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(self._store().count(), 1)
+
+    def test_a_store_failure_defers_the_index_and_says_so(self):
+        """Indexing on regardless would mark the mail indexed and never revisit
+        it: the silent drift this stage exists to end."""
+        self._deliver_with_attachment()
+        reached = []
+
+        def broken(**kw):
+            raise OSError("disk full")
+
+        report = self._index(attach_fn=broken, index_fn=lambda **k: reached.append(1) or (1, set()))
+        self.assertIn("attachments", report.skipped_stages)
+        self.assertEqual(report.status, STATUS_PARTIAL)
+        self.assertEqual(reached, [], "the index ran although the store write failed")
+        self.assertEqual(report.indexed, 0)
+        self.assertEqual(len(self._pending_index_keys()), 1)
+
+    def test_the_next_run_after_a_store_failure_catches_up(self):
+        self._deliver_with_attachment()
+        self._index(attach_fn=lambda **kw: (_ for _ in ()).throw(OSError("disk full")))
+        report = self._index()
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(self._store().count(), 1)
+
+    def test_storing_the_same_message_twice_keeps_one_row(self):
+        from src.sync.runner import _default_attach
+
+        self._deliver_with_attachment()
+        paths = [
+            r["eml_path"] for r in self.state.pending("acct", "indexed", judge_configured=False)
+        ]
+        _default_attach(paths=paths, collection="test-collection")
+        _default_attach(paths=paths, collection="test-collection")
+        self.assertEqual(self._store().count(), 1)
+
+    def test_an_empty_delta_never_opens_the_store(self):
+        calls = []
+        self._index(attach_fn=lambda **kw: calls.append(1) or 0)
+        self.assertEqual(calls, [])
+
+    def test_the_store_is_written_before_the_embedder_is_built(self):
+        """A store failure must cost a file write, not a 2 GB model load."""
+        self._deliver_with_attachment()
+        order = []
+        index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder_factory=lambda: order.append("embedder") or mock.Mock(),
+            attach_fn=lambda **kw: order.append("attach") or 0,
+            index_fn=lambda **k: (1, self._keys_for(k["paths"])),
+            require_judged=False,
+        )
+        self.assertEqual(order, ["attach", "embedder"])
+
+    def test_an_account_with_no_collection_is_refused(self):
+        """An empty collection resolves to the store ROOT, the shared pre-split
+        layout where one corpus could list another's files."""
+        from src.sync.runner import PermanentIndexError, _default_attach
+
+        with self.assertRaises(PermanentIndexError):
+            _default_attach(paths=[], collection="")
+
+    def test_an_unexpected_error_is_an_outage_not_a_refusal(self):
+        """ValueError used to be on the permanent list, which is how a single
+        message's bad header became a refusal for the whole account."""
+        self._deliver_with_attachment()
+        report = self._index(attach_fn=lambda **kw: (_ for _ in ()).throw(ValueError("odd")))
+        self.assertIn("attachments", report.skipped_stages)
+        self.assertFalse([m for m in report.messages if "REFUSED" in m])
 
 
 class TestMultiAccount(_RunnerTest):

@@ -14,9 +14,10 @@ Parsing raw here instead silently broke the attachment->thread join. See issue #
 
 from __future__ import annotations
 
+import os
 from email import message_from_bytes, policy
 from email.header import decode_header, make_header
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 from src.data.threading import compute_thread_id
@@ -31,13 +32,97 @@ def _decode_filename(raw: str | None) -> str:
     if not raw:
         return ""
     try:
-        return str(make_header(decode_header(raw)))
+        name = _storable(str(make_header(decode_header(raw))))
     except Exception:
-        return raw
+        name = _storable(raw)
+    if len(name) > MAX_NAME_CHARS:
+        # Keep the extension: it is what a reader, and extraction, go by.
+        stem, ext = os.path.splitext(name)
+        ext = ext[:16]
+        name = stem[: MAX_NAME_CHARS - len(ext)] + ext
+    return name
+
+
+# Sender-typed text is stored on every row of a message, up to 500 of them. A
+# 100 KB subject on a message with no Message-ID became its thread id on each:
+# one 153 KB email grew the index by 103 MB. No real name or id is this long.
+MAX_NAME_CHARS = 512
+MAX_ID_CHARS = 1024
+
+
+def _storable(text: str, limit: Optional[int] = None) -> str:
+    """Text that can always be written to the store, optionally clipped.
+
+    A header is whatever the sender typed. An encoded-word such as
+    ``=?utf-7?q?+2AA-?=`` decodes to a lone surrogate, which is a valid Python
+    string and not valid UTF-8, so sqlite refuses to bind it."""
+    out = text.encode("utf-8", "replace").decode("utf-8")
+    return out if limit is None else out[:limit]
+
+
+# Parts stored or indexed per message. Real mail carries a handful. Without a
+# bound, a few megabytes of tiny parts became a file and a commit each.
+MAX_PARTS_PER_MESSAGE = 500
+
+
+def iter_attachment_parts(
+    msg, *, limit: int = MAX_PARTS_PER_MESSAGE, counts: Optional[Dict[str, int]] = None
+):
+    """Yield ``(filename, mime, data, inline)`` for each attachment part of *msg*.
+
+    The one place a message's MIME headers are read for attachments, shared by
+    the store ingest and the index path so neither can be stopped by a header
+    the other survives. Never raises: every header is whatever the sender typed,
+    and the stdlib does raise on some of it (a ``filename*N`` continuation with
+    thousands of digits, for one). A part that cannot be read is skipped, and at
+    most ``limit`` parts are yielded. Every part dropped either way is added to
+    ``counts["bad_parts"]`` when *counts* is given, so a drop is never silent.
+    """
+
+    def dropped() -> None:
+        if counts is not None:
+            counts["bad_parts"] = counts.get("bad_parts", 0) + 1
+
+    seen = 0
+    try:
+        for part in msg.walk():
+            try:
+                if part.is_multipart():
+                    continue
+                if seen >= limit:
+                    dropped()  # past the cap: counted, not read
+                    continue
+                filename = _decode_filename(part.get_filename())
+                disp = part.get_content_disposition() or ""
+                if not filename and disp not in ("attachment", "inline"):
+                    continue
+                data = part.get_payload(decode=True)
+                if not data:
+                    continue
+                # Preserve the declared charset for text parts (text/plain;
+                # charset=...) so extraction can decode them correctly instead
+                # of guessing.
+                mime = part.get_content_type()
+                charset = part.get_content_charset()
+                if charset and mime.startswith("text/"):
+                    mime = f"{mime}; charset={charset}"
+                item = (
+                    filename or "(unnamed)",
+                    _storable(mime, MAX_NAME_CHARS),
+                    bytes(data),
+                    disp == "inline",
+                )
+            except Exception:  # noqa: BLE001 — one unreadable part, not the message
+                dropped()
+                continue
+            seen += 1
+            yield item
+    except Exception:  # noqa: BLE001 — a structure the walker itself cannot follow
+        return
 
 
 def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[str, int]:
-    counts = {"emails": 0, "attachments": 0, "skipped": 0}
+    counts = {"emails": 0, "attachments": 0, "skipped": 0, "bad_parts": 0}
     paths = list(paths)
     bar = None
     if progress:
@@ -60,9 +145,15 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
                 bar.update(1)
             continue
         e = loaded[0]
-        message_id = e.message_id or ""
-        thread_id = compute_thread_id(
-            message_id, e.in_reply_to or "", e.references or "", subject=e.subject or ""
+        # Both ids can carry sender-typed text (the thread id falls back to the
+        # subject), so both are made storable. For any ordinary id this changes
+        # nothing, which keeps the join with the indexed thread intact.
+        message_id = _storable(e.message_id or "", MAX_ID_CHARS)
+        thread_id = _storable(
+            compute_thread_id(
+                message_id, e.in_reply_to or "", e.references or "", subject=e.subject or ""
+            ),
+            MAX_ID_CHARS,
         )
         counts["emails"] += 1
 
@@ -75,36 +166,27 @@ def ingest_eml(paths: Iterable[str], store, *, progress: bool = False) -> Dict[s
             if bar:
                 bar.update(1)
             continue
-        for part in msg.walk():
-            if part.is_multipart():
-                continue
-            filename = _decode_filename(part.get_filename())
-            disp = part.get_content_disposition() or ""
-            if not filename and disp not in ("attachment", "inline"):
-                continue
+        for filename, mime, data, inline in iter_attachment_parts(msg, counts=counts):
             try:
-                data = part.get_payload(decode=True)
-            except Exception:
-                data = None
-            if not data:
+                store.put(
+                    data,
+                    message_id=message_id,
+                    thread_id=thread_id,
+                    filename=filename,
+                    mime=mime,
+                    size=len(data),
+                    source_type="eml",
+                    source_ref=path,
+                    inline=inline,
+                )
+            except ValueError:
+                # Something else in THIS message the store cannot represent. It
+                # costs this part. Raised, one crafted email would fail the whole
+                # ingest, and under sync that means the whole account, on every
+                # run. A failure of the store itself is an OSError or a sqlite
+                # error and still propagates.
+                counts["bad_parts"] += 1
                 continue
-            # Preserve the declared charset for text parts (text/plain; charset=...)
-            # so extraction can decode them correctly instead of guessing.
-            mime = part.get_content_type()
-            charset = part.get_content_charset()
-            if charset and mime.startswith("text/"):
-                mime = f"{mime}; charset={charset}"
-            store.put(
-                data,
-                message_id=message_id,
-                thread_id=thread_id,
-                filename=filename or "(unnamed)",
-                mime=mime,
-                size=len(data),
-                source_type="eml",
-                source_ref=path,
-                inline=(disp == "inline"),
-            )
             counts["attachments"] += 1
         if bar:
             bar.update(1)

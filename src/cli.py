@@ -18,6 +18,7 @@ import sys
 from dotenv import load_dotenv
 
 from src.attachments.ingest_eml import ingest_eml
+from src.attachments.location import DEFAULT_ATTACH_STORE as _DEFAULT_ATTACH_STORE
 from src.attachments.store import AttachmentStore
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
 from src.data.noise_filter import NoiseFilter
@@ -551,7 +552,6 @@ def _configure_prune(p):
     )
 
 
-_DEFAULT_ATTACH_STORE = "~/.mailrag/attachments"
 _CLASSIFY_MAX_SIZE = 100_000
 
 
@@ -562,7 +562,7 @@ def _attach_store_for(args, collection: str) -> str:
     and a personal one cannot surface each other's files. The profile already
     names its collection, so the build needs no extra flag.
     """
-    from src.mcp_server.server import _safe_dirname
+    from src.attachments.location import resolve_attach_store
 
     # An explicit --store is an escape hatch and wins outright: the caller has
     # named a directory, so there is nothing left to infer.
@@ -574,7 +574,10 @@ def _attach_store_for(args, collection: str) -> str:
             "this verb needs --collection: attachment stores are separate per corpus, "
             "so there is no shared store to read from"
         )
-    return os.path.join(os.path.expanduser(_DEFAULT_ATTACH_STORE), _safe_dirname(collection))
+    # The same resolution the MCP server and sync use, $RAG_ATTACH_STORE included.
+    # Building into ~/.mailrag while the server read from the env override left
+    # the two looking at different directories.
+    return os.path.expanduser(resolve_attach_store(collection=collection))
 
 
 def _cmd_attachments_build(args):
@@ -590,6 +593,10 @@ def _cmd_attachments_build(args):
     record_profile_for_collection(prof.collection, args.profile)
     store = AttachmentStore(_attach_store_for(args, prof.collection))
     try:
+        # A fresh store is partial until this build finishes over the whole
+        # profile. Left unmarked, the rows from a --limit run or an interrupted
+        # one made it read as complete.
+        store.mark_partial()
         counts = ingest_eml(kept, store, progress=True)
         print(f"attachments: {counts}")
         if not args.no_classify:
@@ -613,6 +620,12 @@ def _cmd_attachments_build(args):
                 progress=True,
             )
             print(f"classified: {stats.as_dict()}")
+        if not args.limit and counts.get("emails", 0) > 0:
+            # Only a build over the whole profile makes an empty lookup mean "no
+            # attachments". A --limit run, like sync, covers part of the corpus,
+            # and a build that found no mail at all (a missing or unmounted
+            # root) covered none of it.
+            store.mark_built()
     finally:
         store.close()
     return 0

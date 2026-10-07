@@ -374,6 +374,54 @@ class TestListAttachmentsBoilerplateDefault(unittest.TestCase):
         self.assertEqual(store.boilerplate_calls, [True])  # raw request needs no second pass
 
 
+class TestASyncOnlyStoreIsNotACompleteStore(unittest.TestCase):
+    """The loud "never built" error keyed on an empty store. Sync now writes the
+    store, so one synced attachment made it non-empty and silenced the error
+    while every older thread still listed as having no attachments."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+
+        from src.attachments.store import AttachmentStore
+
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.store = AttachmentStore(self.d)
+        self.addCleanup(self.store.close)
+
+    def _put(self, mid):
+        self.store.put(
+            b"bytes" + mid.encode(),
+            message_id=mid,
+            thread_id="t-" + mid,
+            filename="report.pdf",
+            mime="application/pdf",
+            size=9,
+            source_type="eml",
+            source_ref="/x/a.eml",
+        )
+
+    def test_an_older_thread_is_refused_until_the_store_is_built(self):
+        self.store.mark_partial()
+        self._put("new")
+        with self.assertRaises(ValueError) as ctx:
+            server.list_attachments(thread_id="t-old", store=self.store)
+        self.assertIn("attachments build", str(ctx.exception))
+
+    def test_what_sync_did_store_is_still_listed(self):
+        self.store.mark_partial()
+        self._put("new")
+        out = server.list_attachments(thread_id="t-new", store=self.store)
+        self.assertEqual([a["filename"] for a in out], ["report.pdf"])
+
+    def test_after_a_build_an_empty_answer_is_trusted_again(self):
+        self.store.mark_partial()
+        self._put("new")
+        self.store.mark_built()
+        self.assertEqual(server.list_attachments(thread_id="t-old", store=self.store), [])
+
+
 class TestAllDecorationIsNotNoAttachments(unittest.TestCase):
     """A third kind of nothing, which must not read like the other two.
 
@@ -390,6 +438,9 @@ class TestAllDecorationIsNotNoAttachments(unittest.TestCase):
 
         def count(self):
             return 12
+
+        def build_gap(self):
+            return "empty" if self.count() == 0 else None
 
         def list_for(self, *, thread_id=None, message_id=None, include_boilerplate=True):
             return self._raw if include_boilerplate else []
@@ -430,6 +481,9 @@ class TestAttachmentStoreNeverBuilt(unittest.TestCase):
         def count(self):
             return 0
 
+        def build_gap(self):
+            return "empty" if self.count() == 0 else None
+
         def list_for(self, **kw):
             return []
 
@@ -442,6 +496,9 @@ class TestAttachmentStoreNeverBuilt(unittest.TestCase):
     class _PopulatedStore(_EmptyStore):
         def count(self):
             return 12
+
+        def build_gap(self):
+            return "empty" if self.count() == 0 else None
 
     def test_empty_store_raises_actionable_error(self):
         with self.assertRaises(ValueError) as ctx:
@@ -705,6 +762,9 @@ class _FakeStore:
 
     def count(self):
         return self._count
+
+    def build_gap(self):
+        return "empty" if self.count() == 0 else None
 
     def list_for(self, *, thread_id=None, message_id=None, include_boilerplate=True):
         self.list_calls.append((thread_id, message_id))

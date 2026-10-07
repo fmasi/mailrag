@@ -36,10 +36,11 @@ class _FakeExtractor:
     opinion (covered by TestEngineIndependence).
     """
 
-    def __init__(self, texts=None, raises=False, name="tesseract"):
+    def __init__(self, texts=None, raises=False, name="tesseract", status=None):
         self._texts = texts or {}
         self._raises = raises
         self._name = name
+        self._status = status
 
     def extract(self, data, mime, filename):
         from src.attachments.extract.result import ExtractResult
@@ -47,6 +48,8 @@ class _FakeExtractor:
         if self._raises:
             raise RuntimeError("extractor exploded")
         text = self._texts.get(filename, "")
+        if self._status:
+            return ExtractResult(text="", status=self._status, extractor=self._name)
         return ExtractResult(
             text=text, status="extracted" if text else "empty", extractor=self._name
         )
@@ -210,6 +213,17 @@ class TestClassifyPass(unittest.TestCase):
         stats = classify_blobs(self.store, extractor=_FakeExtractor(raises=True))
         self.assertEqual(stats.failed, 1)
         self.assertEqual(stats.measured, 0)
+
+    def test_a_missing_ocr_engine_is_not_recorded_as_a_measurement(self):
+        """``ocr_unavailable`` describes the environment, not the blob. Recorded,
+        it took the blob off the work list for good, so one run without tesseract
+        on PATH left it unmeasured after the PATH was fixed."""
+        self._put(b"A" * 100, msg="m1", thread="t1", name="a.png")
+        stats = classify_blobs(self.store, extractor=_FakeExtractor(status="ocr_unavailable"))
+        self.assertEqual(stats.measured, 0)
+        self.assertEqual(len(self.store.unmeasured_blobs()), 1)
+        healed = classify_blobs(self.store, extractor=_FakeExtractor())
+        self.assertEqual(healed.measured, 1)
 
     def test_measured_signals_override_the_heuristic_in_listings(self):
         """End-to-end: the case the metadata heuristic got wrong.

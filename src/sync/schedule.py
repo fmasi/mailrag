@@ -111,6 +111,11 @@ def scheduler_environment(overrides: Optional[dict] = None) -> dict:
         # IS cached permanently (GH #37; see extract/ocr/tesseract.py).
         "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     }
+    # The store override, when the installing shell has one. Sync writes the
+    # attachment store now, and a unit without this would write the default
+    # directory while the server and the CLI read the override.
+    if os.environ.get("RAG_ATTACH_STORE"):
+        env["RAG_ATTACH_STORE"] = os.environ["RAG_ATTACH_STORE"]
     env.update(overrides or {})
     return env
 

@@ -35,6 +35,56 @@ class TestAttachmentsCli(unittest.TestCase):
         ing.assert_called_once()
         store_cls.assert_called_once_with("/tmp/st")
 
+    def test_a_build_that_found_no_mail_does_not_call_the_store_complete(self):
+        """A profile root that is missing or unmounted resolves to zero files.
+        Marked built, a store sync had left partial read as complete."""
+        store = self._build(emails=0)
+        self.assertIsNone(store.built_at())
+        self.assertEqual(store.build_gap(), "partial")
+
+    def _build(self, *extra, emails=3):
+        import tempfile
+
+        from src.attachments.store import AttachmentStore
+
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        prof = mock.Mock(selection_rules=[], blacklist=None, collection="c")
+        prof.resolved_root.return_value = "/root"
+        with (
+            mock.patch("src.cli.CorpusProfile.load", return_value=prof),
+            mock.patch("src.cli.resolve_index_files", return_value=([], [])),
+            mock.patch("src.onboard.record_profile_for_collection"),
+            mock.patch(
+                "src.cli.ingest_eml",
+                return_value={"emails": emails, "attachments": 0, "skipped": 0, "bad_parts": 0},
+            ),
+        ):
+            rc = cli.main(
+                ["attachments", "build", "--profile", "p.json", "--store", d, "--no-classify"]
+                + list(extra)
+            )
+        self.assertEqual(rc, 0)
+        store = AttachmentStore(d)
+        self.addCleanup(store.close)
+        store.put(
+            b"x", message_id="<m>", thread_id="t", filename="a", mime="text/plain",
+            size=1, source_type="eml", source_ref="/x",
+        )  # fmt: skip
+        return store
+
+    def test_a_full_build_records_that_the_store_is_complete(self):
+        """After it, an empty lookup means "no attachments"."""
+        self.assertIsNone(self._build().build_gap())
+
+    def test_a_limited_build_on_a_fresh_store_leaves_it_partial(self):
+        """Rows from `--limit 5`, or from a build interrupted halfway, cover part
+        of the corpus. Unmarked, the store read as complete and every thread the
+        build never reached listed as having no attachments."""
+        store = self._build("--limit", "5")
+        self.assertEqual(store.build_gap(), "partial")
+        self.assertIsNone(store.built_at())
+
     def test_get_text_routes(self):
         store = mock.Mock()
         store.fetch.return_value = {

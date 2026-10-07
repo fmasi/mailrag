@@ -38,10 +38,14 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
+from src.attachments.location import (  # noqa: F401 — re-exported: the public names live here
+    DEFAULT_ATTACH_STORE,
+    resolve_attach_store,
+)
+from src.attachments.location import safe_dirname as _safe_dirname  # noqa: F401
 from src.attachments.store import AttachmentStore
 from src.llm.answer import answer_from_threads
 from src.mcp_server import usage
@@ -53,7 +57,6 @@ log = logging.getLogger(__name__)
 
 SERVER_NAME = "mailrag"
 DEFAULT_QDRANT_URL = "http://localhost:6333"
-DEFAULT_ATTACH_STORE = "~/.mailrag/attachments"
 VALID_MODES = ("hybrid", "dense", "sparse")
 
 # search_email output bounding (issue #84): default to a compact snippet window
@@ -128,30 +131,6 @@ def resolve_qdrant_url(qdrant_url: Optional[str] = None) -> str:
     ).strip() or DEFAULT_QDRANT_URL
 
 
-def resolve_attach_store(store: Optional[str] = None, collection: Optional[str] = None) -> str:
-    """Resolve the attachment store for one collection.
-
-    Precedence: explicit ``store`` > ``$RAG_ATTACH_STORE`` / ``~/.mailrag/attachments``,
-    **plus the collection name as a subdirectory**.
-
-    Stores are physically separate per collection rather than one store filtered
-    by a predicate. A shared store leaks in practice, not just in theory: with a
-    single index, four thread ids existed in both a work and a personal corpus,
-    so listing either returned the other's attachments — and ``get_attachment``
-    accepted any sha256 from any corpus with nothing to scope it. Filtering
-    would fix both, right up until the first query that forgets the predicate.
-    Separate directories cannot be un-separated by a missing ``WHERE`` clause,
-    which is the property worth having when the two corpora are someone's
-    employer and their private life.
-    """
-    if store:
-        return store
-    root = os.environ.get("RAG_ATTACH_STORE") or DEFAULT_ATTACH_STORE
-    if not collection:
-        return root
-    return os.path.join(root, _safe_dirname(collection))
-
-
 def _attachment_collection(collection: Optional[str]) -> str:
     """The collection whose attachment store to use, or a clear refusal.
 
@@ -168,16 +147,6 @@ def _attachment_collection(collection: Optional[str]) -> str:
             "per corpus, so there is no corpus-wide default to fall back on. Pass "
             f"`collection`, or set MAILRAG_COLLECTION. ({exc})"
         ) from None
-
-
-def _safe_dirname(collection: str) -> str:
-    """Reduce a collection name to one safe path segment.
-
-    Collection names come from config, so a name like ``../other`` must not be
-    able to walk out of the store root.
-    """
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", collection).strip("-.") or "default"
-    return cleaned[:120]
 
 
 def assert_no_legacy_shared_store(root: Optional[str] = None) -> None:
@@ -316,10 +285,14 @@ def _attachment_names(ctx, store=None) -> Optional[List[str]]:
     if store is None:
         return None
     try:
-        if store.count() == 0:
+        gap = store.build_gap()
+        if gap == "empty":
             return None  # never ingested — say nothing rather than say "none"
         message_ids = [getattr(e, "message_id", "") for e in getattr(ctx, "emails", []) or []]
-        return store.names_for(thread_id=getattr(ctx, "thread_id", None), message_ids=message_ids)
+        names = store.names_for(thread_id=getattr(ctx, "thread_id", None), message_ids=message_ids)
+        # A sync-only store knows about recent mail. What it holds is worth
+        # naming; an empty answer from it is not a claim it can make.
+        return names if (names or gap is None) else None
     except Exception:
         # The attachment store is an optional companion to retrieval; search must
         # keep working when it is missing, just without this field.
@@ -698,19 +671,28 @@ def _require_populated_store(store) -> None:
     caller reasonably concludes the mail has no attachments when in truth none
     have ever been ingested. That is the same failure the grep scan report
     exists to prevent: absence and not-looked-at must not share a
-    representation. Indexing and sync do NOT populate this store (they extract
+    representation. A bulk index does NOT populate this store (it extracts
     attachment text for retrieval down a separate path), so a fully indexed
     corpus with an empty store is the expected state until `attachments build`
-    is run once.
+    is run once. Sync writes it for the mail it brings in from then on.
     """
-    if store.count() == 0:
+    gap = store.build_gap()
+    if gap == "empty":
         raise ValueError(
             f"attachment store at {store.root!r} is empty — no attachments have been "
             "ingested, so every lookup returns nothing regardless of the thread. "
             "Populate it with `mailrag attachments build --profile <corpus.profile.json>`. "
-            "(Indexing and sync extract attachment TEXT for search down a separate path "
-            "and never write this store, so attachment content can be searchable while "
-            "this store is still empty.)"
+            "(A bulk index extracts attachment TEXT for search down a separate path "
+            "and never writes this store, so attachment content can be searchable while "
+            "this store is still empty. Sync fills it only for mail it brings in.)"
+        )
+    if gap == "partial":
+        raise ValueError(
+            f"attachment store at {store.root!r} covers only part of the corpus: mail "
+            "that sync brought in, or a build that was limited or interrupted. A full "
+            "build has never completed, so finding nothing for this lookup does not mean "
+            "the mail has no attachments. Run `mailrag attachments build --profile "
+            "<corpus.profile.json>` once to cover the rest."
         )
 
 
