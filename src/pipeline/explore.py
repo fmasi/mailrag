@@ -23,12 +23,12 @@ from src.cluster.noise_pockets import (
 )
 from src.data.noise_filter import NoiseFilter
 from src.data.threading import compute_thread_id
+from src.ingest.device import pick_device
 from src.ingest.embedder import BgeM3Embedder
 from src.ingest.hybrid_qdrant import get_client
 from src.ingest.local_source import resolve_index_files
 from src.ingest.qdrant_vectors import read_thread_vectors
 from src.pipeline import pass1
-from src.ingest.device import pick_device
 
 __all__ = ["aggregate_threads", "run", "format_report"]
 
