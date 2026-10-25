@@ -28,6 +28,7 @@ from src.ingest.hybrid_qdrant import get_client
 from src.ingest.local_source import resolve_index_files
 from src.ingest.qdrant_vectors import read_thread_vectors
 from src.pipeline import pass1
+from src.ingest.device import pick_device
 
 __all__ = ["aggregate_threads", "run", "format_report"]
 
@@ -94,7 +95,9 @@ def _load_emails(paths):
 
 def _fresh_thread_vectors(emails, tid_to_idx, *, batch_size=32) -> Dict[str, np.ndarray]:
     """Embed each email body once, then mean-pool per thread."""
-    embedder = BgeM3Embedder(device="mps", use_fp16=True)
+    device = pick_device()
+    embedder = BgeM3Embedder(device=device, use_fp16=(device != "cpu"))
+    
     dense, _ = embedder.encode(
         [getattr(e, "body", "") or "" for e in emails], batch_size=batch_size
     )
