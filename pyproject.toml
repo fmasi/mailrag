@@ -65,12 +65,11 @@ anthropic = "^0.40"
 tqdm = "^4.66"
 numpy = "^2.0"
 scikit-learn = "^1.5"
-# 6.16.1 is the CVE floor: 6.15.0 is affected by GHSA-jp53-mhqp-8xcg
-# (PYSEC-2026-3913, fixed in 6.16.0) and GHSA-23w6-3w8w-8484 / GHSA-763m-79hh-57f2
-# (PYSEC-2026-3910/3911, fixed in 6.16.1). The previous floor, 6.15.0, cleared
-# CVE-2026-71870 and CVE-2026-71852 (6.14.2). pypdf parses attacker-chosen
-# attachments, so this floor matters more than most.
-pypdf = "^6.16.1"
+# 6.21.2 is the CVE floor: 6.19.0 is affected by a further batch of advisories fixed
+# by 6.21.2 (the last floor, 6.16.1, cleared GHSA-jp53-mhqp-8xcg, GHSA-23w6-3w8w-8484 and
+# GHSA-763m-79hh-57f2; before that 6.14.2 cleared CVE-2026-71870 and CVE-2026-71852).
+# pypdf parses attacker-chosen attachments, so this floor matters more than most.
+pypdf = "^6.21.2"
 python-docx = "^1.1"
 openpyxl = "^3.1"
 python-pptx = "^1.0"
@@ -81,9 +80,10 @@ python-pptx = "^1.0"
 pandas = ">=2.2,<4"
 pytesseract = "^0.3"
 pdf2image = "^1.17"
-# 12.3 is the CVE floor: 12.2 is affected by CVE-2026-54059/54060/55379/55380/55798
-# (PYSEC-2026-2253..2257), all fixed in 12.3.0.
-pillow = "^12.3"
+# 13.0 is the CVE floor: 12.3.0 is affected by CVE-2026-112902, fixed only in 13.0.0 (a
+# major bump, so the old ^12.3 cap had to widen to ^13.0). 12.2 was affected by
+# CVE-2026-54059/54060/55379/55380/55798 (PYSEC-2026-2253..2257), fixed in 12.3.0.
+pillow = "^13.0"
 # Official Model Context Protocol SDK — powers the stdio MCP server
 # (src/mcp_server) that exposes the email-RAG query path to MCP clients.
 # v2 (2026-07-28) is required, not merely preferred: the 1.x line went into
@@ -102,7 +102,8 @@ pillow = "^12.3"
 # Qdrant does, and it is reached over plain HTTP on localhost), the devcontainer
 # is a full Debian image, and CI runs on ubuntu-latest. Re-check if a slim
 # runtime image is ever introduced.
-mcp = "^2.0.0"
+# 2.2.0 clears CVE-2026-59951 (pip-audit, 2026-10-26); same bump as Dependabot PR #219.
+mcp = "^2.2.0"
 # Continuous sync (src/sync, issue #101). PyYAML parses accounts.yaml (already a
 # transitive dep, declared here because we import it directly). imapclient is the
 # IMAP leg: actively maintained, and it exposes ENABLE / CONDSTORE / CHANGEDSINCE,
@@ -124,8 +125,9 @@ transformers = "^5.5.0"
 click = "^8.4.1"
 #   aiohttp — pulled in by llama-index-core / openai / fsspec.
 #             GHSA-mfx4-hv73-q22v + GHSA-mq44-7p77-q5h7 fixed in 3.14.2,
-#             GHSA-cq5v-8q36-5273 (high) fixed in 3.14.3.
-aiohttp = "^3.14.3"
+#             GHSA-cq5v-8q36-5273 (high) fixed in 3.14.3; GHSA-2g87-pp6c-29x5 and
+#             CVE-2026-111063..111066 / 111748..111750 fixed in 3.14.4.
+aiohttp = "^3.14.4"
 #   cryptography — via pyjwt[crypto] (was azure-storage-blob until Azure was
 #                  retired in #49). GHSA-g6cj-pr64-35w5 (high) is fixed in
 #                  50.0.0. pyjwt only asks for >=3.4.0, so this floor is what
@@ -177,8 +179,13 @@ h2 = "^4.4.1"
 #           Supersedes Dependabot PR #100.
 torch = "^2.13.0"
 #   setuptools — via llama-index-core (and formerly capped by torch, see above).
-#                GHSA-h35f-9h28-mq5c fixed in 83.0.0.
-setuptools = "^83.0.0"
+#                GHSA-h35f-9h28-mq5c fixed in 83.0.0; GHSA-xmj3-9gf7-h52w fixed in
+#                84.1.0.
+setuptools = "^84.1.0"
+#   tinytag — via llama-index-core (audio-tag metadata for its file readers). CVE-2026-104266,
+#             fixed in 2.3.0. llama-index-core only asks for >=2.2.0, so this floor is
+#             what keeps the lock off the affected 2.2.x.
+tinytag = "^2.3.0"
 #   pyjwt — via mcp (pyjwt[crypto]). 2.13.0 is affected by fourteen advisories
 #           (PYSEC-2026-4140..4152, -4183). Most are fixed in 2.14.0, including
 #           GHSA-gvp8-978c-rx2q (CVE-2026-103001: decode() mutating a reused
@@ -199,6 +206,15 @@ urllib3 = "^2.8.0"
 #            at <=2026.6.0, so this floor and that cap leave exactly one
 #            release: the next fsspec advisory needs a datasets bump first.
 fsspec = ">=2026.6.0"
+#   certifi — via requests / httpx / httpcore. PYSEC-2026-4320, fixed in 2026.10.18
+#             (2026.10.19 for the later branch); the 2026.1.4 bundle is affected.
+certifi = "^2026.10.19"
+#   filelock — via datasets / huggingface-hub / torch. CVE-2026-112907, -112913 and
+#              -112940, fixed in 4.2.1 (a major bump; the three dependents ask for
+#              `*` or `>=3.10.0`, so no cap blocks it).
+filelock = "^4.2.1"
+#   opentelemetry-api — via mcp. CVE-2026-114603, fixed in 1.45.1.
+opentelemetry-api = "^1.45.1"
 #   multidict — via aiohttp / yarl. GHSA-54p9-h82j-f925 (CVE-2026-104874), a
 #               reference leak in the items-view union/subtraction, fixed in
 #               6.9.1.
