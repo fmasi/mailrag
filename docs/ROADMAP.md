@@ -226,7 +226,7 @@ planning after that. No calendar dates are promised, deliberately.
 
 **Security.** `pip-audit` is a required CI check: an advisory fails the build
 rather than accumulating in an allow-list. Its only ignore entries are advisories
-with **no fixed release** (today one, nltk GHSA-8mgp-746c-j5xp), each with its
+with **no fixed release** (none today), each with its
 reason in `ci.yml`, and Dependabot watches the dependency tree. Policy: an actionable advisory in a shipped
 dependency triggers a patch release as soon as the fix is verified (recent
 example: the pypdf CVE bump shipped within a day). If a fix is unreachable —

@@ -70,8 +70,12 @@ scikit-learn = "^1.5"
 # infinite loops, long runtimes or large memory use on hostile PDFs), all fixed by 6.21.2.
 # The last floor, 6.16.1, cleared GHSA-jp53-mhqp-8xcg, GHSA-23w6-3w8w-8484 and
 # GHSA-763m-79hh-57f2; before that 6.14.2 cleared CVE-2026-71870 and CVE-2026-71852.
+# 6.21.4 clears the next seven (GHSA-42gh-23hr-vphw, -4vqv-7265-gm2w, -5849-834g-hvw5,
+# -62m5-6wh8-28x7, -cggf-277g-3q54, -mfr5-77xh-9j7h, -x3rh-gjgm-fmqc; CVE-2026-119203..119209):
+# infinite loops and long runtimes or large memory use on hostile xref tables, page trees,
+# page labels and encrypted files.
 # pypdf parses attacker-chosen attachments, so this floor matters more than most.
-pypdf = "^6.21.2"
+pypdf = "^6.21.4"
 python-docx = "^1.1"
 openpyxl = "^3.1"
 python-pptx = "^1.0"
@@ -143,13 +147,13 @@ cryptography = "^50.0.0"
 #          fixed in 3.10.0. 3.10.3 fixed the next batch (PYSEC-2026-3733..3752,
 #          -3790, -3867..3871), two of them critical (GHSA-m4rf-3fr8-xwx3,
 #          GHSA-x99w-6fgc-pmfw). Supersedes Dependabot PR #192.
-#          One advisory has NO fixed release yet: GHSA-8mgp-746c-j5xp
-#          (PYSEC-2026-3740, CVE-2026-81726), a pathsec bypass in nltk's
-#          model-artifact import/export APIs, affected through 3.10.3 (the
-#          latest). pip-audit ignores it by ID, with the reason, in ci.yml and
-#          the justfile's `audit` recipe; drop that ignore and raise this floor
-#          as soon as a fix ships.
-nltk = "^3.10.3"
+#          3.10.4 clears GHSA-j456-xh4h-cpf2 (CVE-2026-109956): WekaClassifier
+#          passed an unvalidated, caller-chosen model path to the Weka JVM,
+#          past nltk's pathsec containment. It also fixes GHSA-8mgp-746c-j5xp
+#          (PYSEC-2026-3740, CVE-2026-81726), a pathsec bypass in the
+#          model-artifact import/export APIs that had no fixed release and was
+#          ignored by ID in CI; that ignore is gone. Supersedes Dependabot PR #225.
+nltk = "^3.10.4"
 #   anyio — via mcp / httpx / httpx2 / openai / anthropic / starlette.
 #           GHSA-82r6-8w77-94w6 (critical) and GHSA-5p39-cfhj-2xmp
 #           (CVE-2026-63374, CVE-2026-64847), fixed in 4.14.2.
@@ -241,8 +245,10 @@ ipykernel = "^7.2.0"
 # Security floor for a dev-only transitive (ipykernel / jupyter-client), kept in
 # this group so it never enters the runtime install: GHSA-mpf4-983q-p7j4 (high),
 # GHSA-8423-8fgw-73vq and GHSA-wwv5-g3v4-889x (PYSEC-2026-3928,
-# CVE-2026-91990/91991), fixed in 6.5.8.
-tornado = "^6.5.8"
+# CVE-2026-91990/91991), fixed in 6.5.8. 6.6 clears GHSA-pcg2-g6cj-q92c,
+# GHSA-pw9p-v7r6-gx4p and GHSA-r4j5-9xpp-3985 (CVE-2026-115927, -116577, -116578):
+# quadratic header parsing, an open redirect and event-loop blocking on chunked bodies.
+tornado = "^6.6"
 # The two CI quality gates, declared so a dev environment built from this file
 # is complete — previously they existed only as pinned `pip install` lines in
 # .github/workflows/ci.yml, so running them locally meant installing them by
