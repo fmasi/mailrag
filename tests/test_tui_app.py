@@ -416,20 +416,21 @@ class TestDescribeRule(unittest.TestCase):
         self.assertEqual(_describe_rule({"type": "weird"}), "{'type': 'weird'}")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestProgressBarsUnderTheFullScreenApp(unittest.TestCase):
     """While the app runs, Textual replaces stderr with a capture whose fileno()
     is invalid. tqdm's first bar in a process creates a multiprocessing lock,
     which spawns a helper and hands it stderr's fd: ValueError 'bad value(s) in
     fds_to_keep'. Calibrate crashed that way, and every later LLM or embedding
     step would have too. Run in a fresh interpreter, since the lock is created
-    once per process."""
+    once per process.
+
+    The helper is only started under the spawn and forkserver start methods,
+    macOS's default. Linux defaults to fork and never crashed, so the script
+    forces spawn: the tests then pin the same failure on every platform."""
 
     SCRIPT = (
-        "import io, sys\n"
+        "import io, sys, multiprocessing\n"
+        "multiprocessing.set_start_method('spawn', force=True)\n"
         "class Capture(io.TextIOBase):\n"
         "    def write(self, s): return len(s)\n"
         "    def fileno(self): return -1\n"
@@ -467,3 +468,23 @@ class TestProgressBarsUnderTheFullScreenApp(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok", result.stdout)
+
+    def test_the_run_screen_applies_the_guard_before_any_step(self):
+        """The helper working proves nothing if the run never calls it."""
+        from src.tui import app as app_mod
+
+        calls = []
+        fake = mock.Mock()
+        fake.app.call_from_thread = lambda fn, *a: None
+        with (
+            mock.patch.object(app_mod, "make_progress_bars_safe", lambda: calls.append("guard")),
+            mock.patch.object(
+                app_mod.flow, "execute_plan", lambda *a, **k: calls.append("steps") or 0
+            ),
+        ):
+            app_mod.RunScreen._execute(fake)
+        self.assertEqual(calls, ["guard", "steps"])
+
+
+if __name__ == "__main__":
+    unittest.main()
