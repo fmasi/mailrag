@@ -61,6 +61,7 @@ def _recording_handlers(calls):
             "index",
             "judge",
             "prune",
+            "attach",
         )
     }
 
@@ -84,7 +85,7 @@ class TestWizard(unittest.TestCase):
         with bh, load, rec:
             rc = run_wizard("p.json", questionary=q, console=FakeConsole())
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, ["scope", "measure", "scan", "tag", "prune", "index"])
+        self.assertEqual(calls, ["scope", "measure", "scan", "tag", "prune", "index", "attach"])
         prof.save.assert_called_once_with("p.json")
 
     def test_llm_all_calibrate_gate_proceed(self):
@@ -96,7 +97,9 @@ class TestWizard(unittest.TestCase):
         with bh, load, rec, mock.patch("src.llm.calibration.format_report", return_value="BUCKETS"):
             rc = run_wizard("p.json", questionary=q, console=FakeConsole())
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, ["scope", "measure", "calibrate", "summarize", "prune", "index"])
+        self.assertEqual(
+            calls, ["scope", "measure", "calibrate", "summarize", "prune", "index", "attach"]
+        )
 
     def test_calibrate_gate_abort_stops_before_summarize(self):
         calls = []
@@ -153,7 +156,18 @@ class TestWizard(unittest.TestCase):
             rc = run_wizard("p.json", questionary=q, console=FakeConsole())
         self.assertEqual(rc, 0)
         self.assertEqual(
-            calls, ["scope", "measure", "scan", "calibrate", "judge", "prune", "summarize", "index"]
+            calls,
+            [
+                "scope",
+                "measure",
+                "scan",
+                "calibrate",
+                "judge",
+                "prune",
+                "summarize",
+                "index",
+                "attach",
+            ],
         )
 
     def test_passes_prune_confirm_to_build_handlers(self):

@@ -19,6 +19,7 @@ verbs:
   summarize: {does: "AI reads each email: a summary, and keep or junk",   cost: big-llm}
   prune:     {does: "put the junk on a skip list",                        cost: free}
   index:     {does: "make the kept mail searchable",                      cost: gpu}
+  attach:    {does: "keep the attachments so agents can open them",       cost: cpu}
 
 personas:
   llm-none:
@@ -31,6 +32,7 @@ personas:
       - tag
       - {prune: {from: tag}}
       - {index: {embed: body}}
+      - attach
 
   llm-verify:
     label: "Balanced"
@@ -44,6 +46,7 @@ personas:
       - {prune: {from: judge}}
       - {summarize: {target: keepers}}
       - {index: {embed: summary}}
+      - attach
 
   llm-all:
     label: "Thorough, AI reads everything"
@@ -55,3 +58,4 @@ personas:
       - {summarize: {target: all}}
       - {prune: {from: summarize}}
       - {index: {embed: summary}}
+      - attach

@@ -128,7 +128,18 @@ def _fake_handlers(calls: List[str]) -> Dict[str, Callable[..., Any]]:
 
         return handler
 
-    verbs = ("scope", "measure", "tag", "scan", "calibrate", "summarize", "index", "judge", "prune")
+    verbs = (
+        "scope",
+        "measure",
+        "tag",
+        "scan",
+        "calibrate",
+        "summarize",
+        "index",
+        "judge",
+        "prune",
+        "attach",
+    )
     return {v: make(v) for v in verbs}
 
 

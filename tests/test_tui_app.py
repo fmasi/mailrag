@@ -55,6 +55,7 @@ def _recording_handlers(calls, prune_confirm=None):
             "index",
             "judge",
             "prune",
+            "attach",
         )
     }
     if prune_confirm is not None:
@@ -163,7 +164,7 @@ class TestHappyPathNoLLM(_TuiCase):
         self.assertEqual(app.return_value, 0)
         # 'scope' is not in calls: the TUI replaces that handler with the rules
         # picked on the scope screen (flow.make_scope_handler).
-        self.assertEqual(self.calls, ["measure", "scan", "tag", "prune", "index"])
+        self.assertEqual(self.calls, ["measure", "scan", "tag", "prune", "index", "attach"])
         # the scope handler wrote the picked rules through to the saved profile
         with open(self.profile_path) as fh:
             saved = json.load(fh)
@@ -238,7 +239,9 @@ class TestLLMPathAndGates(_TuiCase):
             await self.run_done(app, pilot)
         self.assertEqual(app.return_value, 0)
         self.assertEqual(app.state.model, "my-model")
-        self.assertEqual(self.calls, ["measure", "calibrate", "summarize", "prune", "index"])
+        self.assertEqual(
+            self.calls, ["measure", "calibrate", "summarize", "prune", "index", "attach"]
+        )
 
     async def test_calibrate_gate_abort_stops_run(self):
         app = self.app()

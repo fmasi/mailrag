@@ -79,6 +79,7 @@ _COST_STYLE = {
     "small-llm": "yellow",
     "big-llm": "orange1",
     "gpu": "magenta",
+    "cpu": "cyan",
 }
 
 
@@ -89,6 +90,7 @@ _COST_LABEL = {
     "small-llm": "AI, some emails",
     "big-llm": "AI, every email",
     "gpu": "GPU, minutes to hours",
+    "cpu": "no AI, minutes",
 }
 
 

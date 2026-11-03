@@ -17,7 +17,6 @@ import sys
 
 from dotenv import load_dotenv
 
-from src.attachments.ingest_eml import ingest_eml
 from src.attachments.location import DEFAULT_ATTACH_STORE as _DEFAULT_ATTACH_STORE
 from src.attachments.store import AttachmentStore
 from src.data.loaders.mail_archive_x import MailArchiveXLoader
@@ -555,7 +554,7 @@ def _configure_prune(p):
     )
 
 
-_CLASSIFY_MAX_SIZE = 100_000
+from src.attachments.build import CLASSIFY_MAX_SIZE as _CLASSIFY_MAX_SIZE  # noqa: E402
 
 
 def _attach_store_for(args, collection: str) -> str:
@@ -584,53 +583,25 @@ def _attach_store_for(args, collection: str) -> str:
 
 
 def _cmd_attachments_build(args):
-    prof = CorpusProfile.load(args.profile)
-    kept, _ = resolve_index_files(
-        prof.resolved_root(), prof.selection_rules, getattr(prof, "blacklist", None)
-    )
-    if args.limit:
-        kept = kept[: args.limit]
+    from src.attachments.build import build_store
     from src.onboard import record_profile_for_collection
 
+    prof = CorpusProfile.load(args.profile)
     # Register the collection -> profile mapping that grep scoping relies on.
     record_profile_for_collection(prof.collection, args.profile)
-    store = AttachmentStore(_attach_store_for(args, prof.collection))
-    try:
-        # A fresh store is partial until this build finishes over the whole
-        # profile. Left unmarked, the rows from a --limit run or an interrupted
-        # one made it read as complete.
-        store.mark_partial()
-        counts = ingest_eml(kept, store, progress=True)
-        print(f"attachments: {counts}")
-        if not args.no_classify:
-            # Measure the cheap tier in the same pass: the small inline images
-            # that pollute listings are ~0.05s each to OCR and are measured once
-            # per content hash, so this is minutes even on a large corpus. The
-            # expensive documents stay on the lazy get_attachment path.
-            from src.attachments.classify import classify_blobs
-
-            # Only build an extractor when one was explicitly requested:
-            # build_default_extractor(None) resolves $RAG_ATTACH_EXTRACTOR, which
-            # defaults to the vision LLM, and would silently override the
-            # tesseract default that makes this pass cheap enough to run in bulk.
-            from src.attachments.extract import build_default_extractor
-
-            explicit = build_default_extractor(args.extractor) if args.extractor else None
-            stats = classify_blobs(
-                store,
-                extractor=explicit,
-                max_size=args.classify_max_size,
-                progress=True,
-            )
-            print(f"classified: {stats.as_dict()}")
-        if not args.limit and counts.get("emails", 0) > 0:
-            # Only a build over the whole profile makes an empty lookup mean "no
-            # attachments". A --limit run, like sync, covers part of the corpus,
-            # and a build that found no mail at all (a missing or unmounted
-            # root) covered none of it.
-            store.mark_built()
-    finally:
-        store.close()
+    counts = build_store(
+        prof,
+        _attach_store_for(args, prof.collection),
+        limit=args.limit,
+        classify=not args.no_classify,
+        extractor=args.extractor,
+        classify_max_size=args.classify_max_size,
+    )
+    classified = counts.pop("classified")
+    counts.pop("complete")
+    print(f"attachments: {counts}")
+    if classified is not None:
+        print(f"classified: {classified}")
     return 0
 
 

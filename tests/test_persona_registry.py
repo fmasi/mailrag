@@ -14,7 +14,9 @@ class TestPersonaRegistry(unittest.TestCase):
         self.assertIsInstance(p, Persona)
         self.assertEqual(p.label, "Thorough, AI reads everything")
         verbs = [s.verb for s in p.steps]
-        self.assertEqual(verbs, ["scope", "measure", "calibrate", "summarize", "prune", "index"])
+        self.assertEqual(
+            verbs, ["scope", "measure", "calibrate", "summarize", "prune", "index", "attach"]
+        )
         # params parsed from {verb: {..}} steps
         summarize = next(s for s in p.steps if s.verb == "summarize")
         self.assertEqual(summarize.params, {"target": "all"})

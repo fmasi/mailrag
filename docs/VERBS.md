@@ -12,11 +12,11 @@ files on disk make every drop reversible.
 ```
  SCOPE                  NOISE & CONTEXT  (cost-ordered; only `index` drops)
  ─────                  ───────────────────────────────────────────────────
- scope → measure → tag  →  scan  →  judge  → calibrate → summarize → prune → index
-  pick    chunk   regex    no-LLM   cheap     sample      LLM         apply   embed
-  folders  size   flags    clusters LLM       gate        context     drops   + store
-  ─────────────   ─────    ──────   ─────     ──────      ───────     ─────   ─────
-   free    free   free     cheap    small     small       BIG         free    GPU
+ scope → measure → tag  →  scan  →  judge  → calibrate → summarize → prune → index → attach
+  pick    chunk   regex    no-LLM   cheap     sample      LLM         apply   embed   store
+  folders  size   flags    clusters LLM       gate        context     drops   + store files
+  ─────────────   ─────    ──────   ─────     ──────      ───────     ─────   ─────   ──────
+   free    free   free     cheap    small     small       BIG         free    GPU     CPU
 ```
 
 The one cost that dominates is the **LLM pass over each email body**. So the golden
@@ -37,6 +37,7 @@ keep), never both.
 | `summarize` | LLM **summary/context** for the emails you keep (the noise verdict comes free in the same call). The expensive step. | big LLM | no (verdict) |
 | `prune` | Apply the `tag`/`scan`/`judge` drops **before** the LLM pass, so the LLM only ever runs on the keep set. | free | marks drops |
 | `index` | Embed (BGE-M3 dense + sparse) and store in Qdrant. **The only step that actually removes the dropped mail.** Incremental by default; `--recreate` rebuilds from scratch. | GPU | yes |
+| `attach` | Store the profile's attachment files in the collection's attachment store, so agents can list and open them (`list_attachments` / `get_attachment`). The recipe form of `attachments build`. | CPU (OCR of small images) | no |
 | `ask` | Answer a question against an indexed collection (hybrid retrieval → thread expansion → grounded answer). | LLM at query time | — |
 | `onboard` | One-shot, zero-config build from an `.eml` directory. | — | — |
 | `run` | Execute a persona recipe end-to-end (headless). Needs `--persona`, and `--model` for any LLM step. | per recipe | via `index` |
@@ -96,9 +97,9 @@ recommend one.
 
 | Persona | What you get | Recipe |
 |---------|--------------|--------|
-| **`llm-none`** | Fast, **no LLM at all**. Body-only embeddings; `prune` drops the regex-tagged bulk. Cheapest, noisiest. | `scope → measure → [scan] → tag → prune(tag) → index` |
-| **`llm-verify`** | **Safe budget.** A cheap `judge` confirms drops only on the `scan`-flagged suspects; `prune` blacklists them *before* the summary pass; summaries on what's kept. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → prune(judge) → summarize(rest) → index` |
-| **`llm-all`** | **Max quality.** One combined LLM call per email (summary + verdict); `prune` then drops the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → prune(summarize) → index` |
+| **`llm-none`** | Fast, **no LLM at all**. Body-only embeddings; `prune` drops the regex-tagged bulk. Cheapest, noisiest. | `scope → measure → [scan] → tag → prune(tag) → index → attach` |
+| **`llm-verify`** | **Safe budget.** A cheap `judge` confirms drops only on the `scan`-flagged suspects; `prune` blacklists them *before* the summary pass; summaries on what's kept. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → prune(judge) → summarize(rest) → index → attach` |
+| **`llm-all`** | **Max quality.** One combined LLM call per email (summary + verdict); `prune` then drops the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → prune(summarize) → index → attach` |
 
 Run a persona end-to-end with `./mailrag run --persona <name> --profile <p> [--model <m>]`,
 or interactively with `./mailrag wizard`.

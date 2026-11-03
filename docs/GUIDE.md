@@ -25,6 +25,7 @@ flowchart LR
     scan --> calibrate[calibrate<br/>sample gate · small LLM]
     calibrate --> summarize[summarize<br/>context · BIG LLM]
     summarize --> index[index<br/>embed + store · only this drops]
+    index --> attach[attach<br/>store attachment files · CPU]
     scan -. recommends .-> persona{{which persona?}}
 ```
 
@@ -171,7 +172,9 @@ it. See [`VERBS.md`](VERBS.md) for the full ladder and the cost of each verb.
 
 ## Attachments
 
-Attachments are stored separately from email bodies. The three commands are:
+Attachments are stored separately from email bodies. Every recipe ends with an
+`attach` step that fills the store, so after the wizard or `mailrag run` there is
+nothing to do. By hand, the three commands are:
 
 ```bash
 # ingest a profile's attachment bytes into the content-addressed store
