@@ -58,6 +58,7 @@ accounts:
     exclude_roles: [junk, trash]
     cadence: 12h
     start_from: "2026-08-01"   # optional — see below
+    index_since: "2026-01-01"  # optional — see below
     embed_summary: true        # MUST match how the collection was built
 ```
 
@@ -79,6 +80,24 @@ watermark is placed without downloading anything first. If a folder has nothing
 since that date it is marked caught up at its newest message; if the search fails,
 mailrag falls back to a full sync rather than silently skipping mail it cannot
 bound.
+
+### `index_since`: download everything, judge and index only recent mail
+
+`start_from` limits what is downloaded. `index_since` limits what is *worked on*:
+every message is still fetched and kept in the spool, but mail dated before
+`index_since` (a UTC day boundary) is never sent to the judge LLM and never
+indexed. A message with no date is always processed, because there is no telling
+it is old.
+
+It exists for a mailbox whose history needs its own cleanup before it goes
+anywhere near the index: a business mailbox with ten years of receipts and
+shared-alias traffic, say. Without the setting, adding that account to sync makes
+the next scheduled run judge every old message unattended, one LLM call each, and
+index whatever survives.
+
+Held-back mail keeps its place in the ledger. `mailrag sync --status` reports it
+on its own line instead of as a backlog, and removing `index_since` (or moving it
+earlier) makes it pending again on the next run. Nothing is deleted either way.
 
 Multi-account falls out of this: several entries each get their own cursor and
 ledger, and can target their own collection or share one. The same message

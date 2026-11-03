@@ -219,7 +219,7 @@ def judge_pending(
     disk, and the next tick will judge it.
     """
     report = report or SyncReport(account_id=account.id)
-    pending = state.pending(account.id, "judged")
+    pending = state.pending(account.id, "judged", since=account.index_since_bound())
     if not pending:
         return report
 
@@ -434,9 +434,10 @@ def index_pending(
     # judge stage configured, unjudged mail waits (so nothing is ever embedded
     # without its summary); without one it is indexed directly, and the
     # transition table re-queues it automatically if a judgment arrives later.
-    pending = state.pending(account.id, "indexed", judge_configured=require_judged)
+    since = account.index_since_bound()
+    pending = state.pending(account.id, "indexed", judge_configured=require_judged, since=since)
     if require_judged:
-        waiting = len(state.pending(account.id, "judged"))
+        waiting = len(state.pending(account.id, "judged", since=since))
         if waiting:
             report.messages.append(f"{waiting} message(s) awaiting judge before indexing")
 
@@ -746,7 +747,7 @@ def sync_account(
                 judge_pending(
                     account, state, profile=profile, model=model, workers=workers, report=report
                 )
-            elif state.pending(account.id, "judged"):
+            elif state.pending(account.id, "judged", since=account.index_since_bound()):
                 # Without a model there IS no judge stage. Say so — reporting a
                 # clean "ok" while silently indexing unjudged mail hides the
                 # single most consequential thing about the run.

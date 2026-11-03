@@ -314,3 +314,25 @@ class TestEmbedSummaryConfig(unittest.TestCase):
 
     def test_it_can_be_turned_off_to_match_the_collection(self):
         self.assertFalse(account_from_dict({"id": "a", "embed_summary": False}).embed_summary)
+
+
+class TestIndexSince(unittest.TestCase):
+    def test_it_is_off_by_default(self):
+        cfg = account_from_dict({"id": "a"})
+        self.assertIsNone(cfg.index_since)
+        self.assertIsNone(cfg.index_since_bound())
+
+    def test_it_becomes_a_utc_day_boundary(self):
+        cfg = account_from_dict({"id": "a", "index_since": "2026-01-01"})
+        self.assertEqual(cfg.index_since_bound(), "2026-01-01T00:00:00+00:00")
+
+    def test_a_yaml_date_is_accepted(self):
+        """Unquoted in YAML, 2026-01-01 arrives as a datetime.date, not a string."""
+        from datetime import date
+
+        cfg = account_from_dict({"id": "a", "index_since": date(2026, 1, 1)})
+        self.assertEqual(cfg.index_since_bound(), "2026-01-01T00:00:00+00:00")
+
+    def test_a_bad_date_is_rejected_at_load_time(self):
+        with self.assertRaisesRegex(ValueError, "index_since"):
+            account_from_dict({"id": "a", "index_since": "last year"})
