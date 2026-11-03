@@ -84,10 +84,10 @@ _COST_STYLE = {
 #: What each cost tier means to someone who has never seen the pipeline.
 _COST_LABEL = {
     "free": "free",
-    "cheap": "seconds",
-    "small-llm": "AI, on a sample",
+    "cheap": "no AI, GPU minutes",
+    "small-llm": "AI, some emails",
     "big-llm": "AI, every email",
-    "gpu": "GPU, minutes",
+    "gpu": "GPU, minutes to hours",
 }
 
 
@@ -167,9 +167,10 @@ class WelcomeScreen(WizardScreen):
         Binding("q", "quit_wizard", "Quit"),
     ]
 
-    def __init__(self, state: WizardState) -> None:
+    def __init__(self, state: WizardState, registry: Optional[Registry] = None) -> None:
         super().__init__()
         self._state = state
+        self._registry = registry
 
     def compose_body(self) -> ComposeResult:
         st = self._state
@@ -185,7 +186,7 @@ class WelcomeScreen(WizardScreen):
         rows = "\n".join(f"[dim]{k:>14}[/]  {escape(str(v))}" for k, v in facts)
         rec = (
             f"\n\n[green]★ a scan of this mailbox recommends the "
-            f"[bold]{st.recommendation}[/bold] recipe[/]"
+            f"[bold]{escape(self._recommended_label())}[/bold] recipe[/]"
             if st.recommendation
             else ""
         )
@@ -197,11 +198,21 @@ class WelcomeScreen(WizardScreen):
                 yield Static(
                     "This makes a mailbox searchable, for you and for AI agents. You pick a "
                     "recipe, the folders to include and, for the AI recipes, the model. Then "
-                    "it runs, and stops twice for you to check before the slow part.\n"
+                    "it runs, and asks you before anything slow or costly.\n"
                     "[dim]Nothing in your mailbox is changed or deleted.[/]",
                     id="welcome-blurb",
                 )
                 yield Static("[b]enter[/] begin   [b]q[/] quit", id="welcome-keys")
+
+    def _recommended_label(self) -> str:
+        """The recommended persona by the name the picker shows, not its id."""
+        name = self._state.recommendation or ""
+        if self._registry is None:
+            return name
+        try:
+            return self._registry.get(name).label
+        except ValueError:
+            return name
 
     def action_begin(self) -> None:
         self.dismiss(True)
@@ -297,20 +308,25 @@ class ModelScreen(WizardScreen):
         Binding("ctrl+q", "quit_wizard", "Quit"),
     ]
 
-    def __init__(self, state: WizardState, persona: Persona) -> None:
+    def __init__(self, state: WizardState, persona: Persona, registry: Registry) -> None:
         super().__init__()
         self._state = state
         self._persona = persona
+        self._registry = registry
 
     def compose_body(self) -> ComposeResult:
-        llm_verbs = [s.verb for s in self._persona.steps if s.verb in flow.LLM_STEPS]
+        llm_steps = [
+            self._registry.verb_info(s.verb).does
+            for s in self._persona.steps
+            if s.verb in flow.LLM_STEPS
+        ]
         with Center(id="model-center"):
             with Vertical(id="model-card"):
                 yield Static("[b]Which AI model reads your mail?[/]", classes="panel-title")
                 yield Static(
-                    f"The [bold]{escape(self._persona.label)}[/] recipe uses an AI model for: "
-                    f"[yellow]{', '.join(llm_verbs)}[/].\n"
-                    "It runs on your own machine, in LM Studio or Ollama (or any server "
+                    f"The [bold]{escape(self._persona.label)}[/] recipe uses an AI model to:\n"
+                    + "".join(f"  • {escape(d)}\n" for d in llm_steps)
+                    + "It runs on your own machine, in LM Studio or Ollama (or any server "
                     "with an OpenAI-style API). Type the model's name exactly as that "
                     "app lists it, and keep the app running while this works.\n"
                     "[dim]LM Studio: the name is under My Models, or run `lms ls`.[/]",
@@ -573,12 +589,18 @@ class ReviewScreen(WizardScreen):
                         id="review-missing",
                     )
                 else:
-                    yield Static(
-                        "\n[green]Ready.[/] Press [b]enter[/] to start.\n"
-                        "[dim]Nothing slow or costly runs without asking: the run stops to "
-                        "show you a sample of the AI's decisions, and asks again before "
-                        "the AI reads every email.[/]"
-                    )
+                    if flow.needs_model(self._persona):
+                        asks = (
+                            "Nothing slow or costly runs without asking: the run first "
+                            "shows you a sample of the AI's decisions to check, and asks "
+                            "again before the AI reads every email."
+                        )
+                    else:
+                        asks = (
+                            "The only question it asks is whether to put the flagged "
+                            "newsletters on the skip list."
+                        )
+                    yield Static(f"\n[green]Ready.[/] Press [b]enter[/] to start.\n[dim]{asks}[/]")
 
     def action_start(self) -> None:
         if self._missing:
@@ -662,9 +684,9 @@ class CalibrateGateModal(ModalScreen[str]):
         with Vertical(classes="dialog dialog-wide"):
             yield Static("[b]Check the AI's decisions on a sample[/]", classes="dialog-title")
             yield Static(
-                "The AI applied the junk rules to a sample of your mail. Junk is left out "
-                "of search. Below are the decisions most likely to be wrong; scroll to see "
-                "both lists.\n"
+                "The AI applied the junk rules to a sample of your mail. What it is sure is "
+                "junk is left out of search. Below are the decisions most likely to be "
+                "wrong; scroll to see both lists.\n"
                 "• [b]Marked junk, but might be a real record[/]: if real receipts, invoices "
                 "or account notices are here, the rules are too strict.\n"
                 "• [b]Kept, but might be junk[/]: if newsletters or ads are here, the rules "
@@ -675,8 +697,7 @@ class CalibrateGateModal(ModalScreen[str]):
                 # The report quotes email subjects/senders — escape their brackets.
                 yield Static(escape(self._report))
             yield Static(
-                "[b]p[/] looks right, run the AI on all of it   "
-                "[b]r[/] try other junk rules   [b]a[/] stop here",
+                "[b]p[/] looks right, carry on   [b]r[/] try other junk rules   [b]a[/] stop here",
                 classes="dialog-keys",
             )
 
@@ -810,11 +831,12 @@ class _WorkerBridge:
             )
         else:
             if_no = "No keeps them: they will be searchable along with everything else."
+        who = "the AI judged" if self._screen.ai_judges_everything() else "the header rules flagged"
         body = (
-            "These emails were judged junk (a sample is shown). Yes adds them to the "
-            "settings' skip list, so later runs and rebuilds pass over them too. "
-            "Nothing is deleted from your mailbox, and the skip list is a text file "
-            f"you can edit.\n[dim]{if_no}[/]\n\n"
+            f"These are emails {who} as junk (a sample is shown). Yes adds them to a "
+            "skip list, so later runs and rebuilds pass over them too. Nothing is "
+            "deleted from your mailbox. The skip list is a file next to your settings "
+            f"file, ending in .blacklist.txt; delete it to undo.\n[dim]{if_no}[/]\n\n"
         ) + "\n".join(f"  [dim]{escape(line)}[/]" for line in preview)
         return bool(
             self._ask(
@@ -864,7 +886,7 @@ class RunScreen(Screen[int]):
     def compose(self) -> ComposeResult:
         yield StageBar("Run")
         with Horizontal(id="run-body"):
-            with Vertical(id="run-steps-panel"):
+            with VerticalScroll(id="run-steps-panel"):
                 yield Static(
                     f"[b]{self._persona.name}[/] — {escape(self._persona.label)}",
                     classes="panel-title",
@@ -911,19 +933,26 @@ class RunScreen(Screen[int]):
         status = self.query_one("#run-status", Static)
         if code == 0:
             collection = escape(self._state.profile.collection)
-            self.write_log(
-                f"\n[green b]Done.[/] Your mail is searchable in [b]{collection}[/].\n"
-                f'Ask it a question:  ./mailrag ask "…" --profile '
-                f"{escape(self._state.profile_path)}\n"
-                "Let AI agents search it: connect them to the MCP server "
-                "(docs/MCP_SERVER.md).\n"
-                "[dim]To keep it up to date as new mail arrives, see docs/SYNC.md.[/]"
-            )
+            lines = [f"\n[green b]Done.[/] Your mail is searchable in [b]{collection}[/]."]
+            if self._state.model:
+                # `ask` writes its answer with an LLM it finds through RAG_LLM_MODEL,
+                # not through anything the wizard saved.
+                lines.append(
+                    "Ask it a question:  RAG_LLM_MODEL="
+                    f'{escape(self._state.model)} ./mailrag ask "…" --profile '
+                    f"{escape(self._state.profile_path)}"
+                )
+            lines += [
+                "Let AI agents search it: connect them to the MCP server (docs/MCP_SERVER.md).",
+                "[dim]To keep it up to date as new mail arrives, see docs/SYNC.md.[/]",
+            ]
+            self.write_log("\n".join(lines))
             status.update("[green]✓ done[/], your choices are saved. Press [b]enter[/] to exit.")
         else:
             status.update(
                 "[yellow]Stopped.[/] Your choices so far are saved. Run the wizard again to "
-                "carry on: work the AI already did is not repeated. Press [b]enter[/] to exit."
+                "carry on: summaries the AI already wrote are kept, the sample check runs "
+                "again. Press [b]enter[/] to exit."
             )
 
     # -- the worker ---------------------------------------------------------------
@@ -949,7 +978,8 @@ class RunScreen(Screen[int]):
     def action_finish(self) -> None:
         if self._exit_code is None:
             self.notify(
-                "Still running. Ctrl+Q stops it now; summaries already written are kept.",
+                "Still running. Ctrl+Q closes the wizard, but the step already running "
+                "finishes in the background. Summaries already written are kept.",
                 severity="warning",
             )
             return
@@ -1064,7 +1094,7 @@ class MailragWizardApp(App[int]):
         padding: 1 2;
         margin-right: 2;
     }
-    .step-row { height: auto; padding-bottom: 1; }
+    .step-row { height: auto; }
     #run-log-panel {
         width: 1fr;
         border: round $secondary;
@@ -1115,6 +1145,9 @@ class MailragWizardApp(App[int]):
             model=self._cli_model,
             limit=limit,
             recommendation=flow.read_recommendation(profile_path),
+            # A rerun after a stop starts with last time's folders ticked, not
+            # an empty tree.
+            scope_rules=list(profile.selection_rules) or None,
         )
 
     @property
@@ -1139,13 +1172,13 @@ class MailragWizardApp(App[int]):
         """The screen sequence, recomputed as choices land (model/scope are dynamic)."""
         st = self._state
         stages: List[tuple] = [
-            ("welcome", lambda: WelcomeScreen(st)),
+            ("welcome", lambda: WelcomeScreen(st, self._personas)),
             ("persona", lambda: PersonaScreen(st, self._personas)),
         ]
         persona = self._persona()
         if persona is not None:
             if flow.needs_model(persona) and self._cli_model is None:
-                stages.append(("model", lambda: ModelScreen(st, persona)))
+                stages.append(("model", lambda: ModelScreen(st, persona, self._personas)))
             if any(s.verb == "scope" for s in persona.steps):
                 stages.append(("scope", lambda: ScopeScreen(st)))
         stages.append(("review", lambda: ReviewScreen(st, self._personas)))

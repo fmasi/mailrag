@@ -73,22 +73,44 @@ _DEMO_EMLS = (
     "Archive/2019-taxes.eml",
 )
 
-#: Sample step results shown in the run log (short_result renders these).
-_FAKE_RESULTS = {
-    "measure": "corpus 5,120 messages · median body 1.4 KB · suggested chunk 512/64",
-    "summarize": "summarized 5,120 messages · 1,204 flagged as likely noise",
-    "prune": "blacklisted 1,204 messages as noise (score >= 0.70)",
-    "index": "embedded 3,916 keepers with BGE-M3 -> Qdrant collection 'acme-mail'",
-}
 
-#: A representative calibration report for the calibrate-gate modal.
-_FAKE_CALIBRATION_REPORT = (
-    "rubric 'personal' on a 200-message sample\n\n"
-    "  KEEP  (score < 0.30)   152 msgs   e.g. 'Re: dinner Saturday?', 'Invoice #4471'\n"
-    "  GREY  (0.30-0.70)        31 msgs   e.g. 'Your statement is ready'\n"
-    "  DROP  (score >= 0.70)    17 msgs   e.g. '50% off everything!', 'Weekly digest'\n\n"
-    "Trust it before you spend: proceed only if these buckets look right."
-)
+#: Sample step results, typed like the real handlers' returns so the run log
+#: shows exactly the sentences the app writes (flow.describe_result).
+def _fake_results() -> Dict[str, Any]:
+    from src.indexing.contextual_index import BuildResult
+    from src.pipeline.profile import ProfileReport
+
+    return {
+        "scope": [{"type": "prefix", "value": "Inbox/"}, {"type": "prefix", "value": "Projects/"}],
+        "measure": ProfileReport(
+            percentiles={50: 212}, mean=290.0, bodies=5120, suggested_chunk_size=512
+        ),
+        "summarize": {"cached": 0, "done": 5120, "error": 0, "unavailable": 0},
+        "prune": 1204,
+        "index": BuildResult(collection="acme-mail", kept_emails=3916, chunks=8840),
+    }
+
+
+def _fake_calibration_text() -> str:
+    """A representative report through the real formatter (synthetic rows)."""
+    from src.llm.calibration import CalibrationReport, format_report
+
+    nag = {
+        "sender": "Vault <noreply@example.com>",
+        "subject": "Improve your password",
+        "summary": "security reminder",
+    }
+    return format_report(
+        CalibrationReport(
+            rubric="personal",
+            sample=200,
+            noise_rate=0.38,
+            false_noise=[
+                {"sender": "Shop <orders@example.com>", "subject": "Your order", "reason": "promo"}
+            ],
+            false_keep=[nag] * 6,
+        )
+    )
 
 
 def _fake_handlers(calls: List[str]) -> Dict[str, Callable[..., Any]]:
@@ -102,7 +124,7 @@ def _fake_handlers(calls: List[str]) -> Dict[str, Callable[..., Any]]:
     def make(verb: str) -> Callable[..., Any]:
         def handler(prof: Any, **params: Any) -> Any:
             calls.append(verb)
-            return _FAKE_RESULTS.get(verb, f"{verb} ok")
+            return _fake_results().get(verb, f"{verb} ok")
 
         return handler
 
@@ -156,7 +178,7 @@ async def generate(out_dir: str) -> List[str]:
             mock.patch(
                 "src.tui.flow.build_handlers", side_effect=lambda **_: _fake_handlers(calls)
             ),
-            mock.patch("src.llm.calibration.format_report", return_value=_FAKE_CALIBRATION_REPORT),
+            mock.patch("src.llm.calibration.format_report", return_value=_fake_calibration_text()),
             mock.patch("src.llm.rubrics.names", return_value=["personal", "work", "legal"]),
         ):
             app = MailragWizardApp(profile_path)

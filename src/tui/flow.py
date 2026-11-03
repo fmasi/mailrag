@@ -378,6 +378,13 @@ def describe_result(result: Any, verb: str = "") -> str:
         return line
     if isinstance(result, list) and all(isinstance(r, dict) and "type" in r for r in result):
         return f"{len(result)} folder selection(s) saved"
+    if name == "Pass1Stats":
+        return f"{result.tagged} of {result.total} emails look like newsletters"
+    if name == "ClusterReport":
+        return (
+            f"{result.n_emails} emails grouped; about "
+            f"{round(100 * result.obvious_noise_fraction)}% sit in obvious junk groups"
+        )
     if verb == "prune" and isinstance(result, int) and not isinstance(result, bool):
         return f"{result} emails added to the skip list"
     return short_result(result)

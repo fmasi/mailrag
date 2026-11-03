@@ -370,6 +370,40 @@ class TestNavigationAndEdges(_TuiCase):
         self.assertEqual(app.state.persona_name, "llm-verify")
 
 
+class TestRerunKeepsChoices(_TuiCase):
+    def test_folders_ticked_last_time_are_ticked_again(self):
+        """A rerun after a stop should not start from an empty folder tree."""
+        with open(self.profile_path) as fh:
+            data = json.load(fh)
+        data["selection_rules"] = [{"type": "prefix", "value": "Inbox/"}]
+        with open(self.profile_path, "w") as fh:
+            json.dump(data, fh)
+        self.assertEqual(self.app().state.scope_rules, [{"type": "prefix", "value": "Inbox/"}])
+
+    def test_a_fresh_profile_starts_with_nothing_ticked(self):
+        self.assertIsNone(self.app().state.scope_rules)
+
+
+class TestWelcomeNamesTheRecipe(unittest.TestCase):
+    def test_the_recommendation_uses_the_label_the_picker_shows(self):
+        from src.persona.registry import load_registry
+        from src.tui.app import WelcomeScreen
+
+        screen = WelcomeScreen.__new__(WelcomeScreen)
+        screen._state = SimpleNamespace(recommendation="llm-all")
+        screen._registry = load_registry()
+        self.assertEqual(screen._recommended_label(), "Thorough, AI reads everything")
+
+    def test_an_unknown_recommendation_falls_back_to_its_id(self):
+        from src.persona.registry import load_registry
+        from src.tui.app import WelcomeScreen
+
+        screen = WelcomeScreen.__new__(WelcomeScreen)
+        screen._state = SimpleNamespace(recommendation="gone")
+        screen._registry = load_registry()
+        self.assertEqual(screen._recommended_label(), "gone")
+
+
 class TestRunTuiGuards(unittest.TestCase):
     def test_run_tui_needs_a_tty(self):
         # Under pytest stdin/stdout are not ttys, so the guard trips.
