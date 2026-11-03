@@ -614,8 +614,8 @@ def answer_question(
 # pixels. Calibrated on the live corpus (2026-08-20): ten text-bearing PDFs
 # measured 99,000-225,000 chars/MB, while the two documents an agent actually
 # had to render measured 1,869 (a partner PDF whose key fact is a horseshoe
-# diagram of five names) and 66 (a 21 MB slide deck). A 50x margin either side,
-# so the cut is nowhere near either population.
+# diagram of five names) and 66 (a 21 MB slide deck). The cut sits about 10x
+# below the lowest text-bearing PDF and about 5x above the diagram PDF.
 _SPARSE_TEXT_CHARS_PER_MB = 10_000
 # Below this size the ratio is noise: a 2 KB file with one line of text scores
 # enormously, and a 900-byte spacer scores zero, neither meaningfully.
@@ -709,7 +709,7 @@ def list_attachments(
     Parity with the CLI ``attachments list``: at least one of ``thread_id`` /
     ``message_id`` must be given. Recurring small inline images (signature logos,
     spacer pixels) are excluded unless ``include_boilerplate=True`` — on a real
-    corpus they are 73% of all rows and would bury the actual documents.
+    corpus they are 61% of all rows and would bury the actual documents.
     Returns a row per attachment
     (``sha256``, ``filename``, ``mime``, ``size``, ``thread_id``, ``message_id``,
     ``inline``). ``collection`` selects which corpus's store to read; they are
@@ -764,8 +764,8 @@ def get_attachment(
 
     Parity with the CLI ``attachments get --text``: extracts (or reads the cached)
     text for ``sha256`` and returns ``{sha256, filename, mime, size, text,
-    text_status}``. ``ocr`` selects the extraction backend (``llm`` | ``tesseract``
-    | ``cloud``), like the CLI ``--extractor`` flag; defaults to
+    text_status}``. ``ocr`` selects the extraction backend (``llm`` |
+    ``tesseract``), like the CLI ``--extractor`` flag; defaults to
     ``$RAG_ATTACH_EXTRACTOR`` or ``llm``. Raw bytes are never returned over MCP.
 
     ``collection`` scopes the lookup to that corpus's store. A content hash is
@@ -973,12 +973,15 @@ def build_server():
     ) -> List[Dict[str, Any]]:
         """List the files attached to a thread — the way in to their contents.
 
-        Attachment contents are INVISIBLE to ``search_email``, ``answer_question``
-        and ``grep_email``: those index message bodies only. So when the real
-        answer lives in a document somebody emailed — an invoice PDF, a
-        spreadsheet of figures, a signed contract, a scanned letter, a ticket or
-        boarding pass — body search finds the covering email and then looks as
-        though the numbers simply are not there. They are; they are in the file.
+        Search only partly sees attachments. ``search_email`` and
+        ``answer_question`` also search the text the indexer could extract from
+        attached documents, but a hit is a fragment of the file, and a scan or
+        an image whose text was not extracted is not in search at all.
+        ``grep_email`` reads message bodies only. So when the real answer lives
+        in a document somebody emailed (an invoice PDF, a spreadsheet of
+        figures, a signed contract, a scanned letter, a ticket or boarding
+        pass), search may find the covering email and miss the numbers. They
+        are in the file: open it.
 
         Workflow: ``search_email`` / ``grep_email`` to find the thread → this tool
         to list its attachments → ``get_attachment(sha256)`` to read one. A search
@@ -989,7 +992,7 @@ def build_server():
         message_id, inline}``.
 
         Signature logos, spacer pixels and footer badges are excluded by default:
-        on a real corpus they are 73% of every row and would bury the documents
+        on a real corpus they are 61% of every row and would bury the documents
         you are looking for. They are identified by RECURRENCE (a small inline
         image reused across several messages), not by name or type — because
         ``image002.png`` is a 259-byte spacer in one message and a 12 MB pasted
@@ -1029,7 +1032,7 @@ def build_server():
 
         Args:
             sha256: Content hash of the attachment (from ``list_attachments``).
-            ocr: Extraction backend — ``llm`` | ``tesseract`` | ``cloud``
+            ocr: Extraction backend — ``llm`` | ``tesseract``
                 (default: ``$RAG_ATTACH_EXTRACTOR`` or ``llm``).
             collection: Corpus whose store holds it (default: server-resolved).
         """
