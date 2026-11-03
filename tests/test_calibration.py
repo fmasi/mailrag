@@ -56,15 +56,42 @@ class TestCalibration(unittest.TestCase):
         text = calibration.format_report(report)
         self.assertIn("personal", text)
         self.assertIn("50%", text)
-        self.assertIn("FALSE-NOISE", text)
-        self.assertIn("FALSE-KEEP", text)
+        self.assertIn(calibration.FALSE_NOISE_HEADING, text)
+        self.assertIn(calibration.FALSE_KEEP_HEADING, text)
 
     def test_format_report_empty_buckets_ok(self):
         report = calibration.CalibrationReport(rubric="work", sample=0, noise_rate=0.0)
         text = calibration.format_report(report)
         self.assertIn("work", text)
-        self.assertIn("FALSE-NOISE suspects", text)
+        self.assertIn(calibration.FALSE_NOISE_HEADING, text)
         self.assertIn("] 0", text)  # zero-count buckets render without error
+
+    def test_format_report_groups_repeated_notifications(self):
+        """Eleven copies of one nag are one row with a count, so the distinct
+        rows a reader has to judge stay visible."""
+        nag = _rec(False, subject="Improve your password", summary="security alert")
+        nag["sender"] = "Vault <noreply@example.com>"
+        other = _rec(False, subject="Spring sale", summary="promo")
+        report = calibration.CalibrationReport(
+            rubric="work", sample=12, noise_rate=0.0, false_keep=[nag] * 11 + [other]
+        )
+        text = calibration.format_report(report)
+        self.assertEqual(text.count("Improve your password"), 1)
+        self.assertIn("(x11)", text)
+        self.assertIn("Spring sale", text)
+        self.assertNotIn("(x1)", text)
+        self.assertIn(f"[{calibration.FALSE_KEEP_HEADING}] 12", text)
+
+    def test_format_report_caps_distinct_rows_not_copies(self):
+        recs = []
+        for i in range(20):
+            r = _rec(True, subject=f"invoice {i}", reason="digest")
+            recs.append(r)
+        report = calibration.CalibrationReport(
+            rubric="work", sample=20, noise_rate=1.0, false_noise=recs
+        )
+        text = calibration.format_report(report)
+        self.assertIn("(4 more not shown)", text)
 
     def test_false_keep_kept_when_only_reason_is_recordish(self):
         # PROMO fires from the blob (which includes reason); the REC-exclusion check

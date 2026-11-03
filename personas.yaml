@@ -7,21 +7,23 @@
 #
 # See docs/VERBS.md for the cost model. Only `index` deletes anything.
 
+# `does` is shown to first-time users on the wizard's review and run screens:
+# plain words, no internal terms, short enough for one line.
 verbs:
-  scope:     {does: "choose which folders/accounts are in play", cost: free}
-  measure:   {does: "measure corpus, suggest chunk size",        cost: free}
-  tag:       {does: "regex/header flag of obvious bulk",         cost: free}
-  scan:      {does: "no-LLM embedding clusters + persona advisor", cost: cheap}
-  judge:     {does: "cheap LLM verdict-only on drop-suspects",   cost: small-llm}
-  calibrate: {does: "sample-gate the rubric before any full run", cost: small-llm}
-  summarize: {does: "LLM summary + noise verdict on keepers",    cost: big-llm}
-  prune:     {does: "apply drops before the LLM pass",           cost: free}
-  index:     {does: "embed (BGE-M3) + store in Qdrant",          cost: gpu}
+  scope:     {does: "pick the folders to include",                         cost: free}
+  measure:   {does: "check message lengths to set how text is split",     cost: free}
+  tag:       {does: "flag obvious newsletters from their headers",        cost: free}
+  scan:      {does: "group similar mail and suggest a recipe (no AI)",    cost: cheap}
+  judge:     {does: "AI double-checks only the mail that looks like junk", cost: small-llm}
+  calibrate: {does: "AI tries the junk rules on a sample, you check it",  cost: small-llm}
+  summarize: {does: "AI reads each email: a summary, and keep or junk",   cost: big-llm}
+  prune:     {does: "put the junk on a skip list",                        cost: free}
+  index:     {does: "make the kept mail searchable",                      cost: gpu}
 
 personas:
   llm-none:
-    label: "Body-only (no LLM)"
-    advisor_hint: "fast, no LLM at all; drops obvious bulk by regex tags"
+    label: "Quick, no AI"
+    advisor_hint: "Fastest, and no AI model needed. Newsletters are dropped by their headers; everything else is searchable as written."
     steps:
       - scope
       - measure
@@ -31,8 +33,8 @@ personas:
       - {index: {embed: body}}
 
   llm-verify:
-    label: "Verified trim"
-    advisor_hint: "great quality; a cheap LLM confirms drops only on the obvious pockets"
+    label: "Balanced"
+    advisor_hint: "An AI model double-checks only the mail that looks like junk, then summarizes what is kept. Needs a local AI model."
     steps:
       - scope
       - measure
@@ -44,8 +46,8 @@ personas:
       - {index: {embed: summary}}
 
   llm-all:
-    label: "Full (LLM on everything)"
-    advisor_hint: "max quality; one LLM call per email, then prune the confident noise"
+    label: "Thorough, AI reads everything"
+    advisor_hint: "An AI model reads every email, writes a summary and decides keep or junk. Best search results, slowest: one AI call per email."
     steps:
       - scope
       - measure

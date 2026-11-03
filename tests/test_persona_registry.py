@@ -12,7 +12,7 @@ class TestPersonaRegistry(unittest.TestCase):
         self.assertIn("llm-all", reg.names())
         p = reg.get("llm-all")
         self.assertIsInstance(p, Persona)
-        self.assertEqual(p.label, "Full (LLM on everything)")
+        self.assertEqual(p.label, "Thorough, AI reads everything")
         verbs = [s.verb for s in p.steps]
         self.assertEqual(verbs, ["scope", "measure", "calibrate", "summarize", "prune", "index"])
         # params parsed from {verb: {..}} steps
@@ -48,7 +48,7 @@ class TestPersonaRegistry(unittest.TestCase):
     def test_verb_metadata_available(self):
         reg = load_registry()
         self.assertEqual(reg.verb_info("summarize").cost, "big-llm")
-        self.assertIn("Qdrant", reg.verb_info("index").does)
+        self.assertIn("searchable", reg.verb_info("index").does)
 
 
 if __name__ == "__main__":

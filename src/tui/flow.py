@@ -63,6 +63,7 @@ class PersonaCard:
     verbs: List[str]
     costs: List[str]  # aligned with ``verbs``
     recommended: bool = False
+    does: List[str] = field(default_factory=list)  # aligned with ``verbs``
 
 
 def persona_cards(registry: Registry, recommended: Optional[str] = None) -> List[PersonaCard]:
@@ -78,6 +79,7 @@ def persona_cards(registry: Registry, recommended: Optional[str] = None) -> List
                 verbs=[s.verb for s in p.steps],
                 costs=[registry.verb_info(s.verb).cost for s in p.steps],
                 recommended=(name == recommended),
+                does=[registry.verb_info(s.verb).does for s in p.steps],
             )
         )
     return cards
@@ -345,6 +347,40 @@ def _run_planned(
         result = handlers[step.verb](prof, **step.params)
         ui.on_step_done(index, step, result)
     return 0
+
+
+def describe_result(result: Any, verb: str = "") -> str:
+    """A step's result as a sentence for the run log.
+
+    The log used to print each result's repr, which put Python objects like
+    ``ProfileReport(percentiles={50: 212, ...})`` in front of people who had
+    never seen the code. Results this doesn't recognise still fall back to that
+    one-line repr rather than vanish."""
+    name = type(result).__name__
+    if name == "ProfileReport":
+        return (
+            f"{result.bodies} emails measured; text will be split into pieces of "
+            f"about {result.suggested_chunk_size} tokens"
+        )
+    if name == "BuildResult":
+        return (
+            f"{result.kept_emails} emails are now searchable in '{result.collection}' "
+            f"({result.chunks} pieces)"
+        )
+    if name == "CalibrationReport":
+        return f"sample of {result.sample} checked: {round(100 * result.noise_rate)}% junk"
+    if isinstance(result, dict) and {"done", "cached"} <= set(result):
+        line = f"AI read {result['done']} emails, {result['cached']} were already done"
+        if result.get("error"):
+            line += f", {result['error']} failed (run again to retry them)"
+        if result.get("unavailable"):
+            line += f", {result['unavailable']} skipped while the AI was unreachable"
+        return line
+    if isinstance(result, list) and all(isinstance(r, dict) and "type" in r for r in result):
+        return f"{len(result)} folder selection(s) saved"
+    if verb == "prune" and isinstance(result, int) and not isinstance(result, bool):
+        return f"{result} emails added to the skip list"
+    return short_result(result)
 
 
 def short_result(result: Any, limit: int = 140) -> str:

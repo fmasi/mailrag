@@ -81,8 +81,18 @@ _COST_STYLE = {
 }
 
 
+#: What each cost tier means to someone who has never seen the pipeline.
+_COST_LABEL = {
+    "free": "free",
+    "cheap": "seconds",
+    "small-llm": "AI, on a sample",
+    "big-llm": "AI, every email",
+    "gpu": "GPU, minutes",
+}
+
+
 def _cost_badge(cost: str) -> str:
-    return f"[{_COST_STYLE.get(cost, 'white')}]{cost or '?'}[/]"
+    return f"[{_COST_STYLE.get(cost, 'white')}]{_COST_LABEL.get(cost, cost or '?')}[/]"
 
 
 @dataclass
@@ -164,17 +174,18 @@ class WelcomeScreen(WizardScreen):
     def compose_body(self) -> ComposeResult:
         st = self._state
         facts = [
-            ("profile", st.profile_path),
-            ("mailbox root", st.profile.root or "(not set)"),
-            ("rubric", st.profile.rubric),
-            ("collection", st.profile.collection),
-            ("qdrant", st.profile.qdrant_url),
+            ("settings file", st.profile_path),
+            ("mail folder", st.profile.root or "(not set)"),
+            ("junk rules", st.profile.rubric),
+            ("search index", st.profile.collection),
+            ("database", st.profile.qdrant_url),
         ]
         if st.limit:
             facts.append(("limit", f"first {st.limit} messages (test run)"))
         rows = "\n".join(f"[dim]{k:>14}[/]  {escape(str(v))}" for k, v in facts)
         rec = (
-            f"\n\n[green]★ scan recommends the [bold]{st.recommendation}[/bold] persona[/]"
+            f"\n\n[green]★ a scan of this mailbox recommends the "
+            f"[bold]{st.recommendation}[/bold] recipe[/]"
             if st.recommendation
             else ""
         )
@@ -184,8 +195,10 @@ class WelcomeScreen(WizardScreen):
                 yield Static("[dim]guided mailbox onboarding[/]", id="tagline")
                 yield Static(rows + rec, id="welcome-facts")
                 yield Static(
-                    "[dim]Pick a persona (a cost-ordered recipe of pipeline verbs), scope "
-                    "your folders, review, and run — with a live view of every step.[/]",
+                    "This makes a mailbox searchable, for you and for AI agents. You pick a "
+                    "recipe, the folders to include and, for the AI recipes, the model. Then "
+                    "it runs, and stops twice for you to check before the slow part.\n"
+                    "[dim]Nothing in your mailbox is changed or deleted.[/]",
                     id="welcome-blurb",
                 )
                 yield Static("[b]enter[/] begin   [b]q[/] quit", id="welcome-keys")
@@ -217,14 +230,14 @@ class PersonaScreen(WizardScreen):
     def compose_body(self) -> ComposeResult:
         options = [
             Option(
-                f"{c.name}  [green]★[/]" if c.recommended else c.name,
+                f"{escape(c.label)}  [green]★[/]" if c.recommended else escape(c.label),
                 id=c.name,
             )
             for c in self._cards
         ]
         with Horizontal(id="persona-body"):
             with Vertical(id="persona-list-panel"):
-                yield Static("[b]Personas[/]", classes="panel-title")
+                yield Static("[b]Choose a recipe[/]", classes="panel-title")
                 yield OptionList(*options, id="persona-list")
             with Vertical(id="persona-detail-panel"):
                 yield Static("", id="persona-detail")
@@ -243,13 +256,17 @@ class PersonaScreen(WizardScreen):
         card = self._card(name)
         if card is None:  # pragma: no cover - defensive
             return
-        lines = [f"[bold]{escape(card.label)}[/]", f"[dim]{escape(card.hint)}[/]", ""]
+        lines = [f"[bold]{escape(card.label)}[/]", escape(card.hint), ""]
         if card.recommended:
-            lines.insert(2, "[green]★ recommended by scan for this mailbox[/]")
-        lines.append("[b]Recipe[/] [dim](cost-ordered — cheap screens before the LLM spends)[/]")
-        for i, (verb, cost) in enumerate(zip(card.verbs, card.costs), start=1):
-            lines.append(f"  {i}. [bold]{verb:<10}[/] {_cost_badge(cost)}")
-        lines += ["", "[dim]enter[/] choose   [dim]↑/↓[/] browse"]
+            lines.insert(2, "[green]★ a scan of this mailbox recommends this one[/]")
+        lines.append("[b]Steps[/] [dim](free ones first, so the AI only sees what is left)[/]")
+        for i, (verb, cost, does) in enumerate(zip(card.verbs, card.costs, card.does), start=1):
+            lines.append(f"  {i}. {escape(does)}  {_cost_badge(cost)}")
+        lines += [
+            "",
+            "[dim]No AI model running? Choose the first recipe.[/]",
+            "[dim]enter[/] choose   [dim]↑/↓[/] browse   [dim]esc[/] back",
+        ]
         self.query_one("#persona-detail", Static).update("\n".join(lines))
 
     @on(OptionList.OptionHighlighted, "#persona-list")
@@ -289,17 +306,19 @@ class ModelScreen(WizardScreen):
         llm_verbs = [s.verb for s in self._persona.steps if s.verb in flow.LLM_STEPS]
         with Center(id="model-center"):
             with Vertical(id="model-card"):
-                yield Static("[b]LLM model[/]", classes="panel-title")
+                yield Static("[b]Which AI model reads your mail?[/]", classes="panel-title")
                 yield Static(
-                    f"Persona [bold]{self._persona.name}[/] spends the LLM on: "
+                    f"The [bold]{escape(self._persona.label)}[/] recipe uses an AI model for: "
                     f"[yellow]{', '.join(llm_verbs)}[/].\n"
-                    "[dim]Any model id your OpenAI-compatible endpoint serves "
-                    "(LM Studio / Ollama / NIM / OpenAI).[/]",
+                    "It runs on your own machine, in LM Studio or Ollama (or any server "
+                    "with an OpenAI-style API). Type the model's name exactly as that "
+                    "app lists it, and keep the app running while this works.\n"
+                    "[dim]LM Studio: the name is under My Models, or run `lms ls`.[/]",
                     id="model-blurb",
                 )
                 yield Input(
                     value=self._state.model or "",
-                    placeholder="e.g. qwen/qwen3-4b-2507",
+                    placeholder="model name, e.g. qwen/qwen3-4b-2507",
                     id="model-input",
                 )
                 yield Static("", id="model-error")
@@ -312,8 +331,7 @@ class ModelScreen(WizardScreen):
         model = flow.validate_model(event.value)
         if model is None:
             self.query_one("#model-error", Static).update(
-                "[red]A model id is required for this persona — or go back and pick "
-                "the no-LLM persona.[/]"
+                "[red]Type a model name, or press esc and choose the recipe that needs no AI.[/]"
             )
             return
         self.dismiss(model)
@@ -358,10 +376,11 @@ class ScopeScreen(WizardScreen):
 
     def compose_body(self) -> ComposeResult:
         with Vertical(id="scope-body"):
-            yield Static("[b]Choose what to index[/]", classes="panel-title")
+            yield Static("[b]Which folders should be searchable?[/]", classes="panel-title")
             yield Static(
-                "[dim]space[/] include/exclude a folder (a checked folder covers all its "
-                "subfolders) · [dim]c[/] continue",
+                "Tick the folders to include. A ticked folder includes everything inside it. "
+                "Unticked folders are left alone.\n"
+                "[dim]space[/] tick/untick   [dim]c[/] continue   [dim]esc[/] back",
                 id="scope-help",
             )
             if self._scope_nodes or self._has_root:
@@ -370,7 +389,8 @@ class ScopeScreen(WizardScreen):
                 yield Static(
                     f"[red]No .eml files found under "
                     f"{self._state.profile.resolved_root()!r}.[/]\n"
-                    "[dim]Fix the profile's root and relaunch, or press escape to go back.[/]",
+                    "[dim]Point the settings file's `root` at your mail folder and start "
+                    "again, or press esc to go back.[/]",
                     id="scope-empty",
                 )
             yield Static("", id="scope-status")
@@ -437,9 +457,9 @@ class ScopeScreen(WizardScreen):
         rules = self._rules()
         n = len(rules)
         self.query_one("#scope-status", Static).update(
-            f"[green]{n}[/] selection rule{'s' if n != 1 else ''} — press [b]c[/] to continue"
+            f"[green]{n}[/] folder{'s' if n != 1 else ''} ticked. Press [b]c[/] to continue."
             if n
-            else "[yellow]nothing selected yet[/] — [dim]space[/] to include a folder"
+            else "[yellow]Nothing ticked yet.[/] Press [dim]space[/] on a folder to include it."
         )
 
     # -- selection --------------------------------------------------------------
@@ -525,16 +545,16 @@ class ReviewScreen(WizardScreen):
     def compose_body(self) -> ComposeResult:
         st = self._state
         facts = [
-            ("persona", escape(f"{self._persona.name} — {self._persona.label}")),
-            ("model", escape(st.model) if st.model else "[dim]none (no LLM steps)[/]"),
-            ("scope", f"{len(st.scope_rules or [])} selection rule(s)"),
-            ("rubric", escape(st.profile.rubric)),
-            ("collection", escape(st.profile.collection)),
-            ("limit", f"first {st.limit} messages" if st.limit else "full corpus"),
+            ("recipe", escape(self._persona.label)),
+            ("AI model", escape(st.model) if st.model else "[dim]none needed[/]"),
+            ("folders", f"{len(st.scope_rules or [])} ticked"),
+            ("junk rules", escape(st.profile.rubric)),
+            ("search index", escape(st.profile.collection)),
+            ("how much", f"first {st.limit} messages (a test)" if st.limit else "all of it"),
         ]
         with Horizontal(id="review-body"):
             with Vertical(id="review-config-panel"):
-                yield Static("[b]Configuration[/]", classes="panel-title")
+                yield Static("[b]Check before you start[/]", classes="panel-title")
                 yield Static("\n".join(f"[dim]{k:>12}[/]  {v}" for k, v in facts))
                 for rule in (st.scope_rules or [])[:8]:
                     yield Static(f"[dim]{'':>12}  · {escape(_describe_rule(rule))}[/]")
@@ -542,30 +562,28 @@ class ReviewScreen(WizardScreen):
                 if extra > 0:
                     yield Static(f"[dim]{'':>12}  · … and {extra} more[/]")
             with Vertical(id="review-plan-panel"):
-                yield Static("[b]Planned steps[/]", classes="panel-title")
+                yield Static("[b]What will happen[/]", classes="panel-title")
                 for i, step in enumerate(self._planned, start=1):
-                    marker = "[dim]– skipped (optional)[/]" if step.skipped else ""
-                    yield Static(
-                        f"  {i}. [bold]{step.verb:<10}[/] {_cost_badge(step.cost)}  "
-                        f"[dim]{escape(step.does)}[/] {marker}"
-                    )
+                    marker = "[dim](skipped, not built yet)[/]" if step.skipped else ""
+                    yield Static(f"  {i}. {escape(step.does)}  {_cost_badge(step.cost)} {marker}")
                 if self._missing:
                     yield Static(
-                        f"\n[red]✗ persona '{self._persona.name}' needs verb(s) not yet "
-                        f"implemented: {', '.join(self._missing)} — go back and pick "
-                        f"'llm-none' or 'llm-all'.[/]",
+                        f"\n[red]✗ This recipe needs steps that are not built yet "
+                        f"({', '.join(self._missing)}). Press esc and choose another.[/]",
                         id="review-missing",
                     )
                 else:
                     yield Static(
-                        "\n[green]Ready.[/] [dim]You stay in control: calibration is gated, "
-                        "and the big LLM pass asks before spending.[/]"
+                        "\n[green]Ready.[/] Press [b]enter[/] to start.\n"
+                        "[dim]Nothing slow or costly runs without asking: the run stops to "
+                        "show you a sample of the AI's decisions, and asks again before "
+                        "the AI reads every email.[/]"
                     )
 
     def action_start(self) -> None:
         if self._missing:
             self.notify(
-                f"Missing verb(s): {', '.join(self._missing)} — pick another persona.",
+                f"Steps not built yet: {', '.join(self._missing)}. Choose another recipe.",
                 severity="error",
             )
             return
@@ -581,7 +599,7 @@ class ReviewScreen(WizardScreen):
 def _describe_rule(rule: Dict[str, Any]) -> str:
     """Human-readable one-liner for a selection rule."""
     if rule["type"] == "prefix":
-        return f"{rule['value']} (and subfolders)"
+        return f"{rule['value']} (and everything inside)"
     if rule["type"] == "direct-root-files":
         return f"messages directly in {rule['root']}"
     if rule["type"] == "container-root":
@@ -601,18 +619,23 @@ class ConfirmModal(ModalScreen[bool]):
         Binding("escape", "no", "No"),
     ]
 
-    def __init__(self, title: str, body: str, *, yes_hint: str = "yes") -> None:
+    def __init__(
+        self, title: str, body: str, *, yes_hint: str = "yes", no_hint: str = "cancel"
+    ) -> None:
         super().__init__()
         self._title = title
         self._body = body
         self._yes_hint = yes_hint
+        self._no_hint = no_hint
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Static(f"[b]{self._title}[/]", classes="dialog-title")
             with VerticalScroll(classes="dialog-scroll"):
                 yield Static(self._body)
-            yield Static(f"[b]y[/] {self._yes_hint}   [b]n[/] cancel", classes="dialog-keys")
+            yield Static(
+                f"[b]y[/] {self._yes_hint}   [b]n[/] {self._no_hint}", classes="dialog-keys"
+            )
 
     def action_yes(self) -> None:
         self.dismiss(True)
@@ -637,14 +660,23 @@ class CalibrateGateModal(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog dialog-wide"):
-            yield Static("[b]Calibration gate[/]", classes="dialog-title")
+            yield Static("[b]Check the AI's decisions on a sample[/]", classes="dialog-title")
+            yield Static(
+                "The AI applied the junk rules to a sample of your mail. Junk is left out "
+                "of search. Below are the decisions most likely to be wrong; scroll to see "
+                "both lists.\n"
+                "• [b]Marked junk, but might be a real record[/]: if real receipts, invoices "
+                "or account notices are here, the rules are too strict.\n"
+                "• [b]Kept, but might be junk[/]: if newsletters or ads are here, the rules "
+                "are too loose. Real conversations here are fine.",
+                classes="dialog-intro",
+            )
             with VerticalScroll(classes="dialog-scroll"):
                 # The report quotes email subjects/senders — escape their brackets.
                 yield Static(escape(self._report))
             yield Static(
-                "[dim]Trust it before you spend: proceed only if these buckets look right.[/]\n"
-                "[b]p[/] proceed to the LLM pass   [b]r[/] re-tune (another rubric)   "
-                "[b]a[/] abort",
+                "[b]p[/] looks right, run the AI on all of it   "
+                "[b]r[/] try other junk rules   [b]a[/] stop here",
                 classes="dialog-keys",
             )
 
@@ -674,7 +706,12 @@ class RubricPickModal(ModalScreen[Optional[str]]):
             for n in self._names
         ]
         with Vertical(classes="dialog"):
-            yield Static("[b]Pick a rubric to try[/]", classes="dialog-title")
+            yield Static("[b]Pick the junk rules to try[/]", classes="dialog-title")
+            yield Static(
+                "[dim]Each set of rules is a file in rubrics/ (yours in rubrics/local/). "
+                "The sample is checked again with the one you pick.[/]",
+                classes="dialog-intro",
+            )
             yield OptionList(*options, id="rubric-list")
             yield Static("[b]enter[/] choose   [b]esc[/] keep current", classes="dialog-keys")
 
@@ -728,12 +765,15 @@ class _WorkerBridge:
 
     def on_step_start(self, index: int, step: flow.PlannedStep) -> None:
         self._ui(self._screen.mark_step, index, "running")
-        self._ui(self._screen.write_log, f"[bold cyan]▶ {step.verb}[/] — {escape(step.does)}")
+        self._ui(self._screen.write_log, f"[bold cyan]▶ {escape(step.does)}[/]")
 
     def on_step_done(self, index: int, step: flow.PlannedStep, result: Any) -> None:
         self._ui(self._screen.mark_step, index, "done")
         if result is not None:
-            self._ui(self._screen.write_log, f"[dim]  {escape(flow.short_result(result))}[/]")
+            self._ui(
+                self._screen.write_log,
+                f"[dim]  {escape(flow.describe_result(result, step.verb))}[/]",
+            )
 
     def on_step_skip(self, index: int, step: flow.PlannedStep) -> None:
         self._ui(self._screen.mark_step, index, "skipped")
@@ -751,20 +791,41 @@ class _WorkerBridge:
         return bool(
             self._ask(
                 lambda: ConfirmModal(
-                    "Confirm before spend",
-                    "Run the LLM summary pass over the keep set?\n"
-                    "[dim]This is the expensive step — one LLM call per email.[/]",
-                    yes_hint="run it",
+                    "Let the AI read every email?",
+                    "This is the slow step: one AI call per email in the folders you "
+                    "ticked. Emails the AI already read are skipped, so stopping and "
+                    "running again later loses nothing.",
+                    yes_hint="start",
+                    no_hint="stop here",
                 )
             )
         )
 
     def confirm_prune(self, preview: List[str]) -> bool:
         # Preview lines quote email senders/subjects — escape their brackets.
-        body = "About to blacklist these as noise (sample):\n\n" + "\n".join(
-            f"  [dim]{escape(line)}[/]" for line in preview
+        if self._screen.ai_judges_everything():
+            if_no = (
+                "No changes nothing about this run: the AI's confident junk is left "
+                "out of search either way."
+            )
+        else:
+            if_no = "No keeps them: they will be searchable along with everything else."
+        body = (
+            "These emails were judged junk (a sample is shown). Yes adds them to the "
+            "settings' skip list, so later runs and rebuilds pass over them too. "
+            "Nothing is deleted from your mailbox, and the skip list is a text file "
+            f"you can edit.\n[dim]{if_no}[/]\n\n"
+        ) + "\n".join(f"  [dim]{escape(line)}[/]" for line in preview)
+        return bool(
+            self._ask(
+                lambda: ConfirmModal(
+                    "Put the junk on the skip list?",
+                    body,
+                    yes_hint="add to skip list",
+                    no_hint="skip this step",
+                )
+            )
         )
-        return bool(self._ask(lambda: ConfirmModal("Prune", body, yes_hint="blacklist")))
 
 
 _STEP_ICON = {
@@ -812,9 +873,11 @@ class RunScreen(Screen[int]):
                     yield Static("", id=f"step-{i}", classes="step-row")
             with Vertical(id="run-log-panel"):
                 yield Static("[b]Log[/]", classes="panel-title")
-                yield RichLog(id="run-log", markup=True, wrap=True)
+                # min_width defaults to 78, wider than this panel on most screens,
+                # so long lines were cut off at the edge instead of wrapping.
+                yield RichLog(id="run-log", markup=True, wrap=True, min_width=20)
         yield ProgressBar(total=len(self._planned), show_eta=False, id="run-progress")
-        yield Static("[dim]running…[/]", id="run-status")
+        yield Static("[dim]running… the log on the right shows each step.[/]", id="run-status")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -828,12 +891,17 @@ class RunScreen(Screen[int]):
     def mark_step(self, index: int, status: str) -> None:
         step = self._planned[index]
         row = self.query_one(f"#step-{index}", Static)
-        text = f" {_STEP_ICON[status]} [bold]{step.verb:<10}[/] [dim]{escape(step.does)}[/]"
+        text = f" {_STEP_ICON[status]} {escape(step.does)}"
         if status == "skipped":
-            text = f" {_STEP_ICON[status]} [dim]{step.verb:<10} {escape(step.does)} (skipped)[/]"
+            text = f" {_STEP_ICON[status]} [dim]{escape(step.does)} (skipped)[/]"
         row.update(text)
         if status in ("done", "skipped"):
             self.query_one("#run-progress", ProgressBar).advance(1)
+
+    def ai_judges_everything(self) -> bool:
+        """Does this run's recipe have the AI read every email? Then the index
+        leaves its confident junk out whether or not prune writes a skip list."""
+        return any(step.verb == "summarize" for step in self._planned)
 
     def write_log(self, message: str) -> None:
         self.query_one("#run-log", RichLog).write(message)
@@ -842,19 +910,30 @@ class RunScreen(Screen[int]):
         self._exit_code = code
         status = self.query_one("#run-status", Static)
         if code == 0:
-            status.update(
-                f"[green]✓ persona '{self._persona.name}' complete[/] — profile saved to "
-                f"{escape(self._state.profile_path)} — press [b]enter[/] to exit"
+            collection = escape(self._state.profile.collection)
+            self.write_log(
+                f"\n[green b]Done.[/] Your mail is searchable in [b]{collection}[/].\n"
+                f'Ask it a question:  ./mailrag ask "…" --profile '
+                f"{escape(self._state.profile_path)}\n"
+                "Let AI agents search it: connect them to the MCP server "
+                "(docs/MCP_SERVER.md).\n"
+                "[dim]To keep it up to date as new mail arrives, see docs/SYNC.md.[/]"
             )
+            status.update("[green]✓ done[/], your choices are saved. Press [b]enter[/] to exit.")
         else:
-            status.update("[yellow]run stopped[/] — press [b]enter[/] to exit")
+            status.update(
+                "[yellow]Stopped.[/] Your choices so far are saved. Run the wizard again to "
+                "carry on: work the AI already did is not repeated. Press [b]enter[/] to exit."
+            )
 
     # -- the worker ---------------------------------------------------------------
 
     def _execute(self) -> None:
         """Worker-thread entry: run the plan; every UI touch goes through the bridge."""
-        make_progress_bars_safe()
         try:
+            # Inside the try: if it ever raised, the worker would exit without
+            # _finish and leave the screen on "running…" for good.
+            make_progress_bars_safe()
             code = flow.execute_plan(
                 self._state.profile,
                 self._state.profile_path,
@@ -869,7 +948,10 @@ class RunScreen(Screen[int]):
 
     def action_finish(self) -> None:
         if self._exit_code is None:
-            self.notify("Still running — Ctrl+Q force-quits.", severity="warning")
+            self.notify(
+                "Still running. Ctrl+Q stops it now; summaries already written are kept.",
+                severity="warning",
+            )
             return
         self.dismiss(self._exit_code)
 
@@ -976,13 +1058,13 @@ class MailragWizardApp(App[int]):
     /* Run */
     #run-body { height: 1fr; padding: 1 2; }
     #run-steps-panel {
-        width: 48;
+        width: 52;
         border: round $primary;
         background: $surface;
         padding: 1 2;
         margin-right: 2;
     }
-    .step-row { height: 1; }
+    .step-row { height: auto; padding-bottom: 1; }
     #run-log-panel {
         width: 1fr;
         border: round $secondary;
@@ -1006,6 +1088,7 @@ class MailragWizardApp(App[int]):
     }
     .dialog-wide { width: 96; }
     .dialog-title { padding-bottom: 1; }
+    .dialog-intro { padding-bottom: 1; }
     .dialog-scroll { max-height: 24; height: auto; }
     .dialog-keys { padding-top: 1; color: $text-muted; }
     #rubric-list { background: $surface; border: none; max-height: 12; }

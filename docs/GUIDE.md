@@ -80,24 +80,28 @@ of screens. A breadcrumb at the top always shows where you are:
 ✓ Welcome  ✓ Persona  ✓ Model  [ Scope ]  Review  Run
 ```
 
-1. **Welcome.** The profile you are onboarding, meaning mailbox root, rubric and
-   collection, plus the recommended persona if you ran `scan`. `enter` begins.
+1. **Welcome.** What the wizard is about to do, in three lines, and the profile it
+   works on: mail folder, junk rules (the rubric), search index (the collection), plus
+   the recommended recipe if you ran `scan`. `enter` begins.
 
    ![Welcome screen — the profile facts and the scan-recommended persona](images/tui/welcome.svg)
-2. **Persona.** The personas on the left, a live preview of the highlighted recipe on
-   the right: every verb with a colour-coded cost badge from `free` to `gpu`, and the
-   `scan` recommendation starred and pre-highlighted.
+2. **Persona.** The personas listed by plain names: *Quick, no AI* (`llm-none`),
+   *Balanced* (`llm-verify`) and *Thorough, AI reads everything* (`llm-all`). The
+   highlighted one is previewed on the right, every step in plain words with a
+   colour-coded cost badge from `free` to `GPU, minutes`, and the `scan` recommendation
+   is starred and pre-highlighted. The step wording lives in `personas.yaml`.
 
    ![Persona picker — persona list on the left, the highlighted recipe with cost badges on the right](images/tui/persona.svg)
 3. **Model.** Only for LLM personas, and skipped when you passed `--model`. It asks for
-   the model id your OpenAI-compatible endpoint serves, and rejects blank input inline.
+   the model name your local server lists (it says where to find it in LM Studio), and
+   rejects blank input inline.
 
    ![Model screen — an input for the LLM model id served by your OpenAI-compatible endpoint](images/tui/model.svg)
 4. **Scope.** The folder picker, as a navigable tree of your mailbox: top-level folders,
    their subfolders, plus "messages directly in …" rows. `space` includes or excludes,
    checking a folder covers all its subfolders and greys the children out, and a rule
-   counter confirms what you have built. `c` continues, and you cannot proceed with
-   nothing selected.
+   counter of ticked folders confirms what you have built. `c` continues, and you
+   cannot proceed with nothing selected.
 
    ![Scope screen — the mailbox folder tree with a checked folder covering its greyed-out subfolders](images/tui/scope.svg)
 5. **Review.** Everything on one screen before anything runs: persona, model, scope
@@ -106,8 +110,10 @@ of screens. A breadcrumb at the top always shows where you are:
 
    ![Review screen — the collected configuration on the left, the exact planned steps on the right](images/tui/review.svg)
 6. **Run.** The recipe as a live ladder (`○` pending, `▶` running, `✓` done) next to a
-   streaming log, with an overall progress bar. Long steps no longer freeze the
-   terminal, because the pipeline runs in a worker while the UI stays live.
+   streaming log that reports each step's result as a sentence, with an overall
+   progress bar. Long steps don't freeze the terminal, because the pipeline runs in a
+   worker while the UI stays live. When it finishes, the log says how to search the
+   mail and how to connect agents. If it stops, rerunning the wizard carries on.
 
    ![Run screen — the recipe as a completed step ladder next to a streaming log, with a full progress bar](images/tui/run.svg)
 
@@ -116,13 +122,15 @@ of screens. A breadcrumb at the top always shows where you are:
 Two human checkpoints interrupt the run as modal dialogs, and keep you in control:
 
 - **The calibrate gate.** Before any full LLM run you see a *sample* of what the rubric
-  would flag, meaning the suspected over-drops and under-drops. If it looks wrong,
+  would flag, in two lists: *marked junk, but might be a real record* (suspected
+  over-drops) and *kept, but might be junk* (suspected under-drops). Repeated
+  notifications collapse into one row with a count. If it looks wrong,
   **re-tune** with `r` to pick another rubric and re-calibrate, then re-check. Only
   **proceed** with `p` once you trust it. This gate exists because a mis-tuned rubric
   once cost about 8 hours of LLM time on the wrong call.
 - **Confirm-before-spend.** Right before the expensive summary pass, mailrag asks. So
-  does `prune`, which shows a sample of what it would blacklist before writing
-  anything.
+  does `prune`, which shows a sample of what it would put on the skip list (the
+  blacklist) and says what answering no means for the recipe you chose.
 
 > The screenshots above are auto-generated from the real app, driven headlessly against a
 > **synthetic** demo mailbox with no real mail, no Qdrant and no LLM, so they stay in sync

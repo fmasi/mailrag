@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from src.tui.app import (
@@ -400,7 +401,7 @@ class TestRunTuiGuards(unittest.TestCase):
 class TestDescribeRule(unittest.TestCase):
     def test_prefix_rule(self):
         self.assertEqual(
-            _describe_rule({"type": "prefix", "value": "Inbox/"}), "Inbox/ (and subfolders)"
+            _describe_rule({"type": "prefix", "value": "Inbox/"}), "Inbox/ (and everything inside)"
         )
 
     def test_direct_root_files_rule(self):
@@ -484,6 +485,42 @@ class TestProgressBarsUnderTheFullScreenApp(unittest.TestCase):
         ):
             app_mod.RunScreen._execute(fake)
         self.assertEqual(calls, ["guard", "steps"])
+
+    def test_a_failing_guard_still_ends_the_run(self):
+        """Otherwise the screen would say "running…" forever."""
+        from src.tui import app as app_mod
+
+        finished = []
+        fake = mock.Mock()
+        fake.app.call_from_thread = lambda fn, *a: (
+            finished.append(a) if fn is fake._finish else None
+        )
+
+        def broken():
+            raise RuntimeError("no tqdm")
+
+        with mock.patch.object(app_mod, "make_progress_bars_safe", broken):
+            app_mod.RunScreen._execute(fake)
+        self.assertEqual(finished, [(1,)])
+
+
+class TestPruneWording(unittest.TestCase):
+    """What "no" means at the prune gate depends on the recipe: after the AI
+    has read everything, its confident junk is out of search either way; on the
+    no-AI recipe, saying no leaves the flagged newsletters searchable."""
+
+    def _screen(self, verbs):
+        from src.tui import app as app_mod
+
+        fake = mock.Mock()
+        fake._planned = [SimpleNamespace(verb=v) for v in verbs]
+        return app_mod.RunScreen.ai_judges_everything(fake)
+
+    def test_with_the_ai_reading_everything(self):
+        self.assertTrue(self._screen(["scope", "calibrate", "summarize", "prune", "index"]))
+
+    def test_without_it(self):
+        self.assertFalse(self._screen(["scope", "tag", "prune", "index"]))
 
 
 if __name__ == "__main__":

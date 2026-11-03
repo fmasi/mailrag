@@ -397,3 +397,53 @@ class TestShortResult(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDescribeResult(unittest.TestCase):
+    """The run log speaks in sentences, not in Python reprs."""
+
+    def test_measure_report(self):
+        from src.pipeline.profile import ProfileReport
+
+        text = flow.describe_result(
+            ProfileReport(percentiles={50: 1}, mean=1.0, bodies=457, suggested_chunk_size=704)
+        )
+        self.assertEqual(
+            text, "457 emails measured; text will be split into pieces of about 704 tokens"
+        )
+        self.assertNotIn("ProfileReport", text)
+
+    def test_summary_counts(self):
+        text = flow.describe_result({"cached": 3, "done": 10, "error": 0, "unavailable": 0})
+        self.assertEqual(text, "AI read 10 emails, 3 were already done")
+
+    def test_summary_failures_say_what_to_do(self):
+        text = flow.describe_result({"cached": 0, "done": 1, "error": 2, "unavailable": 0})
+        self.assertIn("2 failed (run again to retry them)", text)
+
+    def test_index_result(self):
+        from src.indexing.contextual_index import BuildResult
+
+        text = flow.describe_result(BuildResult(collection="box", kept_emails=416, chunks=959))
+        self.assertEqual(text, "416 emails are now searchable in 'box' (959 pieces)")
+
+    def test_scope_rules(self):
+        rules = [{"type": "prefix", "value": "a/"}, {"type": "prefix", "value": "b/"}]
+        self.assertEqual(flow.describe_result(rules), "2 folder selection(s) saved")
+
+    def test_a_count_means_the_skip_list_only_for_prune(self):
+        self.assertEqual(flow.describe_result(5, "prune"), "5 emails added to the skip list")
+        self.assertEqual(flow.describe_result(5, "tag"), "5")
+
+    def test_unknown_results_fall_back_to_one_line(self):
+        self.assertEqual(flow.describe_result({"x": "a\n b"}), "{'x': 'a\\n b'}")
+
+
+class TestPersonaCardsCarryPlainSteps(unittest.TestCase):
+    def test_every_step_has_a_plain_description(self):
+        for card in flow.persona_cards(load_registry()):
+            self.assertEqual(len(card.does), len(card.verbs))
+            for does in card.does:
+                self.assertTrue(does)
+                for jargon in ("Qdrant", "BGE", "rubric", "LLM", "verb", "corpus"):
+                    self.assertNotIn(jargon, does)
