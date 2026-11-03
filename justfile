@@ -12,8 +12,8 @@ mypy_version := "2.1.0"
 # `allow-ghsas`). Each one is an advisory with NO fixed release; the reason sits next to it in
 # ci.yml and in pyproject's security-floor block.
 # Drop an entry as soon as a fix ships (and raise the floor in pyproject.toml).
-#   PYSEC-2026-3740 = GHSA-8mgp-746c-j5xp / CVE-2026-81726: nltk <= 3.10.3 (the latest).
-audit_ignores := "--ignore-vuln PYSEC-2026-3740"
+# None today: the last one, nltk's PYSEC-2026-3740, was fixed in 3.10.4.
+audit_ignores := ""
 
 default: ci
 

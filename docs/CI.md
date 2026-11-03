@@ -8,7 +8,7 @@ pinned to a commit SHA.
 | Gate | Required? | What it enforces | Run locally |
 |------|-----------|------------------|-------------|
 | `pytest` | ✅ required | Full test suite plus a coverage floor of **85%** (currently ~90%) | `just test` |
-| `pip-audit` | ✅ required | Known CVEs in the locked deps (OSV). The only `--ignore-vuln` entries are advisories with **no fixed release**, each with its reason in `ci.yml` (today: nltk GHSA-8mgp-746c-j5xp) | `just audit` |
+| `pip-audit` | ✅ required | Known CVEs in the locked deps (OSV). The only `--ignore-vuln` entries are advisories with **no fixed release**, each with its reason in `ci.yml` (none today) | `just audit` |
 | `CodeQL (python)` | ✅ required | Static security analysis of `src/`, `scripts/` and `tests/`, `default` query suite | (runs on GitHub) |
 | `CodeQL (actions)` | ✅ required | Static analysis of the workflow files themselves | (runs on GitHub) |
 | `review / review-gate` | ✅ required | Green only while the PR carries `claude-reviewed` and not `claude-blocked`: the one Claude review passed with no Critical finding | (see below) |
