@@ -222,8 +222,8 @@ Reranking and noise cleanup are not measured by the demo either. Absolute figure
 about 3pp between runs because Qdrant rebuilds its HNSW graph each time, so read the
 direction and the significance rather than the third digit.
 
-Its runtime has not been timed. Expect it to be slower than `just bench` on CPU, which
-carries the 9x penalty measured above.
+Its runtime has not been timed. On CPU, expect a slowdown like the 9x measured for
+`just bench` above.
 
 **What remains private.** Thread reconstruction and contextual summaries are now both
 publicly demonstrated, on a corpus anyone can download. What is still author-reported is
