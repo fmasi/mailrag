@@ -101,7 +101,7 @@ it re-reads the *actual* query against the *actual* email, it pushes drifted-in 
 >   [`CLAIMS.md`](CLAIMS.md) row R6b.
 > - **Contextual retrieval (`C′`) was the *best* arm** (ranked and end-to-end) — the "drift"
 >   penalty did not reproduce; **`C′` is kept, not retired.**
-> - **Thread reconstruction is the headline win — recall@5 62% → 93%** (thread-recall): match a
+> - **Thread reconstruction is the headline win — recall@5 64% → 93%** (thread-recall, [`CLAIMS.md`](CLAIMS.md) R4): match a
 >   small unit, answer from its whole thread; recommended stack is **`C′` + expand top ~1–3 threads**.
 > - **Retrieval coverage (~76%), not the answer model, is the ceiling.**
 
@@ -295,8 +295,9 @@ trusts cross-method consensus over any single ranker's confidence.
 
 ### In this project
 
-bge-m3 gives us dense + sparse from one pass; Qdrant stores both as named vectors and runs
-RRF fusion server-side. The cross-encoder **reranker** (a later section) then re-orders the
+bge-m3 gives us dense + sparse from one pass; Qdrant stores both as named vectors, and
+RRF fuses the two legs client-side, through LlamaIndex's `hybrid_fusion_fn` hook (see
+[below](#hybrid--reciprocal-rank-fusion-rrf)). The cross-encoder **reranker** (a later section) then re-orders the
 fused shortlist for final precision. The pipeline becomes:
 
 ```
@@ -356,18 +357,20 @@ practical levels. Still, ColBERT indexes are heavier than single-vector dense.
 
 ### How it fits *this* project
 
-bge-m3 emits ColBERT multi-vectors in the same forward pass as dense + sparse. Because of the
-storage cost, the pragmatic use here is **reranking, not first-stage search**: let dense +
-sparse + RRF produce a shortlist, then apply ColBERT MaxSim (or a cross-encoder) to reorder
-the top candidates. So our pipeline becomes:
+bge-m3 can emit ColBERT multi-vectors in the same forward pass as dense + sparse, but
+mailrag does **not** use them today: the embedder asks for dense and sparse only
+(`return_colbert_vecs=False` in `src/ingest/embedder.py`), and the optional reranker is a
+cross-encoder. Because of the storage cost, the pragmatic use for ColBERT would be
+**reranking, not first-stage search**: let dense + sparse + RRF produce a shortlist, then
+apply ColBERT MaxSim to reorder the top candidates:
 
 ```
-query → dense + sparse retrieve → RRF fuse (top ~50) → ColBERT / cross-encoder rerank (top ~10) → LLM
+query → dense + sparse retrieve → RRF fuse (top ~50) → ColBERT rerank (top ~10) → LLM
 ```
 
-ColBERT is the "free" reranker we already get from bge-m3; a dedicated cross-encoder
-(e.g. bge-reranker-v2-m3) is the heavier, often higher-accuracy alternative — we'll compare
-both in the reranking section.
+That would make ColBERT a "free" reranker from bge-m3, against the heavier dedicated
+cross-encoder (bge-reranker-v2-m3) that mailrag ships. It is an option, not something
+measured here.
 
 > **Interview soundbite:** *"ColBERT keeps one contextual vector per token instead of one per
 > document, and scores with MaxSim — each query token grabs its best-matching document token.
@@ -375,7 +378,8 @@ both in the reranking section.
 > query-document interaction is deferred to a cheap MaxSim step. It sits between a bi-encoder
 > (one vector, fast, coarse) and a cross-encoder (joint encoding, accurate, unscalable). The
 > cost is storage — N vectors per doc — which ColBERTv2 compresses with residual encoding and
-> PLAID. bge-m3 gives me ColBERT vectors for free, so I use them to rerank a hybrid shortlist."*
+> PLAID. bge-m3 gives me ColBERT vectors for free, so they are the natural way to rerank a
+> hybrid shortlist."*
 
 ---
 
@@ -442,7 +446,7 @@ specifically, MLX is dense-only** (no learned sparse), which is why a hybrid bui
   natural choice: one server returns dense + learned-sparse + ColBERT; push batch size up
   (UMA has headroom); try `PYTORCH_MPS_PREFER_METAL=1`.
 - **Max-performance option:** split — **MLX-fp16 for dense** (hits the M5 tensor units) +
-  Infinity/CPU for sparse. More plumbing; only worth it if a quick benchmark shows MLX is
+  PyTorch-MPS for sparse. More plumbing; only worth it if a quick benchmark shows MLX is
   dramatically faster. Quality is identical either way, so benchmark and decide empirically.
 
 > **Interview soundbite:** *"On Apple Silicon, embedding-backend choice is about speed, not
@@ -450,7 +454,7 @@ specifically, MLX is dense-only** (no learned sparse), which is why a hybrid bui
 > architecture, but MLX is built for it (lazy graph, per-op device, zero-copy) and is the
 > only stack that drives the M5's per-core Neural Accelerators via Metal 4 TensorOps. The
 > trade-off is that for bge-m3, MLX only does dense, so a hybrid index that needs learned
-> sparse runs on a PyTorch-MPS server like Infinity instead."*
+> sparse stays on PyTorch-MPS. Here that runs in-process, with no server."*
 
 ---
 
@@ -623,6 +627,6 @@ thread-aware retrieval.
   `C′` + expand top ~1–3 threads, reranker off; a small model suffices; retrieval coverage is
   the ceiling.**
 - **▶ Next lead — lift the retrieval ceiling (~76%).** The eval showed the answer model isn't
-  the bottleneck; retrieval is. Open issues: per-thread summaries (#11), coverage diagnosis
-  (#12), summary-prompt quality (#13), chunk size (#14).
+  the bottleneck; retrieval is. The coverage diagnosis (#12) is done (`EXPERIMENTS.md` §10).
+  Still open: per-thread summaries (#11), summary-prompt quality (#13), chunk size (#14).
 - **Chunking strategy, RAPTOR, late chunking** — deeper theory sections still to write.

@@ -91,7 +91,7 @@
       <span class="badge">bge-m3 hybrid</span>
       <span class="badge ok">self-hosted</span>
       <span class="badge">recall@5 45.6→93.3%</span>
-      <span class="badge">1500 tests</span>
+      <span class="badge">~1,970 tests</span>
       <span class="badge">Apache-2.0</span>
     </div>
     <div class="cta">
@@ -109,7 +109,7 @@
   <span class="c">  top-5 messages give you 52.6% of it, thread expansion 100%</span>
 <span class="p">$</span> ./mailrag ask <span class="o">"who approved the Q3 budget, and when?"</span>
   <span class="c">→ retrieves the matching message, expands to its full thread,</span>
-  <span class="c">  and answers from the whole conversation — with citations.</span>
+  <span class="c">  and answers from the whole conversation.</span>
 
 <span class="p">$</span> just bench               <span class="c"># check the retrieval claim yourself — no LLM, no key</span>
   <span class="c">→ dense         R@5  94.4 [91.6, 96.4]</span>
@@ -134,12 +134,12 @@
     <h2>What it does</h2>
     <div class="grid">
       <div class="card"><h3>Thread-aware answers</h3><p>The flagship: match a single message, then answer from its <em>entire</em> conversation. Lifts recall@5 from <b>64.2% (message-level) → 93.3% (thread-level)</b>. Biggest single lever in the system, and it needs no LLM.</p></div>
-      <div class="card"><h3>Hybrid retrieval</h3><p>bge-m3 dense + learned sparse vectors, RRF-fused in Qdrant. Gets both the concept <em>and</em> the rare exact token: acronyms, IDs, reference numbers.</p></div>
+      <div class="card"><h3>Hybrid retrieval</h3><p>bge-m3 dense + learned sparse vectors, fused with RRF. Gets both the concept <em>and</em> the rare exact token: acronyms, IDs, reference numbers.</p></div>
       <div class="card"><h3>Email-aware preprocessing</h3><p>Reply-chain stripping, calendar-invite collapsing, noise/newsletter filtering, and exact-text chunk dedup.</p></div>
       <div class="card"><h3>Attachments, searchable</h3><p>Text pulled from PDFs, Office files, HTML and images, with OCR for scans (local Tesseract or a local vision model). Each attachment is chunked by its own structure: spreadsheet rows with a repeated header, PDF pages, deck slides. A number buried in a 500-row sheet stays findable, and every chunk traces back to its email and thread.</p></div>
       <div class="card"><h3>Local-LLM summaries</h3><p>Optional <code>summarize</code> step: a local LLM writes a per-email summary + noise judgement, content-addressed and cached so re-runs are free. Local by default, and it points at <em>any</em> OpenAI-compatible server (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI) with one env var.</p></div>
-      <div class="card"><h3>Stays current</h3><p>A collection built from a backup is a snapshot that quietly rots. <code>./mailrag sync</code> pulls new mail from a live account and indexes only the delta, so the index runs 1–2 days fresh instead of frozen at its export date. Deterministic point ids mean re-indexing <em>replaces</em> rather than duplicates, and the content-addressed cache means only new mail costs an LLM call.</p></div>
-      <div class="card"><h3>Pluggable loaders &amp; sources</h3><p>The public Enron corpus and local <code>.eml</code> archives sit behind one <code>EmailLoader</code>. IMAP and Maildir sit behind a <code>MessageSource</code> seam with opaque cursors, so Gmail, JMAP or Graph slot in without a schema change.</p></div>
+      <div class="card"><h3>Stays current</h3><p>A collection built from a backup is a snapshot that quietly rots. <code>./mailrag sync</code> pulls new mail from a live account and indexes only the delta, so the index stays as fresh as the schedule you set instead of frozen at its export date. Deterministic point ids mean re-indexing <em>replaces</em> rather than duplicates, and the content-addressed cache means only new mail costs an LLM call.</p></div>
+      <div class="card"><h3>Pluggable loaders &amp; sources</h3><p>The public Enron corpus and local <code>.eml</code> archives sit behind one <code>EmailLoader</code>. IMAP and Maildir sit behind a <code>MessageSource</code> seam with opaque cursors, so the Gmail API, JMAP or Graph slot in without a schema change.</p></div>
       <div class="card"><h3>Measured methodology</h3><p>A 360-query eval that prices every technique, controls for confounds and reports significance. In several cases it overturned the intuitive choice.</p></div>
       <div class="card"><h3>Agents connect over MCP</h3><p>A multi-collection, read-only <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server (<code>./mailrag mcp</code>, MCP SDK v2): any agent can discover your indexed corpora, search and fetch whole threads, regex-grep the raw <code>.eml</code> corpus where embeddings are blind, ask grounded questions, and read attachment text. Seven tools, no internals exposed.</p></div>
     </div>
@@ -172,9 +172,10 @@
          default. (Query-side HyDE never beat the raw query on this entity-rich corpus either.) Both stay
          in-tree. Every published figure, including this correction, is tracked in the
          <a href="https://github.com/fmasi/mailrag/blob/main/docs/CLAIMS.md">claims register</a>.</li>
-      <li><b>Retrieval is the ceiling, well before the model is.</b> With the answer in context, even a
-         4 B model answered ~88% correctly. The lost points are queries where retrieval never surfaced
-         the thread at all. Model size came out second-order.</li>
+      <li><b>Retrieval is the ceiling, well before the model is.</b> With the answer in context, the
+         answer model was right about 88% of the time, and a 4 B model essentially tied one six times
+         its size. The lost points are queries where retrieval never surfaced the thread at all. Model
+         size came out second-order.</li>
     </ul>
   </section>
 
@@ -184,18 +185,20 @@
     <picture>
       <!-- dark mode keeps the crisp dark diagram; light mode (and no-preference) gets the light one -->
       <source srcset="architecture.png" media="(prefers-color-scheme: dark)">
-      <img src="architecture-light.png" alt="mailrag pipeline: loaders (.eml / Enron / IMAP sync) to clean, chunk, embed (bge-m3), Qdrant hybrid store, thread-aware retrieval, and a local-LLM answer — with llm-none / llm-verify / llm-all personas, all on your own machine" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
+      <img src="architecture-light.png" alt="mailrag pipeline: loaders (.eml / Enron / IMAP sync) to clean, chunk, embed (bge-m3), Qdrant hybrid store, thread-aware retrieval, and a local-LLM answer — with llm-none / llm-verify / llm-all recipes, all on your own machine" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
     </picture>
   </section>
 
   <section>
     <h2>The guided wizard</h2>
     <p class="muted" style="margin:0 0 14px"><code>./mailrag wizard</code> is a full-screen terminal app
-       (<a href="https://textual.textualize.io/">Textual</a>): pick a cost-ordered persona, scope your
-       folders on a tree, review the exact plan, then watch every step run live. Two human checkpoints —
-       the calibrate gate and confirm-before-spend — keep you in control before any LLM cost.</p>
+       (<a href="https://textual.textualize.io/">Textual</a>): pick a recipe, from Quick (no AI) to
+       Thorough (AI reads everything), scope your folders on a tree, review the exact plan, then watch
+       every step run live. Every recipe ends by storing the attachments so your agents can open them.
+       Two human checkpoints — the calibrate gate and confirm-before-spend — keep you in control before
+       any LLM cost.</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
-      <img src="images/tui/persona.svg" alt="The persona picker: a list of cost-ordered personas on the left and a live preview of the highlighted recipe — every verb with a colour-coded cost badge — on the right" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
+      <img src="images/tui/persona.svg" alt="The recipe picker: a list of cost-ordered recipes on the left and a live preview of the highlighted recipe — every verb with a colour-coded cost badge — on the right" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
       <img src="images/tui/run.svg" alt="The live run screen: the recipe as a step ladder with tick marks on the left and a streaming log on the right, an overall progress bar beneath" style="width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block">
     </div>
     <p class="muted" style="margin:12px 0 0;font-size:13px">Screenshots are auto-generated from the real
@@ -256,7 +259,8 @@
        45.6→93.3 ladder was measured on a 32,000-email archive and stays author-reported. Every figure
        on this page is tracked in the
        <a href="https://github.com/fmasi/mailrag/blob/main/docs/CLAIMS.md">claims register</a> with the
-       script that produced it and the date it last ran. Full write-up in the
+       script that produced it and the date it last ran. The <a href="methods.html">methods page</a>
+       walks through how the evidence was gathered. Full write-up in the
        <a href="https://fmasi.eu/blog/email-rag-retrieval/">benchmark post</a> and the
        <a href="https://github.com/fmasi/mailrag/blob/main/docs/CASE_STUDY.md">case study</a>.</p>
   </section>
@@ -264,8 +268,8 @@
   <section>
     <h2>How it's kept honest</h2>
     <div class="grid">
-      <div class="card"><h3>1500 tests</h3><p>A <code>unittest</code>-style suite covering the pipeline, the retrieval seams, the MCP tools and the sync machinery. A green <code>pytest</code> is a required check before anything reaches <code>main</code>.</p></div>
-      <div class="card"><h3>Independent CI gates</h3><p><code>ruff</code> (lint + format), <code>mypy</code>, <code>pytest</code>, <code>pip-audit</code> and CodeQL each run as a separately named status. The <code>pip-audit</code> ignore list is deliberately empty. Advisories get fixed or pinned around, never waved through.</p></div>
+      <div class="card"><h3>~1,970 tests</h3><p>A <code>unittest</code>-style suite covering the pipeline, the retrieval seams, the MCP tools and the sync machinery. A green <code>pytest</code> is a required check before anything reaches <code>main</code>.</p></div>
+      <div class="card"><h3>Independent CI gates</h3><p>Lint (<code>ruff</code>, <code>mypy</code>, secret and workflow scans), <code>pytest</code>, <code>pip-audit</code>, dependency review and CodeQL each run as a separately named required check, and one Claude review gates the merge. The <code>pip-audit</code> ignore list is deliberately empty. Advisories get fixed or pinned around, never waved through.</p></div>
       <div class="card"><h3>Supply chain, pinned on purpose</h3><p>The Qdrant server image is pinned by digest; the client is capped below a release that silently removed a symbol. Every pin carries an in-tree comment saying why it exists and when to lift it. Zero open Dependabot alerts.</p></div>
     </div>
   </section>
@@ -279,8 +283,8 @@
        <a href="https://github.com/fmasi/mailrag/blob/main/docs/ROADMAP.md">roadmap</a> close.</p>
     <div class="grid">
       <div class="card"><h3>MCP server — shipped ✓</h3><p>A multi-collection stdio server exposes seven tools: <code>list_collections</code>, <code>search_email</code>, <code>get_thread</code> (an exact key lookup rather than a second retrieval pass), <code>grep_email</code>, <code>answer_question</code>, and attachment list/fetch. Any agent, yours or a teammate's, can query your mail without touching the internals.</p></div>
-      <div class="card"><h3>Live ingestion — shipped ✓</h3><p><code>./mailrag sync</code> moves mailrag from one-time imports to incremental ingest: a <em>living</em> context source, not a static snapshot. New mail is spooled as <code>.eml</code> and run through the <em>same</em> pipeline, so the cleaning rubric never drifts. Each stage degrades independently. Mail is still fetched when the LLM is down and still judged when the vector store is down, and the run picks up where it left off next time. On macOS a launchd agent keeps it running unattended.</p></div>
-      <div class="card"><h3>Guided TUI — shipped ✓</h3><p><code>./mailrag wizard</code> is now a full-screen terminal app (Textual): pick a persona, scope folders on a tree, review the plan, and watch the run live, with the calibrate and confirm-before-spend gates as dialogs.</p></div>
+      <div class="card"><h3>Live ingestion — shipped ✓</h3><p><code>./mailrag sync</code> moves mailrag from one-time imports to incremental ingest: a <em>living</em> context source, not a static snapshot. New mail is spooled as <code>.eml</code> and run through the <em>same</em> pipeline, so the cleaning rubric never drifts. Each stage degrades independently. Mail is still fetched when the LLM is down and still judged when the vector store is down, and the run picks up where it left off next time. A launchd agent on macOS, or a systemd timer on Linux, keeps it running unattended.</p></div>
+      <div class="card"><h3>Guided TUI — shipped ✓</h3><p><code>./mailrag wizard</code> is now a full-screen terminal app (Textual): pick a recipe, scope folders on a tree, review the plan, and watch the run live, with the calibrate and confirm-before-spend gates as dialogs.</p></div>
     </div>
   </section>
 

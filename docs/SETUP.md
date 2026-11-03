@@ -32,18 +32,20 @@ server — there is no separate build/test split:
 
 ```bash
 conda create -y -n mailrag python=3.11
-conda run -n mailrag pip install -r requirements.txt
-conda run -n mailrag python -m pytest tests/ -q     # expect: all pass, a handful of opt-in skips
+conda activate mailrag
+just install                         # poetry install --with dev --all-extras --no-interaction --no-root
+python -m pytest tests/ -q           # expect: all pass, a handful of opt-in skips
 ```
 
-`requirements.txt` already pulls `FlagEmbedding` (bge-m3), `textual` (the wizard),
-and `mcp` (the server), so this single env can build, query, run the TUI, and serve
-MCP. The project is Poetry **non-package mode** (`package-mode = false`), so
-`pip install -e .` will fail — don't use it. `pyproject.toml` / `poetry.lock` are
-the source of truth for exact pinned versions (and what CI installs), but the
-conda + `requirements.txt` path above is the supported local install.
+Poetry itself comes from `pipx install poetry` or from conda-forge into the env
+(`conda install -n mailrag -c conda-forge poetry`). With the env active, `poetry install`
+installs into it. `pyproject.toml` and `poetry.lock` pin every version, and this is the
+same install CI runs. The main dependencies already include `FlagEmbedding` (bge-m3),
+`textual` (the wizard), `mcp` (the server) and the attachment extractors, so this single
+env can build, query, run the TUI, and serve MCP. The project is Poetry **non-package
+mode** (`package-mode = false`), so `pip install -e .` will fail. Don't use it.
 
-> **Cached bge-m3 needs `HF_HUB_OFFLINE=1`.** The first build/query downloads ~2 GB
+> **Cached bge-m3 needs `HF_HUB_OFFLINE=1`.** The first build/query downloads a few GB
 > of bge-m3 weights into your Hugging Face cache. After that, set `HF_HUB_OFFLINE=1`
 > so FlagEmbedding loads straight from cache instead of contacting the Hub on every
 > run — faster, and it works with no network. Export it in your shell profile, or
@@ -84,7 +86,7 @@ For pointing the LLM / embedder / vector store at a specific backend, see
 ## 5. Quick demo (public data)
 
 ```bash
-just demo        # starts Qdrant, then builds an index over 100 Enron emails and answers example queries
+just demo        # starts Qdrant, builds a plain and a contextual index over 1,200 Enron emails, scores both
 ```
 
 `just demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh) (bring up Qdrant →
@@ -117,9 +119,10 @@ HF_HUB_OFFLINE=1 ./mailrag run --profile ~/rag_eml.profile.json \
 #    add --limit N for a fast end-to-end test on a small sample
 ```
 
-The persona owns the ordering (`tag → scan → calibrate → summarize → prune → index`);
-`index` is the only step that actually drops anything, and your raw `.eml` files stay
-on disk, so every choice is reversible. `--model` is required for any persona with LLM
+The persona owns the ordering (for `llm-all`: `scope → measure → calibrate → summarize →
+prune → index → attach`. Every recipe in [`personas.yaml`](../personas.yaml) ends with
+`index → attach`). `index` is the only step that actually drops anything, and your raw
+`.eml` files stay on disk, so every choice is reversible. `--model` is required for any persona with LLM
 steps. When it finishes you have a queryable collection (see §8) — ask it with
 `./mailrag ask` or serve it over MCP (see [`MCP_SERVER.md`](MCP_SERVER.md)).
 
@@ -152,8 +155,7 @@ PYTHONPATH=. python3 tests/test_llm_cache.py
 
 Two skips are by design: the LM-Studio smoke test (opt-in via `RUN_LMSTUDIO_SMOKE=1`) and
 a test that loads a real `config/noise_rules.yaml` (skips when only the template is present).
-CI runs the same suite with a coverage floor — see the
-[CI / quality gates](../README.md#ci--quality-gates) table.
+CI runs the same suite with a coverage floor. See [`CI.md`](CI.md).
 
 ---
 
@@ -168,15 +170,19 @@ cleanup/retrieval step.
 
 ## 9. Attachment extraction
 
-`./mailrag attachments build` extracts text from attachments so their content is
-searchable alongside email bodies. Extraction is handled by a subsystem in
+`./mailrag index` puts attachment text into the search index alongside email bodies.
+`./mailrag attachments build`, which is also the `attach` step every recipe ends with,
+fills the collection's attachment store, the copy agents open files from over MCP. Its
+noise-signal pass OCRs the small blobs (below `--classify-max-size`) to tell decoration
+from documents. Extraction is handled by a subsystem in
 `src/attachments/extract/`: one handler per content type (plaintext, html, docx,
 xlsx, pptx, pdf, image) feeding into a swappable OCR-provider backend.
 
 ### OCR / vision backend
 
 For images and image-only / scanned PDFs the default backend is a **local
-vision-LLM (gemma-4 via LM Studio)** — fully on-device, no data leaves the machine.
+vision-LLM** (the multimodal model `RAG_LLM_MODEL` names at `RAG_LLM_API_BASE`) —
+fully on-device, no data leaves the machine.
 If the LLM is unavailable it falls back automatically to local **tesseract**. Cloud
 is opt-in and not yet implemented.
 
@@ -188,22 +194,22 @@ any OCR backend (vision LLM or tesseract) are capped by `RAG_ATTACH_MAX_PAGES`
 
 | Env var | Default | Values |
 |---------|---------|--------|
-| `RAG_ATTACH_EXTRACTOR` | `llm` | `llm` · `tesseract` · `cloud` |
+| `RAG_ATTACH_EXTRACTOR` | `llm` | `llm` · `tesseract`. Used when a file is opened (`attachments get`, MCP `get_attachment`). `index` and sync always use tesseract for attachment text |
+| `RAG_ATTACH_CLASSIFY_EXTRACTOR` | `tesseract` | OCR backend for the noise-signal pass of `attachments build` |
+| `RAG_ATTACH_STORE` | `~/.mailrag/attachments` | store root. Each collection gets its own subdirectory |
 | `RAG_ATTACH_MAX_PAGES` | `10` | integer — max scanned-PDF pages rendered/read per attachment (any OCR backend) |
 
-Both can be overridden per-call with `--extractor <name>` on
-`./mailrag attachments get` and `./mailrag attachments build`. Use `--force` to
-re-extract even when a cached result already exists.
+`--extractor <name>` overrides the backend per call: on `./mailrag attachments get` it
+replaces `RAG_ATTACH_EXTRACTOR`, on `./mailrag attachments build` it replaces
+`RAG_ATTACH_CLASSIFY_EXTRACTOR`. `attachments get --force` re-extracts even when a cached
+result already exists.
 
-### Optional Python dependencies
+### System packages for OCR
 
-```bash
-conda run -n mailrag pip install \
-    pypdf python-docx openpyxl python-pptx pillow pytesseract pdf2image
-```
-
-Plus system packages for OCR: **tesseract** and **poppler**
-(e.g. `brew install tesseract poppler` on macOS).
+The Python extractors (`pypdf`, `python-docx`, `openpyxl`, `python-pptx`, `pillow`,
+`pytesseract`, `pdf2image`) are main dependencies, so `just install` already has them.
+OCR also needs two system packages: **tesseract** and **poppler**
+(`brew install tesseract poppler` on macOS, or `just ocr-deps` to check).
 
 Without these, extraction degrades gracefully: unsupported types are stored with
 status `binary` or `ocr_unavailable`, and the raw attachment file is always

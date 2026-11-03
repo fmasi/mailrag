@@ -20,11 +20,11 @@ here rather than repeating it.
    configuration, the local `.eml` pipeline (persona → `wizard`/`run` → `index`), and how to
    run the tests.
 6. Deep dives, in any order:
-   - **[`BACKENDS.md`](BACKENDS.md)**. Pointing mailrag at the LLM, embedder or vector store
-     of your choice (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI, Qdrant): the `RAG_*`
-     variables, per-backend examples, and the dense-only sparse caveat.
+   - **[`BACKENDS.md`](BACKENDS.md)**. Pointing mailrag at the LLM and embedder of your
+     choice (LM Studio, Ollama, vLLM, NVIDIA NIM, OpenAI) and at a local or managed Qdrant:
+     the `RAG_*` variables, per-backend examples, and the dense-only sparse caveat.
    - **[`VERBS.md`](VERBS.md)**. The CLI source of truth. Every verb including `ask` and
-     `mcp`, the cost-ordered ladder, the alias table, and the persona recipes.
+     `mcp`, the cost-ordered ladder, the old verb names that still work, and the persona recipes.
    - **[`SYNC.md`](SYNC.md)**. Keeping a collection live: `accounts.yaml`, secret references
      (`keychain:` / `env:` / `file:`), folder **roles**, stage-skipping when a backend is
      down, launchd and systemd scheduling, and the `MessageSource` seam for adding a provider.
@@ -78,7 +78,8 @@ A shorter, reader-facing version of the same material is published as
   is deliberately deferred. Mirrored by the `v1.0.0` GitHub milestone.
 - **[`RELEASE_NOTES.md`](RELEASE_NOTES.md)**. What changed between tagged releases.
 - **[`POETRY_MIGRATION.md`](POETRY_MIGRATION.md)**. Poetry dependency-management notes. The
-  conda plus `requirements.txt` install path in [`SETUP.md`](SETUP.md) is the supported one.
+  supported install is a conda env plus `poetry install --with dev --all-extras --no-root`
+  (`just install`), as [`SETUP.md`](SETUP.md) describes.
 
 ## Live entry points (at a glance)
 

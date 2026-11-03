@@ -13,7 +13,7 @@ The work splits into two questions:
    attached so retrieval works?
 
 The second question is a funnel of cheap-to-expensive steps, and the golden rule is that
-**only the last step, `index`, deletes anything.** Everything before it tags, measures,
+**only one step, `index`, deletes anything.** Everything before it tags, measures,
 judges, or just looks. Your original `.eml` files stay on disk throughout, so every
 choice is reversible.
 
@@ -172,9 +172,11 @@ it. See [`VERBS.md`](VERBS.md) for the full ladder and the cost of each verb.
 
 ## Attachments
 
-Attachments are stored separately from email bodies. Every recipe ends with an
-`attach` step that fills the store, so after the wizard or `mailrag run` there is
-nothing to do. By hand, the three commands are:
+Attachment text is searchable once you run `index`: it extracts the text of each kept
+email's attachments (tesseract for scans) and indexes it beside the body, so a hit names
+its file. The files themselves live in a separate store, one per collection, which is what
+agents open them from. Every recipe ends with an `attach` step that fills the store, so
+after the wizard or `mailrag run` there is nothing to do. By hand, the three commands are:
 
 ```bash
 # ingest a profile's attachment bytes into the content-addressed store
@@ -182,6 +184,7 @@ nothing to do. By hand, the three commands are:
 
 # list a thread's / message's attachments (prints full sha256s)
 ./mailrag attachments list --thread-id <id>        # or --message-id <id>
+# list and get take --collection <name> to pick which collection's store to read
 
 # fetch one attachment by sha256: extract + print its text, or write raw bytes
 ./mailrag attachments get <sha256> --text [--extractor llm|tesseract] [--force]
@@ -190,12 +193,13 @@ nothing to do. By hand, the three commands are:
 
 Text extraction runs lazily on `get --text` and is cached. `--extractor` overrides the
 `RAG_ATTACH_EXTRACTOR` env var for that call, and `--force` re-extracts even when a result
-is already cached. `build` also accepts `--extractor` for forward compatibility, but it
-does not extract text today. It only ingests bytes.
+is already cached. `build` ingests the bytes, then OCRs the small images (under 100 kB by
+default) once each to flag decoration such as signature logos. Its `--extractor` picks
+the engine for that pass and defaults to tesseract. Documents are not read until `get`.
 
-The default OCR backend is a **local vision LLM**, gemma-4 via LM Studio, which keeps the
-work on-device. It falls back automatically to local **tesseract** when the LLM is
-unavailable. Cloud OCR is opt-in and not yet implemented.
+The default OCR backend for `get` is a **local vision LLM**, whatever `RAG_LLM_MODEL`
+names at `RAG_LLM_API_BASE` (LM Studio by default), which keeps the work on-device. It
+falls back automatically to local **tesseract** when the LLM is unavailable. Cloud OCR is opt-in and not yet implemented.
 
 For setup details (optional Python deps, system packages, config vars), see
 [`SETUP.md § 9`](SETUP.md#9-attachment-extraction).

@@ -160,7 +160,7 @@ Two failures are deliberately *not* treated as outages, because retrying cannot
 fix them and a silent "deferred" every 12 hours would hide them forever:
 
 - a collection that predates deterministic point ids, and
-- a collection built under a different index policy (see `embed_summary` below).
+- a collection built under a different index policy (see `embed_summary` above).
 
 Both are reported as `index REFUSED (needs operator action)` and are checked
 *before* the delta is loaded, judged and OCR'd — so a refusal costs one round
@@ -240,9 +240,10 @@ finds. Their *bytes* are written to the collection's attachment store
 (`~/.mailrag/attachments/<collection>/`), which is what `list_attachments` and
 `get_attachment` read. The store write runs first and is idempotent.
 
-Sync only stores what it brings in. Mail indexed in bulk, or synced before the
-store step existed, needs one `./mailrag attachments build --profile <p>` to
-catch up. A store that sync starts from empty is marked partial until that build
+Sync only stores what it brings in. Mail indexed through a recipe (the wizard or
+`mailrag run`) already has its store, because every recipe ends with an `attach`
+step. Mail indexed with a bare `./mailrag index`, or synced before the store step
+existed, needs one `./mailrag attachments build --profile <p>` to catch up. A store that sync starts from empty is marked partial until that build
 runs, and until then `list_attachments` refuses to answer "none" for a thread it
 holds nothing for.
 
@@ -366,8 +367,9 @@ The generated unit also pins `RAG_LLM_API_BASE` and `QDRANT_URL` to `localhost`
 in its own environment block. This is not redundant with `.env`: that file is
 written for the **devcontainer**, where `host.docker.internal` resolves — on the
 host it does not, so a unit relying on it would fail every tick forever while
-reporting the LLM and vector store as unavailable. Override with
-`environment={...}` if your endpoints live elsewhere. The backstop is
+reporting the LLM and vector store as unavailable. If your endpoints live
+elsewhere, edit that block in the generated unit. The CLI has no flag for it. Only
+the Python helpers in `src/sync/schedule.py` take an `environment=` override. The backstop is
 `sync --status`.
 
 ### What `--status` can and cannot detect

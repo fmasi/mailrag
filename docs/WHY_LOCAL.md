@@ -40,7 +40,7 @@ you don't move the mailbox to the model. You move the model to the mailbox.
 
 That costs something, and the honest version of the trade is worth stating. Local
 retrieval means open embedders instead of a hosted API, a Qdrant container on your own
-disk, and roughly 8 GB of RAM or VRAM if you also want a local model writing the
+disk, and roughly 9 GB of RAM or VRAM if you also want a local model writing the
 answers. Indexing 32,000 emails takes hours on a laptop rather than minutes on someone
 else's cluster.
 

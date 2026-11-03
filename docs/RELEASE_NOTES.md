@@ -1,6 +1,8 @@
 # mailrag v0.9.0 — first tagged release
 
-*Dated by the tag when it is cut.*
+*Tagged 2026-08-09. These notes describe `main` at that tag and are not updated after it, so
+install steps, test counts and CI details below have since changed. The
+[README](../README.md) describes the current state.*
 
 This is the first tagged release of mailrag, so these notes introduce the whole
 project rather than a delta. The repository has been developed in public since

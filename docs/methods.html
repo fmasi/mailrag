@@ -194,8 +194,7 @@
          validation pass.</p>
       <p>The load-bearing guard against that circularity is external rather than procedural. The
          same ordering of arms holds on public Enron-QA, whose questions were written by someone else
-         entirely, and on TREC Legal's real human relevance judgments. A generator cannot flatter
-         itself across three corpora it did not write.</p>
+         entirely. A generator cannot flatter itself on a corpus it did not write.</p>
       <h3>Where a judge is used, and how far it is trusted</h3>
       <p>Answer quality is a separate lens and it does use a local LLM judge, calibrated against a
          stronger reference model on 514 pooled pairs: Cohen's κ = <b>0.52</b> on the 0–3 scale,
@@ -211,7 +210,7 @@
       <div class="n">03</div>
       <h2>Confounds that were caught</h2>
       <div class="chips">
-        <span class="chip id">R8</span>
+        <span class="chip id">R8</span><span class="chip id">R3b</span>
         <span class="chip priv">author-reported</span>
       </div>
     </div>
@@ -225,7 +224,7 @@
          cleanly: <b>+3pp from quantization, +3pp from the method</b>. Holding the summarizer fixed is
          the difference between a result and a mirage.</p>
       <h3>A cross-dataset confound in the sparse number</h3>
-      <p>Learned-sparse looked worth +4.8 R@5 on the private corpus and only +2.5 on public Enron,
+      <p>Learned-sparse looked worth +4.8 R@5 on the private corpus and only +3.1 on public Enron,
          which is a suspicious gap for the same technique. The private collections carried embedded
          summaries and the public ones did not, so sparse was being credited with part of the
          summary's work. Building a body-only private control brought it to <b>+3.3</b>, in line with
@@ -246,11 +245,11 @@
     <div class="body">
       <p>The whole system treats the conversation as the unit of truth, which assumes conversations
          can be recovered. On the standard public corpus they cannot be read off the headers at all.</p>
-      <p>Across <b>19,530</b> messages of the CMU Enron maildir, <code>In-Reply-To</code> and
-         <code>References</code> appear on <b>0.0%</b>. Not rarely. Zero. Yet 64.3% of messages are
-         replies or forwards by subject, and deriving conversations from a normalised subject plus
-         shared participants recovers <b>50.2% of messages into multi-message threads</b>, the largest
-         running to 59 messages.</p>
+      <p>Across <b>8,000</b> messages of the CMU Enron maildir, <code>In-Reply-To</code> and
+         <code>References</code> appear on <b>0.0%</b>. Not rarely. Zero. Yet 64.3% of those messages
+         are replies or forwards by subject, and deriving conversations from a normalised subject plus
+         shared participants recovers <b>50.2% of 19,530 messages into multi-message threads</b>, the
+         largest running to 59 messages.</p>
       <p>That recall is bought at a price, and the price is measurable rather than hypothetical:</p>
       <table>
         <tr><th>failure mode</th><th>rate</th></tr>
@@ -431,8 +430,9 @@
       <p>So every figure this project publishes has a row recording what produced it, which corpus it
          came from, whether a stranger can reproduce it, and the date the producing script was last
          <i>run</i> rather than last quoted. Rows older than the most recent release should not be
-         quoted without a caveat, and two rows currently carry a warning: one needs an endpoint,
-         one needs its collections rebuilt.</p>
+         quoted without a caveat, and four rows currently carry a warning: one withdrawn claim, one
+         that needs its collections rebuilt, one that rests on three images, and one that rests on
+         twelve ids.</p>
       <p>The register also caught something a checklist would have missed. When the public benchmark
          shipped, its docs listed two omissions and missed a third: contextual summaries were switched
          off too, so a reader could reasonably have assumed the +12.8 lever was in play. Writing every

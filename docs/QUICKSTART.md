@@ -12,17 +12,18 @@ test suite, go to [`SETUP.md`](SETUP.md).
 From a fresh clone:
 
 ```bash
-pip install -r requirements.txt   # includes FlagEmbedding (bge-m3); first run downloads ~2 GB of weights
-just demo                         # starts Qdrant, builds both indexes, scores them
+conda create -y -n mailrag python=3.11 && conda activate mailrag
+just install   # poetry install --with dev --all-extras --no-root, includes FlagEmbedding (bge-m3)
+just demo      # starts Qdrant, builds both indexes, scores them. First run downloads a few GB of model weights
 ```
 
-It needs Python 3.11+, Docker and [`just`](https://github.com/casey/just) (`brew install just`).
+It needs conda, Poetry, Docker and [`just`](https://github.com/casey/just) (`brew install just`).
 No `.env` and no key. You need those only for `./mailrag ask` and for indexing your own mail,
 which come later on this page.
 
 > Keep dependencies in a conda env or a container rather than on the host. See
-> [`SETUP.md`](SETUP.md) for the `mailrag` env. `pyproject.toml` and `poetry.lock` pin exact
-> versions, and `requirements.txt` is the supported install path.
+> [`SETUP.md`](SETUP.md) for the `mailrag` env and where Poetry comes from. `pyproject.toml`
+> and `poetry.lock` pin exact versions, and the install above is the one CI runs.
 
 `just demo` runs [`scripts/quickstart.sh`](../scripts/quickstart.sh), which brings up Qdrant in
 Docker and then runs `python -m scripts.demo`. That builds **two** indexes over the same
@@ -58,7 +59,7 @@ The two commands answer different questions, and it is worth keeping them apart.
 | corpus | 1,200 public Enron emails | 2,000-document Enron-QA slice |
 | measures | contextual embedding, thread reconstruction | hybrid dense plus learned-sparse |
 | LLM calls | none | none |
-| runtime (GPU / CPU) | ~2 min / ~15 min | 1.6 min / 14.7 min |
+| runtime (GPU / CPU) | not timed | 1.6 min / 14.7 min |
 
 Neither reproduces the private 45.6 → 93.3 ladder, which was measured on a 32,000-email
 archive and stays author-reported. [`BENCHMARK.md`](BENCHMARK.md) lists every omission for
@@ -71,13 +72,14 @@ does need a model, so set up [`BACKENDS.md`](BACKENDS.md) first:
 
 ```bash
 cp .env.example .env
-# once the ~2 GB of bge-m3 weights are cached, HF_HUB_OFFLINE=1 skips the Hub round-trip
-HF_HUB_OFFLINE=1 ./mailrag ask "who approved the Q3 budget, and when?" --collection mailrag-demo --k 3
+# once the bge-m3 weights are cached, HF_HUB_OFFLINE=1 skips the Hub round-trip
+HF_HUB_OFFLINE=1 ./mailrag ask "who approved the Q3 budget, and when?" --collection mailrag-demo-context --k 3
 ```
 
 `ask` runs hybrid retrieval, expands each hit into its whole thread rather than a fragment,
-and writes a grounded answer over the top-`k` threads. Omit `--collection` to use the latest
-build. To hand the same collection to any agent over the Model Context Protocol, see
+and writes a grounded answer over the top-`k` threads. `just demo` leaves two collections,
+`mailrag-demo-plain` and `mailrag-demo-context`. Without `--collection`, `ask` uses the
+collection named in `--profile`, else the one from the latest `mailrag onboard` run. To hand the same collection to any agent over the Model Context Protocol, see
 [`MCP_SERVER.md`](MCP_SERVER.md).
 
 ## Configuration essentials
@@ -86,7 +88,6 @@ Copy `.env.example` to `.env` and set the backend you want. The all-local defaul
 or any OpenAI-compatible server, for answers, local bge-m3 for embeddings, and local Qdrant:
 
 ```bash
-RAG_LLM_PROVIDER=lmstudio
 RAG_LLM_API_BASE=http://localhost:1234/v1
 RAG_LLM_MODEL=<your-local-model>          # must be non-empty and loaded on the endpoint
 QDRANT_URL=http://localhost:6333
@@ -104,7 +105,7 @@ from dotenv import load_dotenv; load_dotenv()
 from src.query.hybrid import build_hybrid_searcher
 
 # point at a built collection (see `just demo` / SETUP.md)
-searcher = build_hybrid_searcher("mailrag-demo", mode="hybrid")
+searcher = build_hybrid_searcher("mailrag-demo-context", mode="hybrid")
 
 # plain retrieval: ranked NodeWithScore chunks
 nodes = searcher.search("meeting schedule")
@@ -126,7 +127,7 @@ classes that no longer exist.
 | "QDRANT_URL environment variable is not set" | Set `QDRANT_URL`. Qdrant is required, and `docker compose up -d qdrant` starts the local one. |
 | First run is slow | Expected. The first run downloads bge-m3 weights and embeds the corpus. Export `HF_HUB_OFFLINE=1` afterwards. |
 | bge-m3 tries to reach the Hub while offline | The weights are not cached yet. Run once online, then export `HF_HUB_OFFLINE=1`. |
-| Out of memory | Lower the sample count (`run_demo(num_samples=…)`) or the chunk size. |
+| Out of memory | The demo corpus is fixed. For your own mail, lower `chunk_size` in the corpus profile. |
 
 ## Next steps
 

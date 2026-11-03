@@ -16,10 +16,8 @@ This has two concrete effects on RAG quality:
 2. **Poor retrieval.** A chunk containing one relevant sentence buried in
    5,000 tokens of old quoted text will score lower than a focused chunk.
 
-On the sample corporate inbox used during development (31,981 emails),
-stripping achieved a **68% total token reduction** — median body length
-dropped from 501 → 290 tokens and 67% of emails now fit inside a single
-512-token chunk without being split.
+On a corporate inbox, stripping cuts the token count substantially and lets
+many more emails fit inside a single 512-token chunk without being split.
 
 ---
 
@@ -70,8 +68,8 @@ patterns are only honoured once at least one non-blank line of real content
 has been accumulated above them. Emails with no new top-level content are
 preserved in full.
 
-> **Approx. 4% of emails** in the sample corpus were affected by this
-> before the guard was added — their bodies were being silently wiped.
+> Before the guard was added, emails of this shape had their bodies silently
+> wiped.
 
 ---
 
@@ -154,23 +152,18 @@ size to use.
 ./mailrag measure --profile <your-profile.json>
 ```
 
-This samples the corpus described by the profile, strips reply chains, and
-prints a token-length distribution.
-
-**How to read the output:**
+This loads the mail the profile selects, strips reply chains, measures each
+cleaned body in bge-m3 tokens, and writes a suggested `chunk_size` into the
+profile. The suggestion is the p90 of those lengths, rounded up to a multiple
+of 64 and clamped to 256–1024. It prints one line:
 
 ```
-  Median (p50) :     80 tokens   ← typical short reply after stripping
-  p90          :    422 tokens   ← 90% of emails are under this
-  Fit in 1 chunk:   93%          ← at the simulated chunk size
-  Suggested chunk_size: 448      ← set RAG_CHUNK_SIZE to this value
+suggested chunk_size = <N> (bodies <M>)
 ```
 
-- If **p90 < 512** → set `RAG_CHUNK_SIZE=512` and you're done.
-- If **p90 > 1000** → stripping is likely not catching all patterns; proceed
-  to Step 2 before choosing a chunk size.
-- If **mean >> median** (e.g., mean is 5× the median) → long-tail outliers
-  exist; Step 2 will identify them.
+- If the suggestion is **512 or less**, you're done.
+- If it hits the **1024 ceiling**, stripping is likely not catching all
+  patterns. Proceed to Step 2 before trusting it.
 
 ### Step 2 — Check stripping against your corpus
 
@@ -185,10 +178,6 @@ correspondents' clients emit. Common patterns not yet in the code:
 ```
 # Lotus Notes
 --- <name> wrote: ---
-
-# Chinese Outlook variant
-发件人: Name
-日期: Date
 
 # Custom corporate footers acting as dividers
 == Confidential =======================
@@ -267,13 +256,11 @@ pytest tests/test_reply_chain_stripping.py -v
 
 ### Step 5 — Re-run analysis to confirm
 
-Re-run Step 1. You should see:
-- `Emails where stripping changed body` percentage increase
-- `Total tokens removed` percentage increase
-- Median and p90 drop
+Re-run Step 1. The suggested `chunk_size` should drop as the long bodies lose
+their quoted history.
 
-Iterate Steps 2–5 until the debug script shows no large "none found" emails
-and the analysis shows p90 comfortably below your target chunk size.
+Iterate Steps 2–5 until the longest bodies no longer carry quoted history and
+the suggestion sits at or below your target chunk size.
 
 ---
 
@@ -283,19 +270,23 @@ Once stripping is working well:
 
 | Scenario | Recommendation |
 |---|---|
-| p90 < 300 tokens | `RAG_CHUNK_SIZE=384`, `RAG_CHUNK_OVERLAP=50` |
-| p90 300–600 tokens | `RAG_CHUNK_SIZE=512`, `RAG_CHUNK_OVERLAP=64` ← **project default** |
-| p90 600–900 tokens | `RAG_CHUNK_SIZE=1024`, `RAG_CHUNK_OVERLAP=100` |
+| p90 < 300 tokens | `chunk_size: 384`, `chunk_overlap: 50` |
+| p90 300–600 tokens | `chunk_size: 512`, `chunk_overlap: 64` ← **project default** |
+| p90 600–900 tokens | `chunk_size: 1024`, `chunk_overlap: 100` |
 | p90 > 900 tokens | Investigate remaining long emails — likely a new pattern |
 
-The project ships with `RAG_CHUNK_SIZE=512` and `RAG_CHUNK_OVERLAP=64` as
-defaults (chosen from the sample corpus analysis). Override in `.env` if
-your email corpus has a different distribution:
+Indexing reads `chunk_size` and `chunk_overlap` from the corpus profile, not
+from the environment. A new profile starts at 512 and 64 (chosen from the
+sample corpus analysis), and `measure` overwrites `chunk_size` with its
+suggestion. To pick other values, edit the profile JSON:
 
-```bash
-RAG_CHUNK_SIZE=512    # set to your p90 value, rounded to nearest 64
-RAG_CHUNK_OVERLAP=64  # overlap matters only for emails that exceed chunk size
+```json
+"chunk_size": 512,
+"chunk_overlap": 64
 ```
+
+The `RAG_CHUNK_SIZE` and `RAG_CHUNK_OVERLAP` variables are read only by the
+legacy `RAGConfig`, which the `index` path does not use.
 
 **Why overlap=64?** Overlap only affects the ~33% of emails long enough to be
 split across multiple chunks. 64 tokens gives a sentence of context at each
@@ -372,8 +363,9 @@ Bare numbers carry almost no semantic signal, and one figure has many surface fo
 (`$210,000,000`, `210,000,000`, `210M`, `210 million`). At both index and query time
 we append a **canonical integer token** (`210000000`) via `augment_numeric`
 (`src/ingest/numeric.py`) so the sparse/dense legs share a matchable token while the
-original surface form is preserved. This improves *exact-figure* recall only; fuzzy
-numeric ranges and a raw-corpus `grep_email` escape hatch remain open on #82.
+original surface form is preserved. This improves *exact-figure* recall only. Fuzzy
+numeric ranges are not handled. For an exact string, the `grep_email` MCP tool
+scans the raw corpus (see [`MCP_SERVER.md`](MCP_SERVER.md)).
 
 ---
 
@@ -442,9 +434,7 @@ cannot make for itself.
 To rebuild from scratch:
 
 ```bash
-# Wipe Qdrant collection
-python scripts/reset_qdrant_index.py
-
-# Re-index from scratch
-./mailrag build
+# Drop the profile's collection and re-index it from scratch
+./mailrag index --profile <profile.json> --recreate
+# add --embed-summary if the collection was built with summaries
 ```

@@ -32,7 +32,7 @@ from that:
 
 1. **Match small, answer big.** Retrieve one message, then answer from its *entire*
    reconstructed conversation. Biggest win in the system, and it needs no LLM at all.
-2. **Hybrid retrieval.** bge-m3 dense plus **learned-sparse**, RRF-fused in Qdrant. You get the
+2. **Hybrid retrieval.** bge-m3 dense plus **learned-sparse**, fused with RRF. You get the
    concept and the rare exact token that dense vectors lose, like an invoice number or a
    ticket ID.
 3. **Local by default.** Cloud is a swappable option at two seams, the LLM and the embedder,
@@ -54,10 +54,10 @@ can stop at any of them:
 | | what you need | what you get | your mail leaves? | cost |
 |---|---|---|---|---|
 | **1. Read** | nothing | the measured numbers, below | | none |
-| **2. `just bench`** | Docker, ~2 GB weights | re-run those numbers yourself | | none |
+| **2. `just bench`** | Docker, a few GB of model weights | re-run those numbers yourself | | none |
 | **3. `just demo`** | same | both levers measured: findability and completeness | | none |
 | **4. Your mail + your agent** | IMAP or `.eml`, an MCP client | your archive, answerable by Claude/ChatGPT | **yes**, to that provider | your LLM's usage |
-| **5. Your mail + local model** | ~8 GB RAM/VRAM | the same, fully airgapped | **no** | electricity |
+| **5. Your mail + local model** | ~9 GB RAM/VRAM | the same, fully airgapped | **no** | electricity |
 
 Steps 2 and 3 need no API key and no private data. Most evaluations should stop at 3. That is
 enough to judge whether the retrieval is any good.
@@ -65,14 +65,16 @@ enough to judge whether the retrieval is any good.
 ```bash
 git clone https://github.com/fmasi/mailrag.git
 cd mailrag
-pip install -r requirements.txt        # includes FlagEmbedding (bge-m3); first run pulls ~2 GB of weights
+conda create -y -n mailrag python=3.12 && conda activate mailrag
+just install                           # poetry install --with dev --all-extras --no-root
 just demo                              # two indexes, same questions: see what context buys
 just bench                             # the full retrieval benchmark
 ```
 
-Prerequisites are Python 3.11+, Docker (for the Qdrant container) and
-[`just`](https://github.com/casey/just) (`brew install just`). Neither command needs an API key,
-an LLM endpoint, or a `.env` file, and both run on data committed in this repo.
+Prerequisites are conda with Python 3.11 to 3.13, [Poetry](https://python-poetry.org/) 2.x,
+Docker (for the Qdrant container) and [`just`](https://github.com/casey/just)
+(`brew install just`). The first run pulls a few GB of bge-m3 weights. Neither command needs an
+API key, an LLM endpoint, or a `.env` file, and both run on data committed in this repo.
 
 **`just demo`** builds two indexes over the same 1,200 public Enron emails, one plain and one
 with each message embedded alongside its conversation's preceding context, then asks 99
@@ -115,14 +117,16 @@ Once a collection is indexed, query it from the CLI or hand it to an agent over 
 
 ### Who writes the answer is your choice
 
-mailrag is a retrieval system. Six of its seven MCP tools return email and call no model at
-all, so whatever agent you point at it does the writing. That leaves one decision, and it is
+mailrag is a retrieval system. Five of its seven MCP tools return email and call no model at
+all, so whatever agent you point at it does the writing. `answer_question` writes an answer, and
+`get_attachment` reads scans with your configured vision model (set
+`RAG_ATTACH_EXTRACTOR=tesseract` to keep models out of it). That leaves one decision, and it is
 the only one that determines whether anything leaves your machine.
 
 | | your agent | your mail leaves the machine? | you need |
 |---|---|---|---|
 | **Bring your own agent** | Claude, ChatGPT, anything speaking MCP | **yes**, retrieved text goes to that provider | nothing extra |
-| **Fully local** | a local model via CLI *or* MCP | **no** | ~8 GB of RAM/VRAM |
+| **Fully local** | a local model via CLI *or* MCP | **no** | ~9 GB of RAM/VRAM |
 
 The second row is the point of the project, and it works both ways round. MCP is not the cloud
 path and the CLI is not the local path — the model you choose is what decides. Pull the network
@@ -187,8 +191,8 @@ headers, meaning any live IMAP account, avoids this. Row S4 in
 Built on LlamaIndex, `mailrag` turns a mailbox into a queryable knowledge base:
 
 - **Thread-aware answers** (the flagship). Match a small unit, answer from its whole
-  conversation. Roughly doubles answer coverage on terse replies, and needs no LLM.
-- **Hybrid retrieval.** bge-m3 dense plus learned-sparse vectors, RRF-fused in Qdrant.
+  conversation. Roughly doubles answer coverage in the private eval, and needs no LLM.
+- **Hybrid retrieval.** bge-m3 dense plus learned-sparse vectors, fused with RRF.
 - **Email-aware preprocessing.** Reply-chain stripping, calendar-invite collapsing,
   noise/newsletter filtering, exact-text chunk dedup.
 - **Attachments, extracted and indexed.** PDFs, Office files, HTML and images, with OCR for
@@ -196,6 +200,8 @@ Built on LlamaIndex, `mailrag` turns a mailbox into a queryable knowledge base:
   searchable ([`docs/CHUNKING.md`](docs/CHUNKING.md)).
 - **Continuous sync.** A collection built from a backup is a snapshot that quietly rots.
   `./mailrag sync` indexes only the delta from a live account ([`docs/SYNC.md`](docs/SYNC.md)).
+- **Guided wizard.** `./mailrag wizard` runs a recipe, from Quick (no AI) to Thorough, and
+  every recipe ends by storing the attachments so agents can open them.
 - **Agent-ready over MCP.** A read-only, multi-collection stdio server, seven tools spanning
   discovery, search, thread fetch, corpus grep, Q&A and attachments
   ([`docs/MCP_SERVER.md`](docs/MCP_SERVER.md)).
@@ -229,13 +235,13 @@ Full write-up, including the two results that went against expectation:
 
 Full map and reading order: **[`docs/INDEX.md`](docs/INDEX.md)**. The four worth knowing about
 from here are [`GUIDE.md`](docs/GUIDE.md) for the friendly walkthrough and how to pick a
-persona, [`QUICKSTART.md`](docs/QUICKSTART.md) for 5-minute setup,
+recipe, [`QUICKSTART.md`](docs/QUICKSTART.md) for 5-minute setup,
 [`BENCHMARK.md`](docs/BENCHMARK.md) for the public numbers and exactly what they omit, and
 [`CLAIMS.md`](docs/CLAIMS.md) for whether any given figure is reproducible or author-reported.
 
-Every PR must pass pytest with an 85% coverage floor, pip-audit, CodeQL, a lint job (ruff,
-SAST, mypy, workflow lint, gitleaks) and one Claude review before it can merge. Details in
-[`docs/CI.md`](docs/CI.md).
+Every PR must pass pytest with an 85% coverage floor, pip-audit, dependency review, CodeQL, a
+lint job (ruff, SAST, mypy, workflow lint, gitleaks) and one Claude review before it can merge.
+Details in [`docs/CI.md`](docs/CI.md).
 
 ## Status
 
@@ -246,9 +252,9 @@ the **MCP server** ([#67](https://github.com/fmasi/mailrag/pull/67),
 [Textual](https://textual.textualize.io/) ([#36](https://github.com/fmasi/mailrag/issues/36)),
 with the old prompt flow still reachable as `--classic`.
 
-![The mailrag wizard persona picker, a cost-ordered persona list on the left and a live preview of the highlighted recipe with colour-coded cost badges on the right](docs/images/tui/persona.svg)
+![The mailrag wizard recipe picker, a cost-ordered recipe list on the left and a live preview of the highlighted recipe with colour-coded cost badges on the right](docs/images/tui/persona.svg)
 
-*The persona picker. The [full six-screen walkthrough](docs/GUIDE.md#what-to-expect-from-the-wizard)
+*The recipe picker. The [full six-screen walkthrough](docs/GUIDE.md#what-to-expect-from-the-wizard)
 lives in the guide, and screenshots are auto-generated via `scripts/gen_tui_screenshots.py`.*
 
 ## Built by Frédéric Masi

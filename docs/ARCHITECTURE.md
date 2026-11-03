@@ -91,7 +91,8 @@ judges a sample against the rubric and buckets the mistakes before any
 full-scale sweep.
 
 **Pass-1 — rules and headers, no LLM** (`src/data/noise_filter.py`,
-`src/pipeline/pass1.py`). Curated rules in `config/noise_rules.yaml` (sender
+`src/pipeline/pass1.py`). Curated rules in `config/noise_rules.yaml`, your gitignored
+copy of the shipped `config/noise_rules.template.yaml` (sender
 domains, sender/subject regexes) plus a header-driven bulk filter
 (`List-Unsubscribe`, `Precedence: bulk` or `list`) with keep-guards so human mailing-list
 traffic and transactional receipts survive. Mail relayed by a group alias on the
@@ -208,8 +209,9 @@ custom pieces are exactly two adapters and one callback:
   reranking NIM). The summary-aware variant (`src/query/summary_rerank.py`)
   scores on summary+body so thread context informs *ranking* without being
   embedded into the vector, where it causes drift. The benchmark verdict:
-  reranking helps pointed questions and hurts thread-spanning ones, hence
-  opt-in rather than default.
+  on recall it is neutral or better in every question category, but it scored
+  worse in the LLM-judged answer-quality eval, hence opt-in rather than
+  default ([CLAIMS.md](CLAIMS.md) R6a, R6b).
 
 The last step is what makes retrieval email-shaped: **thread expansion**
 (`src/query/thread_expand.py`). Chunks are what match, but a chunk of an email
@@ -235,8 +237,8 @@ to fix.
 ## The LLM seam
 
 All single-turn completions — Pass-2 judging, summaries, HyDE, answering — go
-through one client (`src/llm/client.py`), a LlamaIndex `OpenAILike` LLM wired
-into `Settings.llm`. Any OpenAI-compatible endpoint works: LM Studio (the
+through one client (`src/llm/client.py`), a LlamaIndex `OpenAILike` LLM built
+from the `RAG_LLM_*` variables. Any OpenAI-compatible endpoint works: LM Studio (the
 local default), Ollama, vLLM, NVIDIA NIM, or OpenAI itself, selected by
 `RAG_*` environment variables (endpoint, model, key). Production is fully
 offline by default; the only cloud caller is the dev-only eval harness. A thin
@@ -250,13 +252,15 @@ shim). The pipeline verbs form a cost-ordered ladder — free inspection first,
 LLM spend last:
 
 ```
-scope · measure · tag · scan · judge · calibrate · summarize · prune · index · ask
+scope · measure · tag · scan · calibrate · judge · prune · summarize · index · ask
 ```
 
 plus `onboard` (one-shot build), `sync`, `run` (execute a named persona
-recipe), `wizard`, `mcp`, and `attachments build|list|get`. Personas
+recipe), `wizard`, `mcp`, `coverage` (mail no profile selects), `usage` (which
+MCP tools agents call), and `attachments build|list|get`. Personas
 (`src/persona/`, `personas.yaml`) bundle the ladder into named recipes so a
-user picks an intent rather than ten flags. See [VERBS.md](VERBS.md).
+user picks an intent rather than ten flags. Every recipe ends with an `attach`
+step, the recipe form of `attachments build`. See [VERBS.md](VERBS.md).
 
 **TUI** (`src/tui/`). A full-screen Textual wizard
 (Welcome → Persona → Model → Scope → Review → Run) over the same verb
@@ -296,7 +300,8 @@ makes a spreadsheet's contents findable by `search_email`. Attachment *bytes and
 go to a separate sha256-addressed store (`src/attachments/`), which is what
 `list_attachments` / `get_attachment` read. The split is deliberate — retrieval wants
 chunked text in Qdrant, an agent fetching a document wants the file — but it has a sharp
-edge: only the index path runs during `onboard` / `index`, so a fully indexed corpus can
+edge. Every recipe ends with an `attach` step that fills the store, but `onboard` and a
+bare `index` run only the index path, so a corpus indexed that way can
 have an empty attachment store, and every listing then returns nothing that looks exactly
 like "this thread has no attachments". Both tools check the store and say so. `sync`
 writes both paths for the mail it brings in, and a store that sync started from empty is
@@ -331,7 +336,7 @@ signals that were tried first and why each failed.
 | `src/eval/` | Retrieval/answer evaluation harness (dev-only) |
 | `src/config/` | Qdrant client seam, secrets; plus the legacy `RAGConfig` |
 | `scripts/` | Build, index, eval and maintenance utilities (including `scripts/eval/`) |
-| `tests/` | The test suite (pytest, ~1,500 tests) |
+| `tests/` | The test suite (pytest) |
 | `docs/` | This map, the guides, the claims register and the eval write-ups |
 
 ### Where the drop decision happens
@@ -339,7 +344,9 @@ signals that were tried first and why each failed.
 The `tag` step only *tags* by default, so nothing is thrown away before the LLM has seen
 it. The confident drop happens at `summarize`, the LLM pass. Which of the two you drop at
 is a deliberate budget-versus-quality knob: drop at `tag` and you skip the LLM cost
-entirely, drop at `summarize` and you get the cleaner index. The eval labels in
+entirely, drop at `summarize` and you get the cleaner index. The *Balanced* recipe
+(`llm-verify`) sits between them. It drops at `judge`, a cheap LLM verdict on the mail
+`scan` flags, and summarizes only what is kept. The eval labels in
 [`EXPERIMENTS.md`](EXPERIMENTS.md) map onto these as **Pass-1 = `tag`** and
 **Pass-2 = `summarize`**.
 
