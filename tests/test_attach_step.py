@@ -79,15 +79,27 @@ class TestAttachStepInTheRecipes(_Case):
         with (
             mock.patch(
                 "src.attachments.location.resolve_attach_store", return_value=self.store_dir
-            ),
+            ) as resolve,
             mock.patch("src.onboard.record_profile_for_collection") as record,
             mock.patch("src.attachments.classify.classify_blobs") as classify,
         ):
             classify.return_value.as_dict.return_value = {}
             counts = handlers["attach"](self.prof)
+        resolve.assert_called_once_with(collection="box")
         record.assert_called_once()
         self.assertEqual(counts["attachments"], 1)
         self.assertTrue(counts["complete"])
+        self.assertEqual(self._store().count(), 1)  # landed in this collection's store
+
+    def test_a_profile_without_a_collection_is_refused(self):
+        handlers = build_handlers(profile_path=os.path.join(self.d, "box.profile.json"))
+        self.prof.collection = ""
+        with self.assertRaisesRegex(ValueError, "no collection"):
+            handlers["attach"](self.prof)
+
+    def test_finding_no_mail_is_not_reported_as_success(self):
+        text = flow.describe_result({"emails": 0, "attachments": 0, "complete": False})
+        self.assertIn("no mail found", text)
 
     def test_the_run_log_says_it_in_a_sentence(self):
         text = flow.describe_result({"emails": 3, "attachments": 5, "complete": True}, "attach")

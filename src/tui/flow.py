@@ -408,6 +408,8 @@ def describe_result(result: Any, verb: str = "") -> str:
             "obvious junk groups"
         )
     if isinstance(result, dict) and {"emails", "attachments", "complete"} <= set(result):
+        if not result["emails"]:
+            return "no mail found in the ticked folders, so no attachments were stored"
         line = (
             f"{result['attachments']} attachments from {result['emails']} emails stored; "
             "agents can open them now"

@@ -118,6 +118,10 @@ def build_handlers(
         from src.attachments.location import resolve_attach_store
         from src.onboard import record_profile_for_collection
 
+        if not prof.collection:
+            # An empty name resolves to the shared root of every store, the one
+            # place per-collection separation exists to keep files out of.
+            raise ValueError("the profile names no collection, so there is no store to fill")
         record_profile_for_collection(prof.collection, profile_path)
         return build_store(prof, resolve_attach_store(collection=prof.collection), limit=limit)
 
