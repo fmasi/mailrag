@@ -395,5 +395,107 @@ class TestShortResult(unittest.TestCase):
         self.assertTrue(out.endswith("…"))
 
 
+class TestDescribeResult(unittest.TestCase):
+    """The run log speaks in sentences, not in Python reprs."""
+
+    def test_measure_report(self):
+        from src.pipeline.profile import ProfileReport
+
+        text = flow.describe_result(
+            ProfileReport(percentiles={50: 1}, mean=1.0, bodies=457, suggested_chunk_size=704)
+        )
+        self.assertEqual(
+            text, "457 emails measured; text will be split into pieces of about 704 tokens"
+        )
+        self.assertNotIn("ProfileReport", text)
+
+    def test_summary_counts(self):
+        text = flow.describe_result({"cached": 3, "done": 10, "error": 0, "unavailable": 0})
+        self.assertEqual(text, "AI read 10 emails, 3 were already done")
+
+    def test_summary_failures_say_what_to_do(self):
+        text = flow.describe_result({"cached": 0, "done": 1, "error": 2, "unavailable": 0})
+        self.assertIn("2 failed (run again to retry them)", text)
+
+    def test_index_result(self):
+        from src.indexing.contextual_index import BuildResult
+
+        text = flow.describe_result(BuildResult(collection="box", kept_emails=416, chunks=959))
+        self.assertEqual(text, "416 emails are now searchable in 'box' (959 pieces)")
+
+    def test_scope_rules(self):
+        rules = [{"type": "prefix", "value": "a/"}, {"type": "prefix", "value": "b/"}]
+        self.assertEqual(flow.describe_result(rules), "2 folder selection(s) saved")
+
+    def test_a_count_means_the_skip_list_only_for_prune(self):
+        self.assertEqual(flow.describe_result(5, "prune"), "5 emails added to the skip list")
+        self.assertEqual(flow.describe_result(5, "tag"), "5")
+
+    def test_unknown_results_fall_back_to_one_line(self):
+        self.assertEqual(flow.describe_result({"x": "a\n b"}), "{'x': 'a\\n b'}")
+
+
+class TestPersonaCardsCarryPlainSteps(unittest.TestCase):
+    def test_every_step_has_a_plain_description(self):
+        for card in flow.persona_cards(load_registry()):
+            self.assertEqual(len(card.does), len(card.verbs))
+            for does in card.does:
+                self.assertTrue(does)
+                for jargon in ("Qdrant", "BGE", "rubric", "LLM", "verb", "corpus"):
+                    self.assertNotIn(jargon, does)
+
+
+class TestDescribeMoreResults(unittest.TestCase):
+    def test_tag_stats(self):
+        from src.pipeline.pass1 import Pass1Stats
+
+        text = flow.describe_result(Pass1Stats(total=100, kept=100, dropped=0, tagged=12))
+        self.assertEqual(text, "12 of 100 emails look like newsletters")
+
+    def test_scan_report_speaks_of_conversations(self):
+        from src.cluster.noise_pockets import ClusterReport
+
+        report = ClusterReport(
+            k=1, seed=0, n_threads=4, n_emails=50, corpus_baseline_tag_rate=0.0, clusters=[]
+        )
+        text = flow.describe_result(report)
+        self.assertEqual(
+            text, "50 emails grouped; about 0% of conversations sit in obvious junk groups"
+        )
+
+
+class TestDescribeStops(unittest.TestCase):
+    """The review screen's promise comes from the plan, per recipe."""
+
+    def _stops(self, name):
+        reg = load_registry()
+        persona = reg.get(name)
+        handlers = {s.verb: (lambda *a, **k: None) for s in persona.steps}
+        return flow.describe_stops(flow.plan_steps(persona, handlers, reg))
+
+    def test_thorough(self):
+        self.assertEqual(
+            self._stops("llm-all"),
+            "The run stops to ask you, in this order: check a sample of the AI's "
+            "decisions; let the AI read your mail; put the junk on the skip list. "
+            "Everything else runs without asking.",
+        )
+
+    def test_balanced_mentions_all_three_stops(self):
+        text = self._stops("llm-verify")
+        for stop in ("sample", "skip list", "read your mail"):
+            self.assertIn(stop, text)
+
+    def test_quick(self):
+        self.assertEqual(
+            self._stops("llm-none"),
+            "The run stops to ask you, in this order: put the junk on the skip list. "
+            "Everything else runs without asking.",
+        )
+
+    def test_nothing_to_ask(self):
+        self.assertEqual(flow.describe_stops([]), "The run doesn't stop to ask anything.")
+
+
 if __name__ == "__main__":
     unittest.main()

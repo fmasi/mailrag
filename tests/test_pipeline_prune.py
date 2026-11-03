@@ -27,6 +27,18 @@ class TestCollect(unittest.TestCase):
         self.assertIn("newsletter", preview[0])
         cache.close.assert_called_once()
 
+    def test_preview_lines_cannot_carry_control_codes(self):
+        """Reasons and subjects derive from the email, and every front-end
+        prints these lines to a terminal."""
+        prof = SimpleNamespace(pass2_cache="/tmp/c.db")
+        cache = mock.Mock()
+        cache.iter_noise.return_value = [_row("h1", 0.9, "promo\x1b]0;pwned\x07 mail")]
+        with mock.patch("src.pipeline.prune.Pass2Cache", return_value=cache):
+            _, preview = prune.collect(prof, source="judge", min_confidence=0.7)
+        self.assertNotIn("\x1b", preview[0])
+        self.assertNotIn("\x07", preview[0])
+        self.assertIn("promo?]0;pwned? mail", preview[0])
+
     def test_from_tag(self):
         prof = SimpleNamespace(resolved_root=lambda: "/r", selection_rules=[])
         e1 = SimpleNamespace(

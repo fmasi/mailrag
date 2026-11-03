@@ -8,8 +8,8 @@ Asks "which persona?" first (surfacing `scan`'s recommendation if a scan ran),
 then walks the recipe in order, rendering each step. Two interaction points the
 plain `run` verb does not have:
 
-* the **calibrate gate** — after `calibrate` shows its FALSE-NOISE/FALSE-KEEP
-  buckets, the user may proceed, re-tune (pick another rubric and re-calibrate),
+* the **calibrate gate** — after `calibrate` shows its two buckets of likely
+  mistakes, the user may proceed, re-tune (pick another rubric and re-calibrate),
   or abort;
 * a **confirm-before-spend** prompt before the big `summarize` LLM pass.
 

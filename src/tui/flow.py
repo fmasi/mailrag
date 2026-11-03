@@ -63,6 +63,7 @@ class PersonaCard:
     verbs: List[str]
     costs: List[str]  # aligned with ``verbs``
     recommended: bool = False
+    does: List[str] = field(default_factory=list)  # aligned with ``verbs``
 
 
 def persona_cards(registry: Registry, recommended: Optional[str] = None) -> List[PersonaCard]:
@@ -78,6 +79,7 @@ def persona_cards(registry: Registry, recommended: Optional[str] = None) -> List
                 verbs=[s.verb for s in p.steps],
                 costs=[registry.verb_info(s.verb).cost for s in p.steps],
                 recommended=(name == recommended),
+                does=[registry.verb_info(s.verb).does for s in p.steps],
             )
         )
     return cards
@@ -345,6 +347,69 @@ def _run_planned(
         result = handlers[step.verb](prof, **step.params)
         ui.on_step_done(index, step, result)
     return 0
+
+
+#: Steps that stop the run to ask the user, and what each asks, in plain words.
+_STOPS = {
+    "calibrate": "check a sample of the AI's decisions",
+    "prune": "put the junk on the skip list",
+    "summarize": "let the AI read your mail",
+}
+
+
+def describe_stops(planned: Sequence[PlannedStep]) -> str:
+    """Where this run will stop to ask, built from the plan itself, so the review
+    screen can't promise a different set of questions than the run asks."""
+    stops = [_STOPS[s.verb] for s in planned if s.verb in _STOPS and not s.skipped]
+    if not stops:
+        return "The run doesn't stop to ask anything."
+    return (
+        "The run stops to ask you, in this order: "
+        + "; ".join(stops)
+        + ". Everything else runs without asking."
+    )
+
+
+def describe_result(result: Any, verb: str = "") -> str:
+    """A step's result as a sentence for the run log.
+
+    The log used to print each result's repr, which put Python objects like
+    ``ProfileReport(percentiles={50: 212, ...})`` in front of people who had
+    never seen the code. Results this doesn't recognise still fall back to that
+    one-line repr rather than vanish."""
+    name = type(result).__name__
+    if name == "ProfileReport":
+        return (
+            f"{result.bodies} emails measured; text will be split into pieces of "
+            f"about {result.suggested_chunk_size} tokens"
+        )
+    if name == "BuildResult":
+        return (
+            f"{result.kept_emails} emails are now searchable in '{result.collection}' "
+            f"({result.chunks} pieces)"
+        )
+    if name == "CalibrationReport":
+        return f"sample of {result.sample} checked: {round(100 * result.noise_rate)}% junk"
+    if isinstance(result, dict) and {"done", "cached"} <= set(result):
+        line = f"AI read {result['done']} emails, {result['cached']} were already done"
+        if result.get("error"):
+            line += f", {result['error']} failed (run again to retry them)"
+        if result.get("unavailable"):
+            line += f", {result['unavailable']} skipped while the AI was unreachable"
+        return line
+    if isinstance(result, list) and all(isinstance(r, dict) and "type" in r for r in result):
+        return f"{len(result)} folder selection(s) saved"
+    if name == "Pass1Stats":
+        return f"{result.tagged} of {result.total} emails look like newsletters"
+    if name == "ClusterReport":
+        return (
+            f"{result.n_emails} emails grouped; about "
+            f"{round(100 * result.obvious_noise_fraction)}% of conversations sit in "
+            "obvious junk groups"
+        )
+    if verb == "prune" and isinstance(result, int) and not isinstance(result, bool):
+        return f"{result} emails added to the skip list"
+    return short_result(result)
 
 
 def short_result(result: Any, limit: int = 140) -> str:

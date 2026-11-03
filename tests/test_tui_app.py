@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from src.tui.app import (
@@ -369,6 +370,40 @@ class TestNavigationAndEdges(_TuiCase):
         self.assertEqual(app.state.persona_name, "llm-verify")
 
 
+class TestRerunKeepsChoices(_TuiCase):
+    def test_folders_ticked_last_time_are_ticked_again(self):
+        """A rerun after a stop should not start from an empty folder tree."""
+        with open(self.profile_path) as fh:
+            data = json.load(fh)
+        data["selection_rules"] = [{"type": "prefix", "value": "Inbox/"}]
+        with open(self.profile_path, "w") as fh:
+            json.dump(data, fh)
+        self.assertEqual(self.app().state.scope_rules, [{"type": "prefix", "value": "Inbox/"}])
+
+    def test_a_fresh_profile_starts_with_nothing_ticked(self):
+        self.assertIsNone(self.app().state.scope_rules)
+
+
+class TestWelcomeNamesTheRecipe(unittest.TestCase):
+    def test_the_recommendation_uses_the_label_the_picker_shows(self):
+        from src.persona.registry import load_registry
+        from src.tui.app import WelcomeScreen
+
+        screen = WelcomeScreen.__new__(WelcomeScreen)
+        screen._state = SimpleNamespace(recommendation="llm-all")
+        screen._registry = load_registry()
+        self.assertEqual(screen._recommended_label(), "Thorough, AI reads everything")
+
+    def test_an_unknown_recommendation_falls_back_to_its_id(self):
+        from src.persona.registry import load_registry
+        from src.tui.app import WelcomeScreen
+
+        screen = WelcomeScreen.__new__(WelcomeScreen)
+        screen._state = SimpleNamespace(recommendation="gone")
+        screen._registry = load_registry()
+        self.assertEqual(screen._recommended_label(), "gone")
+
+
 class TestRunTuiGuards(unittest.TestCase):
     def test_run_tui_needs_a_tty(self):
         # Under pytest stdin/stdout are not ttys, so the guard trips.
@@ -400,7 +435,7 @@ class TestRunTuiGuards(unittest.TestCase):
 class TestDescribeRule(unittest.TestCase):
     def test_prefix_rule(self):
         self.assertEqual(
-            _describe_rule({"type": "prefix", "value": "Inbox/"}), "Inbox/ (and subfolders)"
+            _describe_rule({"type": "prefix", "value": "Inbox/"}), "Inbox/ (and everything inside)"
         )
 
     def test_direct_root_files_rule(self):
@@ -484,6 +519,151 @@ class TestProgressBarsUnderTheFullScreenApp(unittest.TestCase):
         ):
             app_mod.RunScreen._execute(fake)
         self.assertEqual(calls, ["guard", "steps"])
+
+    def test_a_failing_guard_still_ends_the_run(self):
+        """Otherwise the screen would say "running…" forever."""
+        from src.tui import app as app_mod
+
+        finished = []
+        fake = mock.Mock()
+        fake.app.call_from_thread = lambda fn, *a: (
+            finished.append(a) if fn is fake._finish else None
+        )
+
+        def broken():
+            raise RuntimeError("no tqdm")
+
+        with mock.patch.object(app_mod, "make_progress_bars_safe", broken):
+            app_mod.RunScreen._execute(fake)
+        self.assertEqual(finished, [(1,)])
+
+
+class TestPruneWording(unittest.TestCase):
+    """What "no" means at the prune gate depends on who made the junk calls:
+    the AI's confident junk is out of search either way, header-flagged
+    newsletters stay searchable. Decided by prune's own source."""
+
+    def _screen(self, steps):
+        from src.tui import app as app_mod
+
+        fake = mock.Mock()
+        fake._planned = [SimpleNamespace(verb=v, params=p) for v, p in steps]
+        return fake, app_mod.RunScreen
+
+    def _ai(self, steps):
+        fake, cls = self._screen(steps)
+        return cls.ai_judges_everything(fake)
+
+    SUMMARY_INDEX = ("index", {"embed": "summary"})
+
+    def test_thorough(self):
+        self.assertTrue(
+            self._ai(
+                [
+                    ("calibrate", {}),
+                    ("summarize", {}),
+                    ("prune", {"from": "summarize"}),
+                    self.SUMMARY_INDEX,
+                ]
+            )
+        )
+
+    def test_balanced(self):
+        self.assertTrue(self._ai([("judge", {}), ("prune", {"from": "judge"}), self.SUMMARY_INDEX]))
+
+    def test_an_index_of_bodies_keeps_the_ai_junk_unless_pruned(self):
+        """build.run applies the AI's verdicts only when it embeds summaries."""
+        self.assertFalse(
+            self._ai([("judge", {}), ("prune", {"from": "judge"}), ("index", {"embed": "body"})])
+        )
+
+    def test_quick(self):
+        self.assertFalse(self._ai([("tag", {}), ("prune", {"from": "tag"})]))
+
+    def test_a_custom_recipe_pruning_tags_before_the_ai_is_not_the_ai(self):
+        self.assertFalse(self._ai([("tag", {}), ("prune", {"from": "tag"}), ("summarize", {})]))
+
+    def test_the_stopped_message_mentions_summaries_only_for_ai_recipes(self):
+        fake, cls = self._screen([("summarize", {})])
+        self.assertIn("Summaries the AI already wrote are kept", cls.stopped_message(fake))
+        fake, cls = self._screen([("tag", {}), ("index", {})])
+        quick = cls.stopped_message(fake)
+        self.assertNotIn("Summaries", quick)
+        self.assertNotIn("sample", quick)
+        self.assertIn("asks for the recipe", quick)
+
+    def _prune_body(self, steps):
+        from src.tui import app as app_mod
+
+        fake, cls = self._screen(steps)
+        fake.ai_judges_everything = lambda: cls.ai_judges_everything(fake)
+        fake.skip_list_path = lambda: "/x/box.blacklist.txt"
+        bridge = app_mod._WorkerBridge.__new__(app_mod._WorkerBridge)
+        bridge._screen = fake
+        seen = {}
+
+        def ask(make):
+            seen["modal"] = make()
+            return True
+
+        bridge._ask = ask
+        bridge.confirm_prune(["0.93  promo"])
+        return seen["modal"]._body
+
+    def test_ai_recipes_do_not_promise_that_deleting_the_list_undoes_it(self):
+        body = self._prune_body(
+            [("judge", {}), ("prune", {"from": "judge"}), ("index", {"embed": "summary"})]
+        )
+        self.assertIn("does not bring these back", body)
+        self.assertNotIn("brings back everything", body)
+        self.assertIn("No changes nothing about this run", body)
+
+    def test_quick_explains_how_to_undo_and_what_no_means(self):
+        body = self._prune_body([("tag", {}), ("prune", {"from": "tag"}), ("index", {})])
+        self.assertIn("brings back everything ever skipped", body)
+        self.assertIn("No keeps them", body)
+        self.assertIn("header rules", body)
+
+    def test_the_skip_list_path_is_the_profiles_own(self):
+        fake, cls = self._screen([])
+        fake._state = SimpleNamespace(
+            profile=SimpleNamespace(blacklist="/x/box.skip.txt"), profile_path="/x/box.json"
+        )
+        self.assertEqual(cls.skip_list_path(fake), "/x/box.skip.txt")
+        fake._state.profile.blacklist = None
+        self.assertEqual(cls.skip_list_path(fake), "/x/box.blacklist.txt")
+
+
+class TestRestoredTicks(_TuiCase):
+    def _save_rules(self, rules):
+        with open(self.profile_path) as fh:
+            data = json.load(fh)
+        data["selection_rules"] = rules
+        with open(self.profile_path, "w") as fh:
+            json.dump(data, fh)
+
+    async def _open_scope(self, app, pilot):
+        screen = ScopeScreen(app.state)
+        await app.push_screen(screen)
+        await pilot.pause()
+        return screen
+
+    async def test_a_saved_folder_is_ticked_on_the_scope_screen(self):
+        self._save_rules([{"type": "prefix", "value": "Inbox/"}])
+        app = self.app()
+        async with app.run_test(size=_SIZE) as pilot:
+            screen = await self._open_scope(app, pilot)
+            self.assertIn("Inbox/", screen._checked)
+
+    async def test_a_tick_for_a_folder_that_is_gone_is_dropped(self):
+        self._save_rules(
+            [{"type": "prefix", "value": "Inbox/"}, {"type": "prefix", "value": "Gone/"}]
+        )
+        app = self.app()
+        async with app.run_test(size=_SIZE) as pilot:
+            screen = await self._open_scope(app, pilot)
+            self.assertNotIn("Gone/", screen._checked)
+            self.assertEqual(screen._rules(), [{"type": "prefix", "value": "Inbox/"}])
 
 
 if __name__ == "__main__":

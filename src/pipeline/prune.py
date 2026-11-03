@@ -17,6 +17,7 @@ from src.data.noise_filter import NoiseFilter
 from src.ingest.local_source import resolve_index_files
 from src.llm.cache import Pass2Cache
 from src.pipeline import pass1
+from src.terminal_text import printable
 
 
 def _from_cache(profile, min_confidence: float) -> Tuple[List[str], List[str]]:
@@ -47,12 +48,19 @@ def _from_tag(profile) -> Tuple[List[str], List[str]]:
 
 
 def collect(profile, *, source: str, min_confidence: float = 0.7) -> Tuple[List[str], List[str]]:
-    """Return ``(hashes, preview_lines)`` for the requested *source*."""
+    """Return ``(hashes, preview_lines)`` for the requested *source*.
+
+    Preview lines quote senders, subjects or the LLM's reasons, all derived from
+    the email, and every front-end prints them to a terminal (``mailrag prune``,
+    both wizards). Control characters are replaced here, once, for all of them.
+    """
     if source in ("judge", "summarize"):
-        return _from_cache(profile, min_confidence)
-    if source == "tag":
-        return _from_tag(profile)
-    raise ValueError(f"unknown prune source {source!r} (use tag|judge|summarize)")
+        hashes, preview = _from_cache(profile, min_confidence)
+    elif source == "tag":
+        hashes, preview = _from_tag(profile)
+    else:
+        raise ValueError(f"unknown prune source {source!r} (use tag|judge|summarize)")
+    return hashes, [printable(line) for line in preview]
 
 
 def run(

@@ -88,7 +88,7 @@ class TestCliDispatch(unittest.TestCase):
                 rc = cli.main(["calibrate", "--profile", fp, "--model", "gemma"])
             self.assertEqual(rc, 0)
             printed = out.getvalue()
-            self.assertIn("FALSE-NOISE", printed)  # the buckets are surfaced
+            self.assertIn("might be a real record", printed)  # the buckets are surfaced
             self.assertIn("personal", printed)
             saved = CorpusProfile.load(fp)
             self.assertIsNotNone(saved.calibration)
