@@ -8,6 +8,7 @@ Uses ``unittest.IsolatedAsyncioTestCase`` (stdlib), which pytest runs natively.
 
 import json
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -413,6 +414,76 @@ class TestDescribeRule(unittest.TestCase):
 
     def test_unknown_rule_type_shown_raw(self):
         self.assertEqual(_describe_rule({"type": "weird"}), "{'type': 'weird'}")
+
+
+class TestProgressBarsUnderTheFullScreenApp(unittest.TestCase):
+    """While the app runs, Textual replaces stderr with a capture whose fileno()
+    is invalid. tqdm's first bar in a process creates a multiprocessing lock,
+    which spawns a helper and hands it stderr's fd: ValueError 'bad value(s) in
+    fds_to_keep'. Calibrate crashed that way, and every later LLM or embedding
+    step would have too. Run in a fresh interpreter, since the lock is created
+    once per process.
+
+    The helper is only started under the spawn and forkserver start methods,
+    macOS's default. Linux defaults to fork and never crashed, so the script
+    forces spawn: the tests then pin the same failure on every platform."""
+
+    SCRIPT = (
+        "import io, sys, multiprocessing\n"
+        "multiprocessing.set_start_method('spawn', force=True)\n"
+        "class Capture(io.TextIOBase):\n"
+        "    def write(self, s): return len(s)\n"
+        "    def fileno(self): return -1\n"
+        "sys.stderr = Capture()\n"
+        "{prepare}\n"
+        "from tqdm import tqdm\n"
+        "try:\n"
+        "    bar = tqdm(total=2); bar.update(2); bar.close()\n"
+        "except Exception as exc:\n"
+        "    print(type(exc).__name__, exc, file=sys.__stdout__)\n"
+        "    sys.exit(1)\n"
+        "print('ok', file=sys.__stdout__)\n"
+    )
+
+    def _run(self, prepare: str):
+        import subprocess
+
+        return subprocess.run(  # noqa: S603 — fixed interpreter and script, no user input
+            [sys.executable, "-c", self.SCRIPT.format(prepare=prepare)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        )
+
+    def test_the_crash_is_real_without_the_guard(self):
+        """Pins the cause, so the guard below is known to be what fixes it."""
+        result = self._run("pass")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fds_to_keep", result.stderr + result.stdout)
+
+    def test_the_app_makes_progress_bars_safe_before_running_steps(self):
+        result = self._run(
+            "from src.tui.app import make_progress_bars_safe; make_progress_bars_safe()"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ok", result.stdout)
+
+    def test_the_run_screen_applies_the_guard_before_any_step(self):
+        """The helper working proves nothing if the run never calls it."""
+        from src.tui import app as app_mod
+
+        calls = []
+        fake = mock.Mock()
+        fake.app.call_from_thread = lambda fn, *a: None
+        with (
+            mock.patch.object(app_mod, "make_progress_bars_safe", lambda: calls.append("guard")),
+            mock.patch.object(
+                app_mod.flow, "execute_plan", lambda *a, **k: calls.append("steps") or 0
+            ),
+        ):
+            app_mod.RunScreen._execute(fake)
+        self.assertEqual(calls, ["guard", "steps"])
 
 
 if __name__ == "__main__":

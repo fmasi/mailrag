@@ -36,6 +36,23 @@ from src.profile import CorpusProfile
 from src.tui import flow
 
 
+def make_progress_bars_safe() -> None:
+    """Give tqdm a thread lock before any step draws a progress bar.
+
+    While the app runs, Textual replaces ``sys.stderr`` with a capture whose
+    ``fileno()`` is invalid. tqdm's first bar in a process creates a
+    multiprocessing lock, which starts a helper process and passes it stderr's
+    file descriptor, and that fails with ``ValueError: bad value(s) in
+    fds_to_keep``. Calibrate crashed that way, and summarize and index create
+    bars too, ours and the embedding library's. The steps run in threads, never
+    in processes, so a thread lock is all tqdm needs. It is process-wide, which
+    is why this runs before the first step rather than around each one.
+    """
+    from tqdm import tqdm
+
+    tqdm.set_lock(threading.RLock())
+
+
 class _Nav:
     """Navigation sentinels returned by screens (identity-compared)."""
 
@@ -836,6 +853,7 @@ class RunScreen(Screen[int]):
 
     def _execute(self) -> None:
         """Worker-thread entry: run the plan; every UI touch goes through the bridge."""
+        make_progress_bars_safe()
         try:
             code = flow.execute_plan(
                 self._state.profile,
