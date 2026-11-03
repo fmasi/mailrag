@@ -592,6 +592,38 @@ class TestPruneWording(unittest.TestCase):
         self.assertNotIn("sample", quick)
         self.assertIn("asks for the recipe", quick)
 
+    def _prune_body(self, steps):
+        from src.tui import app as app_mod
+
+        fake, cls = self._screen(steps)
+        fake.ai_judges_everything = lambda: cls.ai_judges_everything(fake)
+        fake.skip_list_path = lambda: "/x/box.blacklist.txt"
+        bridge = app_mod._WorkerBridge.__new__(app_mod._WorkerBridge)
+        bridge._screen = fake
+        seen = {}
+
+        def ask(make):
+            seen["modal"] = make()
+            return True
+
+        bridge._ask = ask
+        bridge.confirm_prune(["0.93  promo"])
+        return seen["modal"]._body
+
+    def test_ai_recipes_do_not_promise_that_deleting_the_list_undoes_it(self):
+        body = self._prune_body(
+            [("judge", {}), ("prune", {"from": "judge"}), ("index", {"embed": "summary"})]
+        )
+        self.assertIn("does not bring these back", body)
+        self.assertNotIn("brings back everything", body)
+        self.assertIn("No changes nothing about this run", body)
+
+    def test_quick_explains_how_to_undo_and_what_no_means(self):
+        body = self._prune_body([("tag", {}), ("prune", {"from": "tag"}), ("index", {})])
+        self.assertIn("brings back everything ever skipped", body)
+        self.assertIn("No keeps them", body)
+        self.assertIn("header rules", body)
+
     def test_the_skip_list_path_is_the_profiles_own(self):
         fake, cls = self._screen([])
         fake._state = SimpleNamespace(

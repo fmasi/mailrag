@@ -854,16 +854,24 @@ class _WorkerBridge:
         if self._screen.ai_judges_everything():
             who = "the AI judged"
             legend = "Each line: how sure the AI is (0 to 1), then its reason.\n"
+            # build.py re-applies the cached verdicts whatever the list says.
+            undo = (
+                "Deleting the list does not bring these back: the AI's junk calls are "
+                "kept in its cache and applied again at every rebuild."
+            )
         else:
             who = "the header rules flagged"
             legend = ""
+            undo = (
+                "The list builds up over every run: deleting it brings back everything "
+                "ever skipped, from the next rebuild."
+            )
         skip_list = self._screen.skip_list_path()
         body = (
             f"These are emails {who} as junk (a sample is shown). Yes adds them to the "
             f"skip list ({escape(skip_list)}), so later runs and rebuilds pass over them "
-            "too. Nothing is deleted from your mailbox. The list builds up over every "
-            "run: deleting it brings back everything ever skipped, from the next "
-            f"rebuild.\n[dim]{if_no}[/]\n\n{legend}"
+            f"too. Nothing is deleted from your mailbox. {undo}\n[dim]{if_no}[/]\n\n"
+            f"{legend}"
         ) + "\n".join(f"  [dim]{escape(line)}[/]" for line in preview)
         return bool(
             self._ask(
