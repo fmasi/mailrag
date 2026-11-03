@@ -349,7 +349,7 @@ when the file is a scan or an image. Raw bytes are **never** returned over MCP.
 
 - **Args:**
   - `sha256` (str, required) — content hash of the attachment (from `list_attachments`).
-  - `ocr` (str, optional) — extraction backend: `llm` | `tesseract` | `cloud`
+  - `ocr` (str, optional) — extraction backend: `llm` | `tesseract`
     (like the CLI `--extractor` flag). Defaults to `$RAG_ATTACH_EXTRACTOR` or `llm`.
   - `collection` (str, optional) — whose attachment store to read. A sha256 from
     another corpus is not found, and the call is refused when no collection resolves.

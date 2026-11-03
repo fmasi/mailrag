@@ -194,7 +194,7 @@ any OCR backend (vision LLM or tesseract) are capped by `RAG_ATTACH_MAX_PAGES`
 
 | Env var | Default | Values |
 |---------|---------|--------|
-| `RAG_ATTACH_EXTRACTOR` | `llm` | `llm` · `tesseract` · `cloud` (not implemented). Used by `index` and when a file is opened (`attachments get`, MCP `get_attachment`) |
+| `RAG_ATTACH_EXTRACTOR` | `llm` | `llm` · `tesseract`. Used when a file is opened (`attachments get`, MCP `get_attachment`). `index` and sync always use tesseract for attachment text |
 | `RAG_ATTACH_CLASSIFY_EXTRACTOR` | `tesseract` | OCR backend for the noise-signal pass of `attachments build` |
 | `RAG_ATTACH_STORE` | `~/.mailrag/attachments` | store root. Each collection gets its own subdirectory |
 | `RAG_ATTACH_MAX_PAGES` | `10` | integer — max scanned-PDF pages rendered/read per attachment (any OCR backend) |
