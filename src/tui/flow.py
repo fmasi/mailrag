@@ -407,6 +407,16 @@ def describe_result(result: Any, verb: str = "") -> str:
             f"{round(100 * result.obvious_noise_fraction)}% of conversations sit in "
             "obvious junk groups"
         )
+    if isinstance(result, dict) and {"emails", "attachments", "complete"} <= set(result):
+        if not result["emails"]:
+            return "no mail found in the ticked folders, so no attachments were stored"
+        line = (
+            f"{result['attachments']} attachments from {result['emails']} emails stored; "
+            "agents can open them now"
+        )
+        if not result["complete"]:
+            line += " (a partial run: an empty listing may just mean not stored yet)"
+        return line
     if verb == "prune" and isinstance(result, int) and not isinstance(result, bool):
         return f"{result} emails added to the skip list"
     return short_result(result)

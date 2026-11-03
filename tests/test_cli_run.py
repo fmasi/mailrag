@@ -81,7 +81,8 @@ class TestRunLimit(unittest.TestCase):
     def test_run_passes_limit_to_build_handlers(self):
         prof = mock.Mock()
         handlers = {
-            v: (lambda p, **k: None) for v in ("scope", "measure", "scan", "tag", "prune", "index")
+            v: (lambda p, **k: None)
+            for v in ("scope", "measure", "scan", "tag", "prune", "index", "attach")
         }
         with (
             mock.patch("src.cli.CorpusProfile.load", return_value=prof),
@@ -154,6 +155,7 @@ class TestBuildHandlers(unittest.TestCase):
                 "index",
                 "judge",
                 "prune",
+                "attach",
             },
         )
 

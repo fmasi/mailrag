@@ -110,6 +110,21 @@ def build_handlers(
         emb = embedder or BgeM3Embedder(device="mps", use_fp16=True)
         return build_stage.run(prof, embedder=emb, embed_summary=(embed == "summary"), limit=limit)
 
+    def _attach(prof, **_):
+        # The store agents open attachments from (list_attachments /
+        # get_attachment). Sync fills it for new mail; without this step a
+        # mailbox set up through a recipe had searchable mail and no files.
+        from src.attachments.build import build_store
+        from src.attachments.location import resolve_attach_store
+        from src.onboard import record_profile_for_collection
+
+        if not prof.collection:
+            # An empty name resolves to the shared root of every store, the one
+            # place per-collection separation exists to keep files out of.
+            raise ValueError("the profile names no collection, so there is no store to fill")
+        record_profile_for_collection(prof.collection, profile_path)
+        return build_store(prof, resolve_attach_store(collection=prof.collection), limit=limit)
+
     def _judge(prof, min_score=0.6, **_):
         return judge_stage.run(
             prof, model=_require_model(), scan_json=_scan_json, min_score=min_score, workers=workers
@@ -128,6 +143,7 @@ def build_handlers(
         "calibrate": _calibrate,
         "summarize": _summarize,
         "index": _index,
+        "attach": _attach,
         "judge": _judge,
         "prune": _prune,
     }

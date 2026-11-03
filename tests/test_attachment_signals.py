@@ -344,9 +344,9 @@ class TestBuildVerbWiring(unittest.TestCase):
         )
         with (
             mock.patch.object(cli, "CorpusProfile"),
-            mock.patch.object(cli, "resolve_index_files", return_value=([], None)),
-            mock.patch.object(cli, "AttachmentStore"),
-            mock.patch.object(cli, "ingest_eml", return_value={}),
+            mock.patch("src.ingest.local_source.resolve_index_files", return_value=([], None)),
+            mock.patch("src.attachments.store.AttachmentStore"),
+            mock.patch("src.attachments.ingest_eml.ingest_eml", return_value={}),
             mock.patch("src.attachments.classify.classify_blobs") as classify,
             mock.patch("src.attachments.extract.build_default_extractor") as build,
         ):
@@ -375,9 +375,9 @@ class TestBuildVerbWiring(unittest.TestCase):
         )
         with (
             mock.patch.object(cli, "CorpusProfile"),
-            mock.patch.object(cli, "resolve_index_files", return_value=([], None)),
-            mock.patch.object(cli, "AttachmentStore"),
-            mock.patch.object(cli, "ingest_eml", return_value={}),
+            mock.patch("src.ingest.local_source.resolve_index_files", return_value=([], None)),
+            mock.patch("src.attachments.store.AttachmentStore"),
+            mock.patch("src.attachments.ingest_eml.ingest_eml", return_value={}),
             mock.patch("src.attachments.classify.classify_blobs") as classify,
             mock.patch("src.attachments.extract.build_default_extractor") as build,
         ):

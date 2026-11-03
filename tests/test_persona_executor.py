@@ -20,12 +20,14 @@ class TestPersonaExecutor(unittest.TestCase):
 
         persona = self.reg.get("llm-all")
         handlers = {
-            v: make(v) for v in ("scope", "measure", "calibrate", "summarize", "prune", "index")
+            v: make(v)
+            for v in ("scope", "measure", "calibrate", "summarize", "prune", "index", "attach")
         }
         results = run_persona("PROFILE", persona, handlers)
 
         self.assertEqual(
-            [v for v, _ in calls], ["scope", "measure", "calibrate", "summarize", "prune", "index"]
+            [v for v, _ in calls],
+            ["scope", "measure", "calibrate", "summarize", "prune", "index", "attach"],
         )
         self.assertEqual(dict(calls)["summarize"], {"target": "all"})
         self.assertTrue(all(isinstance(r, StepResult) for r in results))
@@ -47,19 +49,19 @@ class TestPersonaExecutor(unittest.TestCase):
         persona = self.reg.get("llm-none")  # scan is {optional: true}
         handlers = {
             v: (lambda profile, _v=v, **k: calls.append(_v))
-            for v in ("scope", "measure", "tag", "prune", "index")
+            for v in ("scope", "measure", "tag", "prune", "index", "attach")
         }  # no scan
         self.assertEqual(missing_handlers(persona, handlers), [])  # optional ignored
         run_persona("P", persona, handlers)
         self.assertNotIn("scan", calls)
-        self.assertEqual(calls, ["scope", "measure", "tag", "prune", "index"])
+        self.assertEqual(calls, ["scope", "measure", "tag", "prune", "index", "attach"])
 
     def test_on_step_callback_fires(self):
         seen = []
         persona = self.reg.get("llm-none")
         handlers = {
             v: (lambda profile, **k: None)
-            for v in ("scope", "measure", "scan", "tag", "prune", "index")
+            for v in ("scope", "measure", "scan", "tag", "prune", "index", "attach")
         }
         run_persona("P", persona, handlers, on_step=lambda step: seen.append(step.verb))
         self.assertEqual(seen[0], "scope")

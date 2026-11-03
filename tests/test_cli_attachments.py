@@ -13,10 +13,16 @@ class TestAttachmentsCli(unittest.TestCase):
         prof.resolved_root.return_value = "/root"
         with (
             mock.patch("src.cli.CorpusProfile.load", return_value=prof),
-            mock.patch("src.cli.resolve_index_files", return_value=(["/root/a.eml"], [])),
-            mock.patch("src.cli.AttachmentStore") as store_cls,
             mock.patch(
-                "src.cli.ingest_eml", return_value={"emails": 1, "attachments": 2, "skipped": 0}
+                "src.ingest.local_source.resolve_index_files", return_value=(["/root/a.eml"], [])
+            ),
+            mock.patch("src.onboard.record_profile_for_collection"),
+            mock.patch("src.attachments.store.AttachmentStore") as store_cls,
+            mock.patch("src.attachments.classify.classify_blobs"),
+            mock.patch("src.attachments.extract.build_default_extractor"),
+            mock.patch(
+                "src.attachments.ingest_eml.ingest_eml",
+                return_value={"emails": 1, "attachments": 2, "skipped": 0},
             ) as ing,
         ):
             rc = cli.main(
@@ -53,10 +59,10 @@ class TestAttachmentsCli(unittest.TestCase):
         prof.resolved_root.return_value = "/root"
         with (
             mock.patch("src.cli.CorpusProfile.load", return_value=prof),
-            mock.patch("src.cli.resolve_index_files", return_value=([], [])),
+            mock.patch("src.ingest.local_source.resolve_index_files", return_value=([], [])),
             mock.patch("src.onboard.record_profile_for_collection"),
             mock.patch(
-                "src.cli.ingest_eml",
+                "src.attachments.ingest_eml.ingest_eml",
                 return_value={"emails": emails, "attachments": 0, "skipped": 0, "bad_parts": 0},
             ),
         ):

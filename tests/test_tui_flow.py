@@ -35,6 +35,7 @@ def _recording_handlers(calls):
             "index",
             "judge",
             "prune",
+            "attach",
         )
     }
 
@@ -277,7 +278,7 @@ class TestExecutePlan(unittest.TestCase):
         ui = FakeUI()
         rc, calls, prof = self._run("llm-none", ui)
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, ["scope", "measure", "scan", "tag", "prune", "index"])
+        self.assertEqual(calls, ["scope", "measure", "scan", "tag", "prune", "index", "attach"])
         prof.save.assert_called_once_with("p.json")
 
     def test_optional_step_without_handler_is_skipped(self):
@@ -292,7 +293,9 @@ class TestExecutePlan(unittest.TestCase):
         with mock.patch("src.llm.calibration.format_report", return_value="BUCKETS"):
             rc, calls, _ = self._run("llm-all", ui)
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, ["scope", "measure", "calibrate", "summarize", "prune", "index"])
+        self.assertEqual(
+            calls, ["scope", "measure", "calibrate", "summarize", "prune", "index", "attach"]
+        )
 
     def test_calibrate_gate_abort_stops_before_summarize(self):
         ui = FakeUI(gates=["abort"])
@@ -364,7 +367,17 @@ class TestExecutePlan(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(
             calls,
-            ["scope", "measure", "scan", "calibrate", "judge", "prune", "summarize", "index"],
+            [
+                "scope",
+                "measure",
+                "scan",
+                "calibrate",
+                "judge",
+                "prune",
+                "summarize",
+                "index",
+                "attach",
+            ],
         )
 
 

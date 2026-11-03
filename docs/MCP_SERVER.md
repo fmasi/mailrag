@@ -260,11 +260,13 @@ grounded natural-language answer for you.
 List the files attached to a thread or a message (parity with the CLI
 `./mailrag attachments list`) — and the way in to their contents.
 
-> **The store must be built once, separately.** `mailrag onboard` and `index`
-> do **not** populate it: they extract attachment *text* for retrieval down a
-> different path (`src/indexing/attachment_docs.py`), which is why attachment
-> content can be fully searchable while `list_attachments` returns nothing for
-> every thread. Run `./mailrag attachments build --profile
+> **The store is built by a recipe's `attach` step, or once by hand.** The
+> wizard and `mailrag run` end every recipe with `attach`, which fills it over
+> the profile's mail. `mailrag onboard` and a bare `index` do **not**: they
+> extract attachment *text* for retrieval down a different path
+> (`src/indexing/attachment_docs.py`), which is why attachment content can be
+> fully searchable while `list_attachments` returns nothing for every thread.
+> After those, run `./mailrag attachments build --profile
 > <corpus.profile.json>` once to populate it. Both attachment tools raise an
 > actionable error naming that command when the store is empty, rather than
 > answering like a thread that simply has no attachments.
