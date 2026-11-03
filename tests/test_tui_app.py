@@ -554,13 +554,28 @@ class TestPruneWording(unittest.TestCase):
         fake, cls = self._screen(steps)
         return cls.ai_judges_everything(fake)
 
+    SUMMARY_INDEX = ("index", {"embed": "summary"})
+
     def test_thorough(self):
         self.assertTrue(
-            self._ai([("calibrate", {}), ("summarize", {}), ("prune", {"from": "summarize"})])
+            self._ai(
+                [
+                    ("calibrate", {}),
+                    ("summarize", {}),
+                    ("prune", {"from": "summarize"}),
+                    self.SUMMARY_INDEX,
+                ]
+            )
         )
 
     def test_balanced(self):
-        self.assertTrue(self._ai([("judge", {}), ("prune", {"from": "judge"})]))
+        self.assertTrue(self._ai([("judge", {}), ("prune", {"from": "judge"}), self.SUMMARY_INDEX]))
+
+    def test_an_index_of_bodies_keeps_the_ai_junk_unless_pruned(self):
+        """build.run applies the AI's verdicts only when it embeds summaries."""
+        self.assertFalse(
+            self._ai([("judge", {}), ("prune", {"from": "judge"}), ("index", {"embed": "body"})])
+        )
 
     def test_quick(self):
         self.assertFalse(self._ai([("tag", {}), ("prune", {"from": "tag"})]))
@@ -584,7 +599,7 @@ class TestPruneWording(unittest.TestCase):
         )
         self.assertEqual(cls.skip_list_path(fake), "/x/box.skip.txt")
         fake._state.profile.blacklist = None
-        self.assertIn("next to it", cls.skip_list_path(fake))
+        self.assertEqual(cls.skip_list_path(fake), "/x/box.blacklist.txt")
 
 
 class TestRestoredTicks(_TuiCase):

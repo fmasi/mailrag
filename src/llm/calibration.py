@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
+from src.terminal_text import printable
+
 Record = Dict[str, Any]
 
 # Record-ish vocabulary: receipts, statements, bookings, account/tax events, bills.
@@ -83,19 +85,10 @@ FALSE_NOISE_HEADING = "Marked junk, but might be a real record"
 FALSE_KEEP_HEADING = "Kept, but might be junk"
 
 
-def _printable(text: str) -> str:
-    """Header text with control characters replaced.
-
-    Sender and subject come from the email, so they are attacker-chosen. An
-    encoded-word header decodes to anything, an ESC sequence included, and this
-    report is printed straight to the terminal by ``mailrag calibrate``."""
-    return "".join(ch if ch.isprintable() else "?" for ch in text)
-
-
 def _line(rec: Record, tail_key: str, count: int) -> str:
-    sender = _printable((rec.get("sender") or "")[:36])
-    subject = _printable((rec.get("subject") or "")[:44])
-    tail = _printable((rec.get(tail_key) or "")[:58])
+    sender = printable((rec.get("sender") or "")[:36])
+    subject = printable((rec.get("subject") or "")[:44])
+    tail = printable((rec.get(tail_key) or "")[:58])
     times = f"  (x{count})" if count > 1 else ""
     return f"  - {sender} | {subject}{times} :: {tail}"
 

@@ -464,5 +464,38 @@ class TestDescribeMoreResults(unittest.TestCase):
         )
 
 
+class TestDescribeStops(unittest.TestCase):
+    """The review screen's promise comes from the plan, per recipe."""
+
+    def _stops(self, name):
+        reg = load_registry()
+        persona = reg.get(name)
+        handlers = {s.verb: (lambda *a, **k: None) for s in persona.steps}
+        return flow.describe_stops(flow.plan_steps(persona, handlers, reg))
+
+    def test_thorough(self):
+        self.assertEqual(
+            self._stops("llm-all"),
+            "The run stops to ask you, in this order: check a sample of the AI's "
+            "decisions; let the AI read your mail; put the junk on the skip list. "
+            "Everything else runs without asking.",
+        )
+
+    def test_balanced_mentions_all_three_stops(self):
+        text = self._stops("llm-verify")
+        for stop in ("sample", "skip list", "read your mail"):
+            self.assertIn(stop, text)
+
+    def test_quick(self):
+        self.assertEqual(
+            self._stops("llm-none"),
+            "The run stops to ask you, in this order: put the junk on the skip list. "
+            "Everything else runs without asking.",
+        )
+
+    def test_nothing_to_ask(self):
+        self.assertEqual(flow.describe_stops([]), "The run doesn't stop to ask anything.")
+
+
 if __name__ == "__main__":
     unittest.main()

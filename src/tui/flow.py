@@ -349,6 +349,27 @@ def _run_planned(
     return 0
 
 
+#: Steps that stop the run to ask the user, and what each asks, in plain words.
+_STOPS = {
+    "calibrate": "check a sample of the AI's decisions",
+    "prune": "put the junk on the skip list",
+    "summarize": "let the AI read your mail",
+}
+
+
+def describe_stops(planned: Sequence[PlannedStep]) -> str:
+    """Where this run will stop to ask, built from the plan itself, so the review
+    screen can't promise a different set of questions than the run asks."""
+    stops = [_STOPS[s.verb] for s in planned if s.verb in _STOPS and not s.skipped]
+    if not stops:
+        return "The run doesn't stop to ask anything."
+    return (
+        "The run stops to ask you, in this order: "
+        + "; ".join(stops)
+        + ". Everything else runs without asking."
+    )
+
+
 def describe_result(result: Any, verb: str = "") -> str:
     """A step's result as a sentence for the run log.
 

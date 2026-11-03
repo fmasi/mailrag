@@ -15,6 +15,7 @@ prune) surface as modal dialogs, marshalled across the thread boundary by
 
 from __future__ import annotations
 
+import shlex
 import sys
 import threading
 import traceback
@@ -404,7 +405,7 @@ class ScopeScreen(WizardScreen):
             yield Static("[b]Which folders should be searchable?[/]", classes="panel-title")
             yield Static(
                 "Tick the folders to include. A ticked folder includes everything inside it. "
-                "Unticked folders are left alone.\n"
+                "Unticked folders are left out of search.\n"
                 "[dim]space[/] tick/untick   [dim]c[/] continue   [dim]esc[/] back",
                 id="scope-help",
             )
@@ -451,7 +452,7 @@ class ScopeScreen(WizardScreen):
         if missing:
             self._checked -= missing
             self.notify(
-                f"{len(missing)} folder(s) ticked last time are no longer in the mailbox "
+                f"{len(missing)} folder(s) ticked last time are not shown in this tree "
                 "and were unticked.",
                 severity="warning",
             )
@@ -618,17 +619,7 @@ class ReviewScreen(WizardScreen):
                         id="review-missing",
                     )
                 else:
-                    if flow.needs_model(self._persona):
-                        asks = (
-                            "The run stops for you to check a sample of the AI's decisions, "
-                            "and asks before the AI reads your mail. Making it searchable "
-                            "at the end runs without asking."
-                        )
-                    else:
-                        asks = (
-                            "The only question it asks is whether to put the flagged "
-                            "newsletters on the skip list."
-                        )
+                    asks = flow.describe_stops(self._planned)
                     yield Static(f"\n[green]Ready.[/] Press [b]enter[/] to start.\n[dim]{asks}[/]")
 
     def action_start(self) -> None:
@@ -962,7 +953,14 @@ class RunScreen(Screen[int]):
         list: the verdicts sit in the cache either way. Decided by prune's own
         ``from`` setting, not by which steps the recipe has."""
         sources = [s.params.get("from", "judge") for s in self._planned if s.verb == "prune"]
-        return bool(sources) and all(src in ("judge", "summarize") for src in sources)
+        if not sources or not all(src in ("judge", "summarize") for src in sources):
+            return False
+        # The index leaves cached junk out only when it embeds summaries
+        # (build.run applies the verdicts under embed_summary alone).
+        return any(
+            s.verb == "index" and s.params.get("embed", "summary") == "summary"
+            for s in self._planned
+        )
 
     def stopped_message(self) -> str:
         """What a stopped run keeps, for this recipe. The recipe and model are not
@@ -978,7 +976,8 @@ class RunScreen(Screen[int]):
     def skip_list_path(self) -> str:
         """Where prune writes, as the runner will resolve it."""
         prof = self._state.profile
-        return prof.blacklist or f"{self._state.profile_path} (.blacklist.txt next to it)"
+        # The runner's default when the profile names none (persona/runner.py).
+        return prof.blacklist or self._state.profile_path.rsplit(".", 1)[0] + ".blacklist.txt"
 
     def write_log(self, message: str) -> None:
         self.query_one("#run-log", RichLog).write(message)
@@ -992,11 +991,11 @@ class RunScreen(Screen[int]):
             if self._state.model:
                 # `ask` writes its answer with an LLM it finds through RAG_LLM_MODEL,
                 # not through anything the wizard saved.
-                lines.append(
-                    "Ask it a question:  RAG_LLM_MODEL="
-                    f'{escape(self._state.model)} ./mailrag ask "…" --profile '
-                    f"{escape(self._state.profile_path)}"
+                command = (
+                    f"RAG_LLM_MODEL={shlex.quote(self._state.model)} ./mailrag ask "
+                    f'"your question" --profile {shlex.quote(self._state.profile_path)}'
                 )
+                lines.append(f"Ask it a question:  {escape(command)}")
             lines += [
                 "Let AI agents search it: connect them to the MCP server (docs/MCP_SERVER.md).",
                 "[dim]To keep it up to date as new mail arrives, see docs/SYNC.md.[/]",
