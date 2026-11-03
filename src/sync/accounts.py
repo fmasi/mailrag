@@ -21,6 +21,7 @@ Example::
         exclude_roles: [junk, trash]
         cadence: 12h
         start_from: "2026-08-01"   # skip history a backup export already covers
+        index_since: "2026-01-01"  # download everything, judge and index only this
 """
 
 from __future__ import annotations
@@ -87,6 +88,14 @@ class AccountConfig:
     # IS the backfill, wrong when a backup export already covers history. Set it
     # to the export's end date so nothing is missed and nothing is re-fetched.
     start_from: Optional[str] = None
+    # The oldest mail the sync judges and indexes, as an ISO date (YYYY-MM-DD,
+    # a UTC day boundary). Unlike start_from it does not limit what is
+    # downloaded: older mail is fetched and kept, just never sent to the LLM or
+    # the index. The case it exists for is a mailbox whose history needs its
+    # own cleanup first. Without it, adding that account to the sync would
+    # judge every old message unattended, one LLM call each, and index it.
+    # Remove or move it back and the held-back mail becomes pending again.
+    index_since: Optional[str] = None
     # Must match how the target collection was built: the index-policy guard
     # rejects an append whose embed_summary differs, and the two are trivially
     # easy to get out of step (a backfill run without --embed-summary followed
@@ -107,6 +116,25 @@ class AccountConfig:
                 f"account {self.id!r}: start_from {self.start_from!r} is not an ISO date "
                 "(YYYY-MM-DD)"
             ) from exc
+
+    def index_since_bound(self) -> Optional[str]:
+        """``index_since`` as the UTC timestamp the ledger compares against, or None.
+
+        The ledger stores ``internal_date`` as UTC ISO text (``…+00:00``), so a
+        string comparison with this bound orders correctly. Raises on an
+        unparseable value."""
+        if not self.index_since:
+            return None
+        from datetime import date  # noqa: PLC0415
+
+        try:
+            day = date.fromisoformat(str(self.index_since))
+        except ValueError as exc:
+            raise ValueError(
+                f"account {self.id!r}: index_since {self.index_since!r} is not an ISO date "
+                "(YYYY-MM-DD)"
+            ) from exc
+        return f"{day.isoformat()}T00:00:00+00:00"
 
     def cadence_seconds(self) -> int:
         return parse_cadence(self.cadence)
@@ -165,6 +193,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
         "folder_roles",
         "cadence",
         "start_from",
+        "index_since",
         "embed_summary",
         "options",
     }
@@ -187,6 +216,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
         folder_roles={str(k): str(v) for k, v in (data.get("folder_roles") or {}).items()},
         cadence=str(data.get("cadence", "12h")),
         start_from=(str(data["start_from"]) if data.get("start_from") else None),
+        index_since=(str(data["index_since"]) if data.get("index_since") else None),
         embed_summary=bool(data.get("embed_summary", True)),
         options=dict(data.get("options") or {}),
     )
@@ -197,6 +227,7 @@ def account_from_dict(data: Dict[str, Any]) -> AccountConfig:
 
     cfg.cadence_seconds()  # validate now, not at schedule time
     cfg.start_from_date()  # ditto: a bad date must not surface mid-run
+    cfg.index_since_bound()  # ditto
     for name, role in cfg.folder_roles.items():
         try:
             FolderRole(str(role).lower())

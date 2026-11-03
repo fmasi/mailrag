@@ -1561,3 +1561,93 @@ class TestFifthRoundRegressions(_RunnerTest):
         self.assertEqual(row["state"], "done")
         self.assertIsNotNone(row["judged_at"])
         self.assertIsNotNone(row["indexed_at"])
+
+
+class TestIndexSinceStages(_RunnerTest):
+    """An account with `index_since` downloads everything but judges and
+    indexes only mail from the bound on."""
+
+    OLD = 1000  # 1970
+    NEW = 1_790_000_000  # 2026-09
+
+    def setUp(self):
+        super().setUp()
+        self.account.index_since = "2026-01-01"
+        self._deliver("old", "<old@x>", mtime=self.OLD)
+        self._deliver("new", "<new@x>", mtime=self.NEW)
+        self._sync()
+        self.new_key = {
+            r["message_key"]
+            for r in self.state.pending("acct", "judged")
+            if r["message_id"] == "<new@x>"
+        }
+        self.assertEqual(len(self.new_key), 1)
+
+    def _profile(self):
+        return mock.Mock(
+            pass2_cache=os.path.join(self.d, "p2.db"),
+            rubric="p",
+            chunk_size=512,
+            chunk_overlap=64,
+            qdrant_url="http://x",
+        )
+
+    def test_old_mail_is_still_downloaded_but_held_back(self):
+        self.assertEqual(self.state.counts("acct")["total"], 2)
+        counts = self.state.counts("acct", since=self.account.index_since_bound())
+        self.assertEqual(counts["held_back"], 1)
+
+    def test_only_mail_from_the_bound_on_is_judged(self):
+        seen = {}
+
+        def fake_run_pass(*, profile, paths, model, workers, on_outcome=None):
+            seen["paths"] = list(paths)
+            for p in paths:
+                on_outcome(p, "done")
+            return {"cached": 0, "done": len(paths), "error": 0}
+
+        report = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=fake_run_pass
+        )
+        self.assertEqual(report.judged, 1)
+        self.assertEqual(len(seen["paths"]), 1)
+        self.assertEqual(self._keys_for(seen["paths"]), self.new_key)
+
+    def test_only_mail_from_the_bound_on_is_indexed(self):
+        self.state.mark_judged(
+            "acct", [r["message_key"] for r in self.state.pending("acct", "judged")]
+        )
+        seen = {}
+
+        def fake_index(**kw):
+            # Read while the rows are still pending; afterwards they are done.
+            seen["keys"] = self._keys_for(kw["paths"])
+            return 1, seen["keys"]
+
+        report = index_pending(
+            self.account,
+            self.state,
+            profile=self._profile(),
+            embedder_factory=lambda: mock.Mock(),
+            index_fn=fake_index,
+            require_judged=True,
+        )
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(seen["keys"], self.new_key)
+
+    def test_held_back_mail_returns_when_the_bound_is_removed(self):
+        def fake_run_pass(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "done")
+            return {"cached": 0, "done": len(paths), "error": 0}
+
+        first = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=fake_run_pass
+        )
+        self.assertEqual(first.judged, 1)
+        self.account.index_since = None
+        second = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=fake_run_pass
+        )
+        self.assertEqual(second.judged, 1)  # the old message, released
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 0)

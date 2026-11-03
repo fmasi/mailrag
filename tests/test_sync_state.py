@@ -268,3 +268,71 @@ class TestLedgerKeying(_StateTest):
     def test_the_content_hash_is_still_recorded(self):
         self.state.record_fetched("acct", message_key="a@x", content_sha256="abc")
         self.assertEqual(self.state.pending("acct", "judged")[0]["content_sha256"], "abc")
+
+
+class TestIndexSince(_StateTest):
+    """`index_since` holds old mail back from judge and index without changing
+    its state, so moving the bound brings it back."""
+
+    BOUND = "2026-01-01T00:00:00+00:00"
+
+    def setUp(self):
+        super().setUp()
+        self.state.record_fetched(
+            "acct", message_key="old", internal_date="2015-06-01T10:00:00+00:00"
+        )
+        self.state.record_fetched(
+            "acct", message_key="edge", internal_date="2026-01-01T00:00:00+00:00"
+        )
+        self.state.record_fetched(
+            "acct", message_key="new", internal_date="2026-10-02T08:30:00.250000+00:00"
+        )
+        self.state.record_fetched("acct", message_key="undated")
+
+    def _keys(self, stage, **kw):
+        return {r["message_key"] for r in self.state.pending("acct", stage, **kw)}
+
+    def test_without_a_bound_everything_is_pending(self):
+        self.assertEqual(self._keys("judged"), {"old", "edge", "new", "undated"})
+
+    def test_mail_older_than_the_bound_is_held_back_from_judging(self):
+        self.assertEqual(self._keys("judged", since=self.BOUND), {"edge", "new", "undated"})
+
+    def test_the_bound_is_inclusive(self):
+        self.assertIn("edge", self._keys("judged", since=self.BOUND))
+
+    def test_undated_mail_is_never_held_back(self):
+        """No date means no evidence it is old; hiding it could hide new mail."""
+        self.assertIn("undated", self._keys("judged", since=self.BOUND))
+
+    def test_the_index_queue_is_held_back_too(self):
+        self.state.mark_judged("acct", ["old", "new"])
+        self.assertEqual(self._keys("indexed", since=self.BOUND), {"new"})
+        self.assertEqual(
+            self._keys("indexed", judge_configured=False, since=self.BOUND),
+            {"edge", "new", "undated"},
+        )
+
+    def test_held_back_mail_keeps_its_state(self):
+        self.state.pending("acct", "judged", since=self.BOUND)
+        self.assertIn("old", self._keys("judged"))
+
+    def test_counts_split_held_back_mail_from_the_backlog(self):
+        counts = self.state.counts("acct", since=self.BOUND)
+        self.assertEqual(counts["held_back"], 1)
+        self.assertEqual(counts["pending_judge"], 3)
+        self.assertEqual(counts["total"], 4)
+
+    def test_counts_without_a_bound_hold_nothing_back(self):
+        counts = self.state.counts("acct")
+        self.assertEqual(counts["held_back"], 0)
+        self.assertEqual(counts["pending_judge"], 4)
+
+    def test_finished_mail_is_not_counted_as_held_back(self):
+        self.state.mark_judged("acct", ["old"])
+        self.state.mark_indexed("acct", ["old"])
+        self.assertEqual(self.state.counts("acct", since=self.BOUND)["held_back"], 0)
+
+    def test_status_passes_the_bound_through(self):
+        st = self.state.status("acct", since=self.BOUND)
+        self.assertEqual(st["counts"]["held_back"], 1)

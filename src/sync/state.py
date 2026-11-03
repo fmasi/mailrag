@@ -418,12 +418,22 @@ class SyncState:
         self._conn.commit()
 
     def pending(
-        self, account_id: str, stage: str, *, judge_configured: bool = True
+        self,
+        account_id: str,
+        stage: str,
+        *,
+        judge_configured: bool = True,
+        since: Optional[str] = None,
     ) -> List[sqlite3.Row]:
         """Messages spooled but not yet through *stage* (``judged``/``indexed``).
 
         The backbone of stage-skipping: mail fetched while LM Studio or Qdrant was
         down simply shows up here on the next run.
+
+        ``since`` (the account's ``index_since`` bound, UTC ISO text) holds back
+        older mail. It is a filter, never a state change, so the mail it holds
+        back stays pending and comes back the moment the bound moves. A message
+        with no recorded date is never held back: there is no telling it is old.
         """
         wanted = [
             st.value for st in State if is_pending(st, stage, judge_configured=judge_configured)
@@ -431,11 +441,16 @@ class SyncState:
         if not wanted:
             return []
         marks = ",".join("?" * len(wanted))
+        params: List[Any] = [account_id, *wanted]
+        date_clause = ""
+        if since:
+            date_clause = "AND (internal_date IS NULL OR internal_date >= ?) "
+            params.append(since)
         return list(
             self._conn.execute(
                 f"SELECT * FROM messages WHERE account_id=? AND state IN ({marks}) "  # noqa: S608 - ? placeholders only
-                "ORDER BY fetched_at",
-                (account_id, *wanted),
+                f"{date_clause}ORDER BY fetched_at",
+                params,
             )
         )
 
@@ -500,21 +515,35 @@ class SyncState:
             (account_id, STATUS_OK),
         ).fetchone()
 
-    def counts(self, account_id: str) -> Dict[str, int]:
+    def counts(self, account_id: str, *, since: Optional[str] = None) -> Dict[str, int]:
+        """Ledger totals for ``--status``.
+
+        With ``since`` (the account's ``index_since`` bound), pending mail older
+        than the bound is counted as ``held_back`` and left out of the two
+        "awaiting" counts, the same split :meth:`pending` makes. Years of
+        deliberately parked history would otherwise read as a stuck backlog."""
         rows = self._conn.execute(
-            "SELECT state, COUNT(*) AS n, SUM(error IS NOT NULL) AS errs "
+            "SELECT state, COUNT(*) AS n, SUM(error IS NOT NULL) AS errs, "
+            "SUM(internal_date IS NOT NULL AND internal_date < ?) AS old "
             "FROM messages WHERE account_id=? GROUP BY state",
-            (account_id,),
+            # '' sorts before every date, so no bound holds nothing back.
+            (since or "", account_id),
         ).fetchall()
         by_state = {r["state"]: r["n"] for r in rows}
+        old = {r["state"]: (r["old"] or 0) for r in rows}
         errors = sum((r["errs"] or 0) for r in rows)
+
+        def _awaiting(stage: str) -> int:
+            return sum(by_state[st] - old[st] for st in by_state if is_pending(State(st), stage))
+
         return {
             "total": sum(by_state.values()),
-            "pending_judge": sum(
-                n for st, n in by_state.items() if is_pending(State(st), "judged")
-            ),
-            "pending_index": sum(
-                n for st, n in by_state.items() if is_pending(State(st), "indexed")
+            "pending_judge": _awaiting("judged"),
+            "pending_index": _awaiting("indexed"),
+            "held_back": sum(
+                old[st]
+                for st in by_state
+                if is_pending(State(st), "judged") or is_pending(State(st), "indexed")
             ),
             "abandoned": by_state.get(State.ABANDONED.value, 0),
             "done": by_state.get(State.DONE.value, 0),
@@ -582,12 +611,12 @@ class SyncState:
             )
         )
 
-    def status(self, account_id: str) -> Dict[str, Any]:
+    def status(self, account_id: str, *, since: Optional[str] = None) -> Dict[str, Any]:
         """Everything ``mailrag sync --status`` needs, in one call."""
         last = self.last_run(account_id)
         return {
             "account_id": account_id,
-            "counts": self.counts(account_id),
+            "counts": self.counts(account_id, since=since),
             "folders": [dict(r) for r in self.folders(account_id)],
             "last_run": dict(last) if last is not None else None,
         }

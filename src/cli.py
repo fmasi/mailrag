@@ -714,7 +714,7 @@ def _cmd_sync(args):
             from src.sync.health import health_warnings  # noqa: PLC0415
 
             for account in accounts:
-                st = state.status(account.id)
+                st = state.status(account.id, since=account.index_since_bound())
                 last = st["last_run"]
                 print(f"\n{account.id}  ->  collection '{account.collection}'")
                 for f in st["folders"]:
@@ -728,6 +728,11 @@ def _cmd_sync(args):
                     f"{c['pending_judge']} awaiting judge, {c['pending_index']} awaiting index, "
                     f"{c['errors']} error(s)"
                 )
+                if c.get("held_back"):
+                    print(
+                        f"  {c['held_back']} older than index_since {account.index_since}: "
+                        "downloaded, held back from judge and index"
+                    )
                 if c.get("abandoned"):
                     print(
                         f"  {c['abandoned']} abandoned — recoverable with "
