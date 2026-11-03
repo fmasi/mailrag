@@ -38,7 +38,8 @@ All seven tools are registered on one server. Every query tool accepts an option
 > empty, when the attachment store has not been built: an always-empty list
 > reads as "this corpus has no attachments" rather than "not populated", and
 > that mis-taught a real session into never opening the attachment tools at all.
-> Populate it with `./mailrag attachments build` (see
+> Every recipe's `attach` step populates it. After `onboard` or a bare `index`, run
+> `./mailrag attachments build` once (see
 > [Noise signals](#noise-signals-attachments-build)).
 
 > **Bounded output.** `search_email` returns a **snippet window + metadata** per
@@ -47,8 +48,9 @@ All seven tools are registered on one server. Every query tool accepts an option
 > For exact needle hunts — a number, an ID, an email address, an error string —
 > use `grep_email`, a literal/regex scan over the raw corpus that bypasses
 > embeddings entirely (mind its [cost model](#cost-model--why-the-scan-is-bounded)).
-> None of those three read inside attachments: for a figure in a spreadsheet or a
-> PDF, go `list_attachments` → `get_attachment`.
+> `grep_email` does not read inside attachments, and search sees only the text
+> `index` extracted from them. For a figure in a spreadsheet or a PDF, go
+> `list_attachments` → `get_attachment`.
 
 ### `list_collections()`
 
@@ -87,8 +89,9 @@ full thread body.
   - `full` (bool, default `false`) — return the full thread `text` instead of a
     snippet. The opt-in escape hatch when you genuinely need the whole body.
 - **Returns:** up to `top_k` **bounded** rows
-  `{thread_id, subject, num_emails, snippet, date, last_date, from, to, message_ids, attachment_names}`.
+  `{thread_id, subject, num_emails, snippet, collection, date, last_date, from, to, message_ids, attachment_names}`.
   With `full=true`, the `snippet` field is replaced by `text` (the whole thread).
+  `collection` names the corpus that answered.
 - **Errors:** `ValueError` on a blank `query`, `top_k < 1`, `max_chars < 1`, an
   unknown `mode`, or an unconfigured corpus.
 
@@ -120,7 +123,7 @@ are normalised before lookup, so `<abc@host>` and `abc@host` both work.
   - `mode` (str, **ignored**) — accepted for backward compatibility only; was the
     retrieval leg before #109. A key lookup has no ranking to vary, so passing it
     changes nothing.
-- **Returns:** `{thread_id, subject, num_emails, text, date, last_date, from, to, message_ids, attachment_names}`.
+- **Returns:** `{thread_id, subject, num_emails, text, collection, date, last_date, from, to, message_ids, attachment_names}`.
 - **Errors:** `ValueError` on a blank id, an unknown thread, or an unconfigured corpus.
 
 ### `grep_email(pattern, collection=None, max_matches=50, regex=False, max_files=None, max_seconds=60)`
@@ -148,7 +151,8 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
   - `regex` (bool, default `false`) — treat `pattern` as a Python regex.
   - `max_files` (int, optional) — stop after scanning this many messages.
   - `max_seconds` (float, default 60, hard cap 900) — wall-clock budget for the
-    scan. `null` disables the deadline, which is only safe on a small corpus.
+    scan. Over MCP, `null` means the 60 s default, not "no deadline". Only a
+    Python caller of `src/mcp_server/grep.py` can switch the deadline off.
 - **Returns:** `{matches, scanned, corpus_files, complete, stop_reason, elapsed_s,
   root, collection, scoped}`. `matches` holds up to `max_matches` rows
   `{subject, from, to, date, message_id, attachment_names, matches, path}`, where
@@ -189,8 +193,8 @@ string) where dense/hybrid retrieval is blind to numerals and identifiers.
 #### Cost model — why the scan is bounded
 
 There is no index behind `grep_email`: every call decodes raw `.eml` files one at
-a time, at roughly **2ms per message**. On a real personal corpus (73k messages /
-11 GB is typical) a full pass is minutes of CPU warm, and considerably worse cold.
+a time, at roughly **2ms per message**. On a real mailbox (the author's is 73k messages /
+11 GB) a full pass is minutes of CPU warm, and considerably worse cold.
 
 The match cap alone does **not** bound that work — it stops the walk early only
 when the pattern actually *hits*. So:
@@ -222,8 +226,8 @@ its one blind spot is base64/quoted-printable bodies, which is exactly what
 > only. It does **not** yet read attachment *bytes* — a spreadsheet cell or PDF
 > text buried in an `.xlsx`/`.pdf` will not match, though the attachment's
 > filename is reported in `attachment_names`. Use `list_attachments` +
-> `get_attachment` to read inside those. Attachment content indexing is tracked
-> separately (issue #80).
+> `get_attachment` to read inside those. Attachment text is indexed for
+> `search_email` instead (issue #80).
 
 ### `answer_question(query, collection=None, k=3)`
 
@@ -255,7 +259,7 @@ Use `search_email` when the agent wants to reason over the raw threads itself
 (no model call); use `answer_question` when you want mailrag to produce the
 grounded natural-language answer for you.
 
-### `list_attachments(thread_id=None, message_id=None, collection=None)`
+### `list_attachments(thread_id=None, message_id=None, collection=None, include_boilerplate=False)`
 
 List the files attached to a thread or a message (parity with the CLI
 `./mailrag attachments list`) — and the way in to their contents.
@@ -283,11 +287,14 @@ List the files attached to a thread or a message (parity with the CLI
 > "nothing stored" only means nobody ingested it. A full `attachments build`
 > (without `--limit`) clears the mark.
 
-> **Attachment contents are invisible to `search_email`, `answer_question` and
-> `grep_email`.** Those index message *bodies* only. So when the answer lives in
-> a document somebody emailed — an invoice PDF, a spreadsheet of figures, a
-> signed contract, a scanned letter — body search finds the covering email and
-> then looks as though the numbers are not there. They are; they are in the file.
+> **Search sees attachment contents only partly, and `grep_email` not at all.**
+> `index` embeds the text it extracts from attachments, so `search_email` and
+> `answer_question` can match inside a document. But that text comes from a cheap
+> index-time pass (tesseract for scans), and a hit shows a snippet, not the file.
+> `grep_email` reads message bodies only. So when the answer lives in a document
+> somebody emailed — an invoice PDF, a spreadsheet of figures, a signed contract,
+> a scanned letter — search can find the covering email and still look as though
+> the numbers are not there. They are; they are in the file.
 > The route is: `search_email` / `grep_email` to find the thread → this tool for
 > its `sha256`s → `get_attachment` to read one. A search hit's
 > `attachment_names` is the hint that a document exists.
@@ -296,8 +303,11 @@ List the files attached to a thread or a message (parity with the CLI
   - `thread_id` (str, optional) — thread whose attachments to list.
   - `message_id` (str, optional) — message whose attachments to list.
   - **At least one** of `thread_id` / `message_id` is required.
-  - `collection` (str, optional) — accepted for API symmetry; the attachment store
-    is corpus-wide, so it is not required to select a store.
+  - `collection` (str, optional) — whose attachment store to read. Stores are
+    separate per collection, so when neither this nor the default resolves a
+    collection the call is refused rather than guessed.
+  - `include_boilerplate` (bool, default `false`) — include the decoration rows
+    filtered out by default (see below).
 - **Returns:** a row per attachment
   `{sha256, filename, mime, size, thread_id, message_id, inline}`.
 
@@ -315,7 +325,11 @@ List the files attached to a thread or a message (parity with the CLI
 > threads because it is a useful reference) while a text-poor "access denied"
 > screenshot is content someone pasted deliberately.
 
-- **Errors:** `ValueError` when neither identifier is supplied.
+- **Errors:** `ValueError` when neither identifier is supplied, when no
+  collection resolves, when a lookup finds nothing in an empty or partly built
+  store (see the build note above), and when every attachment found is decoration.
+  That last one says so and points at `include_boilerplate=true`, so it never
+  reads as "no attachments".
 
 ```jsonc
 // list_attachments(thread_id="t-91af")
@@ -326,7 +340,7 @@ List the files attached to a thread or a message (parity with the CLI
 ]
 ```
 
-### `get_attachment(sha256, ocr=None)`
+### `get_attachment(sha256, ocr=None, collection=None)`
 
 Read the **extracted text** of one attachment — PDF, spreadsheet, doc, scan
 (parity with the CLI `./mailrag attachments get --text`). The only way to see
@@ -337,9 +351,12 @@ when the file is a scan or an image. Raw bytes are **never** returned over MCP.
   - `sha256` (str, required) — content hash of the attachment (from `list_attachments`).
   - `ocr` (str, optional) — extraction backend: `llm` | `tesseract` | `cloud`
     (like the CLI `--extractor` flag). Defaults to `$RAG_ATTACH_EXTRACTOR` or `llm`.
+  - `collection` (str, optional) — whose attachment store to read. A sha256 from
+    another corpus is not found, and the call is refused when no collection resolves.
 - **Returns:** `{sha256, filename, mime, size, text, text_status, chars}`, plus
   `chars_per_mb` and `text_coverage` (`rich` | `sparse`) for documents above
-  50 KB. Always check `text_status` (e.g. `ok`, `ocr_unavailable`): it reports
+  50 KB. Always check `text_status` (`extracted`, `empty`, `binary`, `unsupported`,
+  `ocr_unavailable` or `error`): it reports
   when extraction failed, so an empty `text` is **not** evidence that the
   document is blank.
 
@@ -354,14 +371,16 @@ when the file is a scan or an image. Raw bytes are **never** returned over MCP.
 >
 > Calibrated on a real corpus: ten text-bearing PDFs measured 99,000–225,000
 > chars/MB, against 1,869 for that diagram PDF and 66 for a 21 MB deck. The cut
-> sits at 10,000 — a 50× margin from either population.
-- **Errors:** `ValueError` on a blank `sha256` or an unknown attachment.
+> sits at 10,000, about 10× below the text-bearing PDFs and 5× above the diagram PDF.
+- **Errors:** `ValueError` on a blank `sha256`, an unknown attachment, or no
+  resolvable collection. An unknown sha256 in an empty or partly built store gets
+  the store error instead.
 
 ```jsonc
 // get_attachment("9f2c…", ocr="tesseract")
 {
   "sha256": "9f2c…", "filename": "invoice-4021.pdf", "mime": "application/pdf",
-  "size": 84213, "text": "ACME CORP  Invoice #4021 …", "text_status": "ok"
+  "size": 84213, "text": "ACME CORP  Invoice #4021 …", "text_status": "extracted"
 }
 ```
 
@@ -447,8 +466,8 @@ produce identical signals for the same image.
 **Signals, not verdicts.** The store records `chars`, `words`, `unique_words`,
 `digits`, dimensions, status and extractor per blob; the verdict is computed from
 them at read time. The measurement is corpus-agnostic ("a logo has no text, a
-table does"); the thresholds are not — work mail is 41% bulk against personal
-mail's 7%. Keeping them apart means re-calibrating for another corpus is a SQL
+table does"); the thresholds are not, because what counts as decoration differs
+from one mailbox to the next. Keeping them apart means re-calibrating for another corpus is a SQL
 query, not a re-OCR of thousands of blobs.
 
 The rule, calibrated against images inspected by eye:
@@ -457,8 +476,11 @@ The rule, calibrated against images inspected by eye:
 |---|---|
 | Inline, in ≥20 threads | decoration — a disclaimer image sat in 829 threads, a signature block in 61 |
 | ≥100 chars of text | content — rescues tables the metadata heuristic hid |
-| <30 chars **and** in ≥5 threads | decoration |
+| Not inline (a file attached in its own right) | content |
+| Inline, <30 chars **and** in ≥5 threads | decoration |
 | anything else | no opinion → metadata heuristic decides |
+
+The rows apply in that order. Only inline images can be called decoration.
 
 Known limit: the 15–25 thread band is ambiguous on recurrence alone — a real
 reporting-deadline table sits at 15 threads, a disclaimer at 18. The cut errs
@@ -752,8 +774,11 @@ tools are the agent-facing subset.
 | Calibrate the cleaning rubric | `calibrate` | — CLI only | **Human-in-the-loop gate** — you review the rubric before a full pass. |
 | Cheap LLM noise verdict | `judge` | — CLI only | Bulk LLM pass with `--model` / `--workers`. |
 | LLM summary + noise pass | `summarize` / `pass2` | — CLI only | Long-running one-LLM-call-per-email pass; gated on a calibrated rubric. |
-| Blacklist confident noise | `prune` | — CLI only | Destructive corpus edit before re-indexing. |
-| Ingest attachments | `attachments build` | — CLI only | Long-running extraction/OCR over the profile's mail. |
+| Blacklist confident noise | `prune` | — CLI only | Writes a skip list that the next `index` applies. A dry-run preview unless you pass `--yes`. |
+| Ingest attachments | `attachments build` (a recipe's `attach` step) | — CLI only | Long-running ingest over the profile's mail, plus OCR of small images to flag decoration. |
+| Keep a collection fresh | `sync` | — CLI only | Scheduled fetch and index of new mail, with its own state and credentials. |
+| Find mail no profile selects | `coverage` | — CLI only | Operator check across corpus profiles, not a query over indexed mail. |
+| Report MCP tool use | `usage` | — CLI only | Reads the usage log this server writes. An operator report, not an agent tool. |
 | Run the MCP server | `mcp` | *(this server)* | Launches the stdio server itself. |
 
 If you need any CLI-only capability, run it from a shell in the `mailrag` conda env

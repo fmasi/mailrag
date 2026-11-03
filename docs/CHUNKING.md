@@ -7,7 +7,8 @@ differently, but stitched back together at query time by a shared `thread_id`.
 
 - **Body chunk** = email text **with its LLM contextual summary glued on the front**, then
   embedded. The summary is *baked into the vector* — so a terse reply ("Approved") still
-  matches its topic.
+  matches its topic. That happens only with `--embed-summary`, which the two AI recipes
+  pass. The *Quick, no AI* recipe has no summaries and embeds the body alone.
 - **Attachment chunk** = a spreadsheet/PDF/deck split by its **own structure** (spreadsheet
   row-groups with the header repeated, PDF pages, slides), embedded as **just the raw
   content + exact-number tokens**. **No summary is glued on** — the vector is "pure"
@@ -51,6 +52,9 @@ differently, but stitched back together at query time by a shared `thread_id`.
               (body + summary + attachment text, stitched together)
 ```
 
+Step ➊ on the body side runs only under `--embed-summary`. Without it the body is
+embedded as written.
+
 ## Step by step
 
 1. **Load & (optionally) drop noise.** Emails are loaded; with `--embed-summary`, the
@@ -71,8 +75,9 @@ differently, but stitched back together at query time by a shared `thread_id`.
 5. **Dedup** exact-duplicate chunk contents.
 6. **Embed.** For each chunk, just before embedding
    (`src/indexing/contextual_index.py`):
-   - `prepend_summary(text, metadata.get("summary"))` — prepends the summary **only if the
-     chunk has one** (body chunks do; attachment chunks don't, so they're unchanged).
+   - `prepend_summary(text, metadata.get("summary"))` — runs only under `--embed-summary`,
+     and prepends the summary **only if the chunk has one** (body chunks do; attachment
+     chunks don't, so they're unchanged).
    - `augment_numeric(text)` — appends canonical integer tokens (`$210,000,000 → 210000000`)
      so exact-figure queries can hit. This runs at **both** index and query time so both
      sides share the token vocabulary.

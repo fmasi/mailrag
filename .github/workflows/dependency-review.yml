@@ -1,6 +1,6 @@
 name: Dependency Review
 
-# Scans dependency-manifest changes (poetry.lock / requirements.txt / pyproject)
+# Scans dependency-manifest changes (poetry.lock / pyproject)
 # introduced by a PR and fails if any added dependency carries a known
 # vulnerability at `moderate` severity or higher. Runs only on pull_request —
 # the action diffs the PR base against head and has nothing to compare on push.

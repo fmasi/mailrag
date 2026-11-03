@@ -7,7 +7,7 @@ pinned to a commit SHA.
 
 | Gate | Required? | What it enforces | Run locally |
 |------|-----------|------------------|-------------|
-| `pytest` | ✅ required | Full test suite plus a coverage floor of **85%** (currently ~90%) | `just test` |
+| `pytest` | ✅ required | Full test suite plus a coverage floor of **85%** | `just test` |
 | `pip-audit` | ✅ required | Known CVEs in the locked deps (OSV). The only `--ignore-vuln` entries are advisories with **no fixed release**, each with its reason in `ci.yml` (none today) | `just audit` |
 | `CodeQL (python)` | ✅ required | Static security analysis of `src/`, `scripts/` and `tests/`, `default` query suite | (runs on GitHub) |
 | `CodeQL (actions)` | ✅ required | Static analysis of the workflow files themselves | (runs on GitHub) |
@@ -23,7 +23,8 @@ most common way to get a red build here.
 
 Lint and type settings sit in `pyproject.toml` under `[tool.ruff]` and `[tool.mypy]`.
 The workflows are in `.github/workflows/`: `ci.yml`, `test-suite.yml`, `codeql.yml`,
-`dependency-review.yml`, `claude.yml` and `claude-review.yml`; zizmor's policy is
+`dependency-review.yml`, `claude.yml` and `claude-review.yml`, plus `traffic-snapshot.yml`, a
+daily copy of GitHub's traffic data that gates nothing. zizmor's policy is
 `.github/zizmor.yml`, and gitleaks' known false positives are in `.gitleaksignore`. Most lint
 and format findings clear with `just fmt`.
 

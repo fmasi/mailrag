@@ -67,7 +67,7 @@ dropped pile confirmed it, all on a local model with no cloud spend. Full write-
 | **+ learned sparse + RRF fusion** (bge-m3) | exact-token and acronym precision, fused with semantics | needs a sparse-capable embedder and fusion, more storage |
 | **+ LLM noise removal** | precision. Catches the ~⅓ of noise regex cannot, and clears junk out of the top results | one-time LLM cost (see above) |
 | **+ contextual retrieval** (each email's summary prepended before embedding, the `C′` / `work-rag-ctx-*` collection) | short and terse emails match by gist. Best ranked arm and the end-to-end winner | one extra embedded collection to build and maintain |
-| **+ cross-encoder reranker** | small precision lift on pointed queries (**+2.5 R@5**) | a paid per-query call. Neutral to positive on recall in every category, but it **hurt answer quality under the LLM judge** (§9), so it is off by default |
+| **+ cross-encoder reranker** | small precision lift on pointed queries (**+2.5 R@5**) | a cross-encoder call per query (measured with a paid endpoint, though the in-tree default `BAAI/bge-reranker-v2-m3` runs locally). Neutral to positive on recall in every category, but it **hurt answer quality under the LLM judge** (§9), so it is off by default |
 | **+ thread reconstruction** (pull the full conversation of each top hit) | **message-level recall@5 64.2% → thread-level 93.3%**. Match a small unit, answer from its whole thread | larger context per query, tunable by expanding top-N threads |
 
 ### How the eval was run
@@ -79,8 +79,8 @@ LLM judge in the loop**.
 Generating a query from its answer email risks circularity, since the query could echo the
 target's exact tokens. Queries therefore come from body content under a rule that bans
 artifact and metadata questions, followed by a validation pass. The load-bearing guard is
-external rather than procedural: the ordering holds on public **Enron-QA**, whose questions
-were written independently of this generator, and on TREC's real human judgments below.
+external rather than procedural: the ordering of the retrieval arms holds on public
+**Enron-QA**, whose questions were written independently of this generator.
 
 A separate answer-quality lens does use a local LLM judge, calibrated against a stronger
 reference model on 514 pooled pairs (Cohen's κ = **0.52** on the 0–3 scale, Spearman 0.74).
@@ -140,12 +140,13 @@ LLM judge, reproducible via `scripts/eval/bench_avc.py` and `bench_thread_recons
 ★ The last step switches from "find the exact email" to "find its *thread*", a legitimately
 easier and more useful target, measured as thread-recall. Both of the big levers, thread
 reconstruction at +29.1 and contextual summary at +12.8, come from understanding the
-conversation rather than from a fancier embedding model. The same ordering holds on public
-Enron-QA.
+conversation rather than from a fancier embedding model. On public Enron, `just bench`
+reproduces the learned-sparse step and `just demo` reproduces both big levers, though not their
+magnitude on a real mailbox ([`CLAIMS.md`](CLAIMS.md) R1, R2b, R2c).
 
 A general-purpose dense-plus-rerank yardstick (NVIDIA's retrieval NIMs) trails on email, at
 57% R@5 against the reranked hybrid's 64% in a like-for-like comparison with both arms
-reranked. The same yardstick wins on TREC legal e-discovery. That is task fit rather than
+reranked (a June run that can't be re-checked today, see CLAIMS R7). The same yardstick wins on TREC legal e-discovery. That is task fit rather than
 brand: their stack is built and tuned for general retrieval and is very good at it, and email
 is a different shape of problem. The value here is not any single trick. It is the stack and
 the discipline of pricing every layer.

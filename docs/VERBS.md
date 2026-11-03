@@ -12,12 +12,15 @@ files on disk make every drop reversible.
 ```
  SCOPE                  NOISE & CONTEXT  (cost-ordered; only `index` drops)
  ─────                  ───────────────────────────────────────────────────
- scope → measure → tag  →  scan  →  judge  → calibrate → summarize → prune → index → attach
-  pick    chunk   regex    no-LLM   cheap     sample      LLM         apply   embed   store
-  folders  size   flags    clusters LLM       gate        context     drops   + store files
-  ─────────────   ─────    ──────   ─────     ──────      ───────     ─────   ─────   ──────
-   free    free   free     cheap    small     small       BIG         free    GPU     CPU
+ scope → measure → tag  →  scan  →  calibrate → judge  →  prune → summarize → index → attach
+  pick    chunk   regex    no-LLM   sample      cheap     apply   LLM         embed   store
+  folders  size   flags    clusters gate        LLM       drops   context     + store files
+  ─────────────   ─────    ──────   ──────      ─────     ─────   ───────     ─────   ──────
+   free    free   free     cheap    small       small     free    BIG         GPU     CPU
 ```
+
+That is the order `llm-verify` runs. `llm-all` has no `judge`, so its `prune` comes after
+`summarize` and applies the verdicts that call returns.
 
 The one cost that dominates is the **LLM pass over each email body**. So the golden
 rule is: **never send the same email to the LLM twice.** Each email gets *at most one*
@@ -35,14 +38,16 @@ keep), never both.
 | `judge` | Cheap LLM **verdict only** (noise/keep). Run on mail you intend to *drop*, so you never pay to summarize it. | small LLM | no (verdict) |
 | `calibrate` | Judge a small **sample** with the rubric and bucket the suspected mistakes — the gate before any full LLM run. | small LLM | no |
 | `summarize` | LLM **summary/context** for the emails you keep (the noise verdict comes free in the same call). The expensive step. | big LLM | no (verdict) |
-| `prune` | Apply the `tag`/`scan`/`judge` drops **before** the LLM pass, so the LLM only ever runs on the keep set. | free | marks drops |
+| `prune` | Write the confident drops from one source to a skip list: `--from tag`, `judge` or `summarize`. From `tag` or `judge` it runs **before** the summary pass, so the big LLM only sees the keep set. A dry-run preview unless you pass `--yes`. | free | marks drops |
 | `index` | Embed (BGE-M3 dense + sparse) and store in Qdrant. **The only step that actually removes the dropped mail.** Incremental by default; `--recreate` rebuilds from scratch. | GPU | yes |
 | `attach` | Store the profile's attachment files in the collection's attachment store, so agents can list and open them (`list_attachments` / `get_attachment`). The recipe form of `attachments build`. | CPU (OCR of small images) | no |
 | `ask` | Answer a question against an indexed collection (hybrid retrieval → thread expansion → grounded answer). | LLM at query time | — |
 | `onboard` | One-shot, zero-config build from an `.eml` directory. | — | — |
 | `run` | Execute a persona recipe end-to-end (headless). Needs `--persona`, and `--model` for any LLM step. | per recipe | via `index` |
-| `wizard` | Full-screen guided pipeline (persona → scope → review → live run). `--classic` for the old prompt flow. | per recipe | via `index` |
+| `wizard` | Full-screen guided pipeline (welcome → persona → model → scope → review → live run). `--classic` for the old prompt flow. | per recipe | via `index` |
 | `sync` | Fetch new mail from a live account and index the delta, so a collection stays fresh instead of frozen at its export date. See [`SYNC.md`](SYNC.md). | small LLM (delta only) | no |
+| `coverage` | Report the mail under a corpus root that no profile selects, so it is searchable nowhere. Repeat `--profile` to check several against one root. | free | no |
+| `usage` | Report which MCP tools agents actually call and what they cost, from the usage log (`$MAILRAG_MCP_USAGE_LOG`). | free | no |
 | `mcp` | Run the stdio MCP server over an indexed collection, so any agent can query it. See [`MCP_SERVER.md`](MCP_SERVER.md). | — | no |
 | `attachments` | `build` / `list` / `get` an email's attachments (extract + OCR text). See [`SETUP.md § 9`](SETUP.md#9-attachment-extraction). | free · OCR LLM | no |
 
@@ -97,10 +102,11 @@ recommend one.
 
 | Persona | What you get | Recipe |
 |---------|--------------|--------|
-| **`llm-none`** | Fast, **no LLM at all**. Body-only embeddings; `prune` drops the regex-tagged bulk. Cheapest, noisiest. | `scope → measure → [scan] → tag → prune(tag) → index → attach` |
-| **`llm-verify`** | **Safe budget.** A cheap `judge` confirms drops only on the `scan`-flagged suspects; `prune` blacklists them *before* the summary pass; summaries on what's kept. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → prune(judge) → summarize(rest) → index → attach` |
-| **`llm-all`** | **Max quality.** One combined LLM call per email (summary + verdict); `prune` then drops the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → prune(summarize) → index → attach` |
+| **`llm-none`** (*Quick, no AI*) | Fast, **no LLM at all**. Body-only embeddings; `prune` drops the regex-tagged bulk. Cheapest, noisiest. | `scope → measure → [scan] → tag → prune(tag) → index → attach` |
+| **`llm-verify`** (*Balanced*) | **Safe budget.** A cheap `judge` confirms drops only on the `scan`-flagged suspects; `prune` blacklists them *before* the summary pass; summaries on what's kept. Won't drop real mail blind. | `scope → measure → scan → calibrate → judge(suspects) → prune(judge) → summarize(rest) → index → attach` |
+| **`llm-all`** (*Thorough, AI reads everything*) | **Max quality.** One combined LLM call per email (summary + verdict); `prune` then drops the confident noise. No email is dropped unseen. | `scope → measure → calibrate → summarize(all) → prune(summarize) → index → attach` |
 
+The names in italics are the labels the wizard shows on its "Choose a recipe" screen.
 Run a persona end-to-end with `./mailrag run --persona <name> --profile <p> [--model <m>]`,
 or interactively with `./mailrag wizard`.
 

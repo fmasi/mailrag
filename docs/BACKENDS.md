@@ -1,7 +1,7 @@
 # Backends & providers
 
-How to point `mailrag` at the LLM, embedder, and vector store of your choice —
-local or cloud. The short version:
+How to point `mailrag` at the LLM and embedder of your choice, local or cloud,
+and at a local or managed Qdrant. The short version:
 
 - **LLM — fully backend-agnostic.** One set of `RAG_LLM_*` variables points both
   the answer side and the cleanup pipeline at *any* OpenAI-compatible server:
@@ -22,45 +22,38 @@ the variables below.
 
 ## 1. The LLM
 
-The LLM is used in two places, and **both read the same canonical endpoint
-variable `RAG_LLM_API_BASE`**, so configuring it once points the whole system at
-one server:
+The LLM is used in two places, and **both go through one client,
+`src/llm/client.py`** (a LlamaIndex `OpenAILike`), so configuring it once points
+the whole system at one server:
 
-| Where | What it does | How it's built |
-|-------|--------------|----------------|
-| **Answer side** (`Settings.llm`) | generates grounded answers from retrieved threads — for both `./mailrag ask` and the MCP [`answer_question`](MCP_SERVER.md#answer_questionquery-collectionnone-k3) tool | LlamaIndex LLM, selected by `RAG_LLM_PROVIDER` |
-| **Cleanup pipeline** (`src/llm/client.py`) | `summarize`/`judge`, HyDE, vision OCR | LlamaIndex `OpenAILike`, always — reads `RAG_LLM_API_BASE` directly (provider-agnostic) |
+| Where | What it does |
+|-------|--------------|
+| **Answer side** (`src/llm/answer.py`) | generates grounded answers from retrieved threads — for both `./mailrag ask` and the MCP [`answer_question`](MCP_SERVER.md#answer_questionquery-collectionnone-k3) tool |
+| **Cleanup pipeline** | `summarize`/`judge`, HyDE, vision OCR |
 
 ### Variables
 
 | Variable | Meaning |
 |----------|---------|
-| `RAG_LLM_PROVIDER` | `openai`, `perplexity`, or `lmstudio`. **`lmstudio` is the generic "any OpenAI-compatible endpoint" path** — the name is historical; use it for LM Studio, Ollama, vLLM, NIM, or any server that speaks `/v1/chat/completions`. |
-| `RAG_LLM_API_BASE` | The OpenAI-compatible base URL (e.g. `http://localhost:1234/v1`). |
-| `RAG_LLM_API_KEY` | API key / token for the endpoint. Many local servers don't need one; a placeholder is sent so the client doesn't complain. |
-| `RAG_LLM_MODEL` | The model id as the endpoint names it. |
-| `RAG_LLM_TEMPERATURE` | Sampling temperature (default `0.7`; the cleanup pipeline pins `0.0`). |
+| `RAG_LLM_API_BASE` | The OpenAI-compatible base URL. Default `http://localhost:1234/v1` (LM Studio). Any server that speaks `/v1/chat/completions` works. |
+| `RAG_LLM_API_KEY` | API key / token for the endpoint. Many local servers don't need one; a placeholder is sent so the client doesn't complain. Accepts a `keychain:` / `env:` / `file:` reference, so the token need not sit in `.env`. |
+| `RAG_LLM_MODEL` | The model id as the endpoint names it. Required: there is no default. |
 
-> `openai` and `perplexity` are first-class named providers and read
-> `OPENAI_API_KEY` / `PERPLEXITY_API_KEY` respectively. Everything else goes
-> through `lmstudio` (= `OpenAILike`).
+Every call runs at temperature `0.0`. There is no provider switch: the base URL
+alone decides which server answers.
 
 ### Pick your backend
 
-| Backend | `RAG_LLM_PROVIDER` | `RAG_LLM_API_BASE` | Key | Example `RAG_LLM_MODEL` |
-|---------|-------------------|--------------------|-----|--------------------------|
-| **LM Studio** (local) | `lmstudio` | `http://localhost:1234/v1` ¹ | LM Studio API token (if auth on) | `mistralai/magistral-small-2509` |
-| **Ollama** (local) | `lmstudio` | `http://localhost:11434/v1` | any non-empty string | `llama3.1` |
-| **vLLM** (self-hosted) | `lmstudio` | `http://<host>:8000/v1` | your token | the served model id |
-| **NVIDIA NIM** (hosted) | `lmstudio` | `https://integrate.api.nvidia.com/v1` | `$NVIDIA_API_KEY` | `meta/llama-3.1-8b-instruct` |
-| **OpenAI** | `openai` | (default `https://api.openai.com/v1`) | `$OPENAI_API_KEY` | `gpt-4o-mini` |
-| **Perplexity** | `perplexity` | (default) | `$PERPLEXITY_API_KEY` | `sonar` |
+| Backend | `RAG_LLM_API_BASE` | `RAG_LLM_API_KEY` | Example `RAG_LLM_MODEL` |
+|---------|--------------------|-------------------|--------------------------|
+| **LM Studio** (local) | `http://localhost:1234/v1` ¹ | LM Studio API token (if auth on) | `mistralai/magistral-small-2509` |
+| **Ollama** (local) | `http://localhost:11434/v1` | any non-empty string | `llama3.1` |
+| **vLLM** (self-hosted) | `http://<host>:8000/v1` | your token | the served model id |
+| **NVIDIA NIM** (hosted) | `https://integrate.api.nvidia.com/v1` | your NVIDIA key | `meta/llama-3.1-8b-instruct` |
+| **OpenAI** | `https://api.openai.com/v1` | your OpenAI key | `gpt-4o-mini` |
+| **Perplexity** | `https://api.perplexity.ai` | your Perplexity key | `sonar` |
 
 ¹ Inside a devcontainer, reach the host with `http://host.docker.internal:1234/v1`.
-
-> **Heads-up on the default.** The *code* default is `RAG_LLM_PROVIDER=openai`
-> (it expects `OPENAI_API_KEY`). For a fully local run, set
-> `RAG_LLM_PROVIDER=lmstudio` explicitly — as every example below does.
 
 > **Vision / OCR.** The attachment OCR path (`chat_vision`) sends an inline image
 > to the chat endpoint, so it needs a **multimodal** model loaded (e.g. a Gemma-3/4
@@ -88,16 +81,18 @@ from src.ingest.embedder import make_embedder
 emb = make_embedder("bge-m3")   # dense + learned sparse, produces_sparse=True
 ```
 
-> **`HF_HUB_OFFLINE=1` for cached weights.** The first run downloads ~2 GB of bge-m3
+> **`HF_HUB_OFFLINE=1` for cached weights.** The first run downloads a few GB of bge-m3
 > weights into your Hugging Face cache; after that, set `HF_HUB_OFFLINE=1` so
 > FlagEmbedding loads from cache instead of contacting the Hub on every build/query
 > (faster, works offline). Applies anywhere bge-m3 embeds — `./mailrag ask`,
 > `./mailrag index`, and the MCP server. See [`SETUP.md § 2`](SETUP.md#2-the-mailrag-environment).
 
-### b. Remote OpenAI-compatible dense embedder
+### b. Remote OpenAI-compatible dense embedder (legacy scripts only)
 
-The simpler LlamaIndex `Settings.embed_model` path (used by the Enron
-`VectorStoreIndex` demo) points at any OpenAI-compatible embedding endpoint:
+The LlamaIndex `Settings.embed_model` path points at any OpenAI-compatible embedding
+endpoint. Only two legacy scripts read it (`scripts/reset_qdrant_index.py` and
+`scripts/smoke_lmstudio_embedding.py`). The CLI, `just demo` and the MCP server do
+not:
 
 | Variable | Meaning |
 |----------|---------|
@@ -106,8 +101,8 @@ The simpler LlamaIndex `Settings.embed_model` path (used by the Enron
 | `RAG_EMBEDDING_MODEL` | embedding model id. |
 | `RAG_EMBEDDING_API_KEY` | key (often empty for local servers). |
 
-So an LM Studio / Ollama / vLLM / OpenAI embedding model works here — **dense
-only** (see the caveat below).
+So an LM Studio / Ollama / vLLM / OpenAI embedding model works for those scripts,
+**dense only** (see the caveat below).
 
 ### c. NVIDIA NIM dense + reranker — the "C" experiment
 
@@ -153,7 +148,7 @@ The reranker is injectable, so you can supply either to `build_hybrid_searcher`.
 |----------|---------|
 | `QDRANT_URL` | `http://localhost:6333` (the quickstart's local Docker Qdrant) or a managed Qdrant Cloud URL. |
 | `QDRANT_API_KEY` | set for managed Qdrant. |
-| `QDRANT_COLLECTION_NAME` | collection to read/write. |
+| `QDRANT_COLLECTION_NAME` | read only by legacy scripts. The CLI takes `--collection` or the profile's collection. |
 
 The Qdrant connection is built in one place (`src/config/qdrant.py::get_qdrant_client`),
 so swapping local ↔ cloud is a single URL change. There is no provider switch:
@@ -167,7 +162,6 @@ dense ones as named vectors on one point is a Qdrant-specific facility.
 **All-local (recommended):** LM Studio LLM, local bge-m3 hybrid embeddings, local Qdrant.
 
 ```bash
-RAG_LLM_PROVIDER=lmstudio
 RAG_LLM_API_BASE=http://localhost:1234/v1
 RAG_LLM_MODEL=mistralai/magistral-small-2509
 RAG_LLM_API_KEY=sk-lm-...            # only if LM Studio auth is on
@@ -178,7 +172,6 @@ QDRANT_URL=http://localhost:6333
 **Cloud LLM via NVIDIA NIM, embeddings still local bge-m3:**
 
 ```bash
-RAG_LLM_PROVIDER=lmstudio
 RAG_LLM_API_BASE=https://integrate.api.nvidia.com/v1
 RAG_LLM_MODEL=meta/llama-3.1-8b-instruct
 RAG_LLM_API_KEY=nvapi-...             # your build.nvidia.com key
@@ -187,7 +180,6 @@ RAG_LLM_API_KEY=nvapi-...             # your build.nvidia.com key
 **Ollama LLM (local):**
 
 ```bash
-RAG_LLM_PROVIDER=lmstudio
 RAG_LLM_API_BASE=http://localhost:11434/v1
 RAG_LLM_MODEL=llama3.1
 RAG_LLM_API_KEY=ollama               # any non-empty placeholder

@@ -3,31 +3,25 @@
 ## Status
 Poetry has been successfully adopted in this repository as of February 2026.
 
-## Transition Policy for requirements.txt
+## requirements.txt
 
-We are following **Compat Mode** for backwards compatibility:
-
-1. **Source of Truth**: `pyproject.toml` and `poetry.lock` are the primary dependency sources.
-2. **requirements.txt Handling**: The existing `requirements.txt` is kept for compatibility with tools that don't support Poetry yet.
-3. **Updating requirements.txt**: When dependencies change, `requirements.txt` can be regenerated using:
-   ```bash
-   poetry export -f requirements.txt --output requirements.txt --without-hashes
-   ```
-   Note: This requires the `poetry-plugin-export` plugin to be installed:
-   ```bash
-   poetry self add poetry-plugin-export
-   ```
+`pyproject.toml` and `poetry.lock` are the only dependency sources. The old
+hand-kept `requirements.txt` drifted from the lock and has been deleted. Do not
+recreate it.
 
 ## Development Workflow
 
 ### For new developers:
-1. Install Poetry: `pip install poetry`
-2. Install dependencies: `poetry install`
-3. Run scripts: `poetry run python -m scripts.demo`
+1. Install Poetry with `pipx install poetry`, or into the conda env with
+   `conda install -n mailrag -c conda-forge poetry`. Never with a host `pip install`.
+2. With the `mailrag` conda env active, install dependencies:
+   `poetry install --with dev --all-extras --no-root` (or `just install`)
+3. Run scripts inside the env: `python -m scripts.demo` (or `just demo`)
 
 ### For CI/CD:
-- Install Poetry in the workflow
-- Run `poetry install` to install dependencies
+- `test-suite.yml` installs Poetry and runs
+  `poetry install --with dev --all-extras --no-interaction --no-root`, the same
+  command as `just install`
 - Execute commands via `poetry run <command>`
 
 ## Benefits

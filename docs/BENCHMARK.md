@@ -35,7 +35,7 @@ just bench                    # 2 000 docs / 360 queries
 just bench large              # 10 000 docs / 360 queries (harder)
 ```
 
-First run downloads bge-m3 (~2 GB) and the Enron-QA test split.
+First run downloads bge-m3 (a few GB) and the Enron-QA test split.
 
 ### How long it takes
 
@@ -142,8 +142,9 @@ At that size both arms sat at the ceiling, 96.7% against 95.3% at R@1 with dense
 of the distractor pool, so a corpus small enough to be trivially fast is also small
 enough to measure nothing.
 
-Query count is nearly free by comparison. Scoring 360 queries across both arms costs
-about 75 seconds, against roughly 100 seconds to build the 2 000-document index. So
+Query count is nearly free by comparison. In the first timed run, on a GPU busy with
+other work and so slower than the figures above, scoring 360 queries across both arms
+took about 75 seconds against roughly 100 seconds to build the 2 000-document index. So
 queries are spent generously to tighten the interval rather than rationed for speed.
 
 ## What this proves — and what it does not
@@ -222,7 +223,7 @@ about 3pp between runs because Qdrant rebuilds its HNSW graph each time, so read
 direction and the significance rather than the third digit.
 
 Runtime is under two minutes on an Apple-silicon GPU. Expect roughly 15 on CPU, at the
-same 9x penalty measured for `just bench` below.
+same 9x penalty measured for `just bench` above.
 
 **What remains private.** Thread reconstruction and contextual summaries are now both
 publicly demonstrated, on a corpus anyone can download. What is still author-reported is

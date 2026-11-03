@@ -479,7 +479,7 @@ C′". This 82% is the trustworthy baseline for #17 (widen-N recovers ~4 of 6 bu
 at sparse rank 0, drowned by mediocre-in-both siblings). We implemented a **tunable power-mean
 fusion** over the per-list RRF terms `1/(k+rank)` — `p=1` is exactly RRF-sum, `p→∞` is CombMAX,
 the continuum is a single tunable knob (`src/query/fusion.py: make_rank_fusion`). Evaluated it +
-widen-N **end-to-end** on the clean 120-query set (§ eval-refresh): coverage (cheap p-sweep),
+widen-N **end-to-end** on the clean 120-query set (§10, "Eval refresh"): coverage (cheap p-sweep),
 context tokens, and answer quality (local **26b@6bit** answer-gen, **26b@8bit** judge,
 answer-vs-gold 0–3).
 
@@ -699,7 +699,7 @@ retrieval summary.
 
 The right baseline for the cleanup half is not "no cleanup" but the cleanup you get **free from a
 regex**; the LLM's marginal value is the noise the regex *misses*. We tested this directly: a
-body-only corpus cleaned by regex rules only (`config/noise_rules.yaml`) leaves ~8.7k LLM-only-noise
+body-only corpus cleaned by regex rules only (the local, gitignored `config/noise_rules.yaml`, whose shipped starter is `config/noise_rules.template.yaml`) leaves ~8.7k LLM-only-noise
 emails in as distractors (28,628 emails vs the regex+LLM-clean 19,859); rerun the 360-query coverage
 and compare.
 
@@ -780,7 +780,7 @@ increment 1b:
 - a **calibration pass** over a ~200-email sample that sorts the model's calls into
   *false-noise* (real mail it would drop) and *false-keep* (noise it would keep), and makes
   a human actually read both buckets;
-- a **gate**: `mailrag pass2` won't run until the active rubric has been calibrated
+- a **gate**: `mailrag pass2` (now `mailrag summarize`) won't run until the active rubric has been calibrated
   (`--force` overrides).
 
 Calibration takes minutes; the full sweep took about 6 h on a local model (~2,500 emails/hr,
@@ -814,12 +814,12 @@ by a stranger, and because none of them is what we went looking for.
 
 ### 15.1 Public Enron has no threading headers, and it barely matters
 
-Across 19,530 real messages from the CMU maildir, `In-Reply-To` and `References` appear on
+Across 8,000 real messages from the CMU maildir, `In-Reply-To` and `References` appear on
 **0.0%** of them. Not "rarely". Zero.
 
 The corpus is still threadable. 64.3% of those messages are replies or forwards by subject,
 and deriving conversations from a normalised subject plus shared participants recovers
-**50.2% of messages into multi-message threads**, the largest running to 59 messages. So a
+**50.2% of 19,530 messages into multi-message threads**, the largest running to 59 messages. So a
 header-less corpus is not an unthreadable corpus; you reconstruct instead of reading.
 
 The derivation buys that recall at a measured price, and row S4 in [`CLAIMS.md`](CLAIMS.md)
@@ -1004,7 +1004,7 @@ corpus containing a 22 MB deck and a partner PDF and never once called
 `list_attachments` — partly because a stale note said those tools were broken,
 and partly because every search result confirmed it.
 
-This is the same defect as the unbounded grep scan (§16 and `MCP_SERVER.md`):
+This is the same defect as the unbounded grep scan (see `grep_email` in [`MCP_SERVER.md`](MCP_SERVER.md)):
 absence and not-looked-at sharing one representation. The fix is the same shape —
 the key is now **absent** when the store cannot answer, and `[]` only when the
 thread genuinely has nothing.
@@ -1020,7 +1020,8 @@ rendering the PDF pages as images.
 
 Text density separates these cleanly. Ten text-bearing PDFs measured
 99,000–225,000 chars/MB; the diagram PDF measured **1,869** and a 21 MB deck
-**66**. A cut at 10,000 has a 50× margin either side, so `get_attachment` now
+**66**. A cut at 10,000 sits about 10× below the lowest text-bearing PDF and about 5×
+above the diagram PDF, so `get_attachment` now
 returns `text_coverage: sparse` with a note to go look at the pixels.
 
 ### 17.4 Good retrieval suppresses tool diversity
@@ -1047,7 +1048,7 @@ now do — rather than for expecting the caller to remember.
 - ~~**Diagnose the coverage ceiling** (#12)~~ — DONE (§10). The ceiling is a **query→document
   matching** problem, not indexing/chunking (0/6 hard misses are chunk defects; the gold email
   is retrievable at rank ~0 from its own text).
-- ~~**Eval hygiene** (#18)~~ — DONE (§ eval-refresh). 120 validated queries; clean 82% baseline.
+- ~~**Eval hygiene** (#18)~~ — DONE (§10, "Eval refresh"). 120 validated queries; clean 82% baseline.
 - ~~**Cheap fusion/widen-N wins** (#17)~~ — DONE (§11). **Negative result:** tunable power-mean
   fusion + widen-N are within-noise / counterproductive end-to-end here; kept RRF default, shipped
   `make_rank_fusion` as a corpus-tunable knob. Retrieval-knob tuning is second-order.
