@@ -539,22 +539,84 @@ class TestProgressBarsUnderTheFullScreenApp(unittest.TestCase):
 
 
 class TestPruneWording(unittest.TestCase):
-    """What "no" means at the prune gate depends on the recipe: after the AI
-    has read everything, its confident junk is out of search either way; on the
-    no-AI recipe, saying no leaves the flagged newsletters searchable."""
+    """What "no" means at the prune gate depends on who made the junk calls:
+    the AI's confident junk is out of search either way, header-flagged
+    newsletters stay searchable. Decided by prune's own source."""
 
-    def _screen(self, verbs):
+    def _screen(self, steps):
         from src.tui import app as app_mod
 
         fake = mock.Mock()
-        fake._planned = [SimpleNamespace(verb=v) for v in verbs]
-        return app_mod.RunScreen.ai_judges_everything(fake)
+        fake._planned = [SimpleNamespace(verb=v, params=p) for v, p in steps]
+        return fake, app_mod.RunScreen
 
-    def test_with_the_ai_reading_everything(self):
-        self.assertTrue(self._screen(["scope", "calibrate", "summarize", "prune", "index"]))
+    def _ai(self, steps):
+        fake, cls = self._screen(steps)
+        return cls.ai_judges_everything(fake)
 
-    def test_without_it(self):
-        self.assertFalse(self._screen(["scope", "tag", "prune", "index"]))
+    def test_thorough(self):
+        self.assertTrue(
+            self._ai([("calibrate", {}), ("summarize", {}), ("prune", {"from": "summarize"})])
+        )
+
+    def test_balanced(self):
+        self.assertTrue(self._ai([("judge", {}), ("prune", {"from": "judge"})]))
+
+    def test_quick(self):
+        self.assertFalse(self._ai([("tag", {}), ("prune", {"from": "tag"})]))
+
+    def test_a_custom_recipe_pruning_tags_before_the_ai_is_not_the_ai(self):
+        self.assertFalse(self._ai([("tag", {}), ("prune", {"from": "tag"}), ("summarize", {})]))
+
+    def test_the_stopped_message_mentions_summaries_only_for_ai_recipes(self):
+        fake, cls = self._screen([("summarize", {})])
+        self.assertIn("Summaries the AI already wrote are kept", cls.stopped_message(fake))
+        fake, cls = self._screen([("tag", {}), ("index", {})])
+        quick = cls.stopped_message(fake)
+        self.assertNotIn("Summaries", quick)
+        self.assertNotIn("sample", quick)
+        self.assertIn("asks for the recipe", quick)
+
+    def test_the_skip_list_path_is_the_profiles_own(self):
+        fake, cls = self._screen([])
+        fake._state = SimpleNamespace(
+            profile=SimpleNamespace(blacklist="/x/box.skip.txt"), profile_path="/x/box.json"
+        )
+        self.assertEqual(cls.skip_list_path(fake), "/x/box.skip.txt")
+        fake._state.profile.blacklist = None
+        self.assertIn("next to it", cls.skip_list_path(fake))
+
+
+class TestRestoredTicks(_TuiCase):
+    def _save_rules(self, rules):
+        with open(self.profile_path) as fh:
+            data = json.load(fh)
+        data["selection_rules"] = rules
+        with open(self.profile_path, "w") as fh:
+            json.dump(data, fh)
+
+    async def _open_scope(self, app, pilot):
+        screen = ScopeScreen(app.state)
+        await app.push_screen(screen)
+        await pilot.pause()
+        return screen
+
+    async def test_a_saved_folder_is_ticked_on_the_scope_screen(self):
+        self._save_rules([{"type": "prefix", "value": "Inbox/"}])
+        app = self.app()
+        async with app.run_test(size=_SIZE) as pilot:
+            screen = await self._open_scope(app, pilot)
+            self.assertIn("Inbox/", screen._checked)
+
+    async def test_a_tick_for_a_folder_that_is_gone_is_dropped(self):
+        self._save_rules(
+            [{"type": "prefix", "value": "Inbox/"}, {"type": "prefix", "value": "Gone/"}]
+        )
+        app = self.app()
+        async with app.run_test(size=_SIZE) as pilot:
+            screen = await self._open_scope(app, pilot)
+            self.assertNotIn("Gone/", screen._checked)
+            self.assertEqual(screen._rules(), [{"type": "prefix", "value": "Inbox/"}])
 
 
 if __name__ == "__main__":

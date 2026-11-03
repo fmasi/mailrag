@@ -198,7 +198,7 @@ class WelcomeScreen(WizardScreen):
                 yield Static(
                     "This makes a mailbox searchable, for you and for AI agents. You pick a "
                     "recipe, the folders to include and, for the AI recipes, the model. Then "
-                    "it runs, and asks you before anything slow or costly.\n"
+                    "it runs, and stops to ask you at the decisions that matter.\n"
                     "[dim]Nothing in your mailbox is changed or deleted.[/]",
                     id="welcome-blurb",
                 )
@@ -326,9 +326,12 @@ class ModelScreen(WizardScreen):
                 yield Static(
                     f"The [bold]{escape(self._persona.label)}[/] recipe uses an AI model to:\n"
                     + "".join(f"  • {escape(d)}\n" for d in llm_steps)
-                    + "It runs on your own machine, in LM Studio or Ollama (or any server "
-                    "with an OpenAI-style API). Type the model's name exactly as that "
-                    "app lists it, and keep the app running while this works.\n"
+                    + f"Your mail is sent to the AI server at [b]{escape(self._endpoint())}[/]. "
+                    "localhost means your own machine; anything else, make sure you "
+                    "trust it. To use another server (Ollama, for example), quit and set "
+                    "RAG_LLM_API_BASE.\n"
+                    "Type the model's name exactly as that server lists it, and keep it "
+                    "running while this works.\n"
                     "[dim]LM Studio: the name is under My Models, or run `lms ls`.[/]",
                     id="model-blurb",
                 )
@@ -338,6 +341,12 @@ class ModelScreen(WizardScreen):
                     id="model-input",
                 )
                 yield Static("", id="model-error")
+
+    @staticmethod
+    def _endpoint() -> str:
+        from src.llm.client import resolve_llm_api_base
+
+        return resolve_llm_api_base()
 
     def on_mount(self) -> None:
         self.query_one("#model-input", Input).focus()
@@ -424,8 +433,28 @@ class ScopeScreen(WizardScreen):
             for child in node.children:
                 branch.add_leaf("", data=child.node_id)
         tree.root.expand()
+        self._drop_missing_ticks()
         self._refresh_labels()
         tree.focus()
+
+    def _drop_missing_ticks(self) -> None:
+        """Forget restored ticks for folders this tree no longer shows.
+
+        Last run's choice is restored from the profile, and the mailbox may have
+        changed since. A tick with no row could never be unticked, yet it still
+        became a rule, and a run made only of such rules indexes nothing."""
+        shown = {self.ROOT_FILES_ID} if self._has_root else set()
+        for node in self._scope_nodes:
+            shown.add(node.node_id)
+            shown.update(child.node_id for child in node.children)
+        missing = self._checked - shown
+        if missing:
+            self._checked -= missing
+            self.notify(
+                f"{len(missing)} folder(s) ticked last time are no longer in the mailbox "
+                "and were unticked.",
+                severity="warning",
+            )
 
     # -- rendering ------------------------------------------------------------
 
@@ -591,9 +620,9 @@ class ReviewScreen(WizardScreen):
                 else:
                     if flow.needs_model(self._persona):
                         asks = (
-                            "Nothing slow or costly runs without asking: the run first "
-                            "shows you a sample of the AI's decisions to check, and asks "
-                            "again before the AI reads every email."
+                            "The run stops for you to check a sample of the AI's decisions, "
+                            "and asks before the AI reads your mail. Making it searchable "
+                            "at the end runs without asking."
                         )
                     else:
                         asks = (
@@ -813,9 +842,9 @@ class _WorkerBridge:
             self._ask(
                 lambda: ConfirmModal(
                     "Let the AI read every email?",
-                    "This is the slow step: one AI call per email in the folders you "
-                    "ticked. Emails the AI already read are skipped, so stopping and "
-                    "running again later loses nothing.",
+                    "This is the slow step: one AI call for each email it hasn't read "
+                    "yet. Emails it already read are skipped, so stopping and running "
+                    "again later loses nothing.",
                     yes_hint="start",
                     no_hint="stop here",
                 )
@@ -831,12 +860,19 @@ class _WorkerBridge:
             )
         else:
             if_no = "No keeps them: they will be searchable along with everything else."
-        who = "the AI judged" if self._screen.ai_judges_everything() else "the header rules flagged"
+        if self._screen.ai_judges_everything():
+            who = "the AI judged"
+            legend = "Each line: how sure the AI is (0 to 1), then its reason.\n"
+        else:
+            who = "the header rules flagged"
+            legend = ""
+        skip_list = self._screen.skip_list_path()
         body = (
-            f"These are emails {who} as junk (a sample is shown). Yes adds them to a "
-            "skip list, so later runs and rebuilds pass over them too. Nothing is "
-            "deleted from your mailbox. The skip list is a file next to your settings "
-            f"file, ending in .blacklist.txt; delete it to undo.\n[dim]{if_no}[/]\n\n"
+            f"These are emails {who} as junk (a sample is shown). Yes adds them to the "
+            f"skip list ({escape(skip_list)}), so later runs and rebuilds pass over them "
+            "too. Nothing is deleted from your mailbox. The list builds up over every "
+            "run: deleting it brings back everything ever skipped, from the next "
+            f"rebuild.\n[dim]{if_no}[/]\n\n{legend}"
         ) + "\n".join(f"  [dim]{escape(line)}[/]" for line in preview)
         return bool(
             self._ask(
@@ -921,9 +957,28 @@ class RunScreen(Screen[int]):
             self.query_one("#run-progress", ProgressBar).advance(1)
 
     def ai_judges_everything(self) -> bool:
-        """Does this run's recipe have the AI read every email? Then the index
-        leaves its confident junk out whether or not prune writes a skip list."""
-        return any(step.verb == "summarize" for step in self._planned)
+        """Did the AI make the junk calls prune is about to apply? Then the
+        index leaves that confident junk out whether or not prune writes a skip
+        list: the verdicts sit in the cache either way. Decided by prune's own
+        ``from`` setting, not by which steps the recipe has."""
+        sources = [s.params.get("from", "judge") for s in self._planned if s.verb == "prune"]
+        return bool(sources) and all(src in ("judge", "summarize") for src in sources)
+
+    def stopped_message(self) -> str:
+        """What a stopped run keeps, for this recipe. The recipe and model are not
+        saved anywhere, so a rerun asks for them again."""
+        kept = ""
+        if any(step.verb in flow.LLM_STEPS for step in self._planned):
+            kept = " Summaries the AI already wrote are kept; the sample check runs again."
+        return (
+            "[yellow]Stopped.[/] Run the wizard again to carry on; it asks for the recipe "
+            f"again.{kept} Press [b]enter[/] to exit."
+        )
+
+    def skip_list_path(self) -> str:
+        """Where prune writes, as the runner will resolve it."""
+        prof = self._state.profile
+        return prof.blacklist or f"{self._state.profile_path} (.blacklist.txt next to it)"
 
     def write_log(self, message: str) -> None:
         self.query_one("#run-log", RichLog).write(message)
@@ -947,13 +1002,11 @@ class RunScreen(Screen[int]):
                 "[dim]To keep it up to date as new mail arrives, see docs/SYNC.md.[/]",
             ]
             self.write_log("\n".join(lines))
-            status.update("[green]✓ done[/], your choices are saved. Press [b]enter[/] to exit.")
-        else:
             status.update(
-                "[yellow]Stopped.[/] Your choices so far are saved. Run the wizard again to "
-                "carry on: summaries the AI already wrote are kept, the sample check runs "
-                "again. Press [b]enter[/] to exit."
+                "[green]✓ done[/]. Your folder choice is saved. Press [b]enter[/] to exit."
             )
+        else:
+            status.update(self.stopped_message())
 
     # -- the worker ---------------------------------------------------------------
 
@@ -978,8 +1031,8 @@ class RunScreen(Screen[int]):
     def action_finish(self) -> None:
         if self._exit_code is None:
             self.notify(
-                "Still running. Ctrl+Q closes the wizard, but the step already running "
-                "finishes in the background. Summaries already written are kept.",
+                "Still running. Ctrl+Q closes the screen, but the terminal stays busy "
+                "until the current step finishes. Summaries already written are kept.",
                 severity="warning",
             )
             return

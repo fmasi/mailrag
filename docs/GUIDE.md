@@ -88,7 +88,7 @@ of screens. A breadcrumb at the top always shows where you are:
 2. **Persona.** The personas listed by plain names: *Quick, no AI* (`llm-none`),
    *Balanced* (`llm-verify`) and *Thorough, AI reads everything* (`llm-all`). The
    highlighted one is previewed on the right, every step in plain words with a
-   colour-coded cost badge from `free` to `GPU, minutes`, and the `scan` recommendation
+   colour-coded cost badge from `free` to `GPU, minutes to hours`, and the `scan` recommendation
    is starred and pre-highlighted. The step wording lives in `personas.yaml`.
 
    ![Persona picker — persona list on the left, the highlighted recipe with cost badges on the right](images/tui/persona.svg)

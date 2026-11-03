@@ -82,6 +82,18 @@ class TestCalibration(unittest.TestCase):
         self.assertNotIn("(x1)", text)
         self.assertIn(f"[{calibration.FALSE_KEEP_HEADING}] 12", text)
 
+    def test_header_text_cannot_reach_the_terminal_as_control_codes(self):
+        """A subject is attacker-chosen and an encoded-word can decode to ESC."""
+        evil = _rec(True, subject="hi\x1b]0;pwned\x07x", reason="r\x1b[2J", sender="a\rb")
+        report = calibration.CalibrationReport(
+            rubric="w", sample=1, noise_rate=1.0, false_noise=[evil]
+        )
+        text = calibration.format_report(report)
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn("\x07", text)
+        self.assertNotIn("\r", text)
+        self.assertIn("hi?]0;pwned?x", text)
+
     def test_format_report_caps_distinct_rows_not_copies(self):
         recs = []
         for i in range(20):

@@ -395,10 +395,6 @@ class TestShortResult(unittest.TestCase):
         self.assertTrue(out.endswith("…"))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestDescribeResult(unittest.TestCase):
     """The run log speaks in sentences, not in Python reprs."""
 
@@ -447,3 +443,26 @@ class TestPersonaCardsCarryPlainSteps(unittest.TestCase):
                 self.assertTrue(does)
                 for jargon in ("Qdrant", "BGE", "rubric", "LLM", "verb", "corpus"):
                     self.assertNotIn(jargon, does)
+
+
+class TestDescribeMoreResults(unittest.TestCase):
+    def test_tag_stats(self):
+        from src.pipeline.pass1 import Pass1Stats
+
+        text = flow.describe_result(Pass1Stats(total=100, kept=100, dropped=0, tagged=12))
+        self.assertEqual(text, "12 of 100 emails look like newsletters")
+
+    def test_scan_report_speaks_of_conversations(self):
+        from src.cluster.noise_pockets import ClusterReport
+
+        report = ClusterReport(
+            k=1, seed=0, n_threads=4, n_emails=50, corpus_baseline_tag_rate=0.0, clusters=[]
+        )
+        text = flow.describe_result(report)
+        self.assertEqual(
+            text, "50 emails grouped; about 0% of conversations sit in obvious junk groups"
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
