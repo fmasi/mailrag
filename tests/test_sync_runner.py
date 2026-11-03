@@ -1592,8 +1592,10 @@ class TestIndexSinceStages(_RunnerTest):
             qdrant_url="http://x",
         )
 
-    def test_old_mail_is_still_downloaded(self):
+    def test_old_mail_is_still_downloaded_but_held_back(self):
         self.assertEqual(self.state.counts("acct")["total"], 2)
+        counts = self.state.counts("acct", since=self.account.index_since_bound())
+        self.assertEqual(counts["held_back"], 1)
 
     def test_only_mail_from_the_bound_on_is_judged(self):
         seen = {}
@@ -1634,5 +1636,18 @@ class TestIndexSinceStages(_RunnerTest):
         self.assertEqual(seen["keys"], self.new_key)
 
     def test_held_back_mail_returns_when_the_bound_is_removed(self):
+        def fake_run_pass(*, profile, paths, model, workers, on_outcome=None):
+            for p in paths:
+                on_outcome(p, "done")
+            return {"cached": 0, "done": len(paths), "error": 0}
+
+        first = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=fake_run_pass
+        )
+        self.assertEqual(first.judged, 1)
         self.account.index_since = None
-        self.assertEqual(len(self.state.pending("acct", "judged")), 2)
+        second = judge_pending(
+            self.account, self.state, profile=self._profile(), model="m", run_pass_fn=fake_run_pass
+        )
+        self.assertEqual(second.judged, 1)  # the old message, released
+        self.assertEqual(self.state.counts("acct")["pending_judge"], 0)
