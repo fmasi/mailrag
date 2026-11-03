@@ -1110,7 +1110,7 @@ def build_parser():
     atg.add_argument(
         "--extractor",
         default=None,
-        help="OCR backend: llm | tesseract | cloud (default: RAG_ATTACH_EXTRACTOR or llm)",
+        help="OCR backend: llm | tesseract (default: RAG_ATTACH_EXTRACTOR or llm)",
     )
     atg.add_argument(
         "--force",
