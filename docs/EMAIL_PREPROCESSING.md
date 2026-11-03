@@ -364,7 +364,7 @@ Bare numbers carry almost no semantic signal, and one figure has many surface fo
 we append a **canonical integer token** (`210000000`) via `augment_numeric`
 (`src/ingest/numeric.py`) so the sparse/dense legs share a matchable token while the
 original surface form is preserved. This improves *exact-figure* recall only. Fuzzy
-numeric ranges remain open on #82. For an exact string, the `grep_email` MCP tool
+numeric ranges are not handled. For an exact string, the `grep_email` MCP tool
 scans the raw corpus (see [`MCP_SERVER.md`](MCP_SERVER.md)).
 
 ---

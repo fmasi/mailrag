@@ -19,7 +19,7 @@ files on disk make every drop reversible.
    free    free   free     cheap    small       small     free    BIG         GPU     CPU
 ```
 
-That is the order `llm-verify` runs. `llm-all` has no `judge`, so its `prune` comes after
+That is the order `llm-verify` runs, minus `tag`, which only `llm-none` uses. `llm-all` has no `judge`, so its `prune` comes after
 `summarize` and applies the verdicts that call returns.
 
 The one cost that dominates is the **LLM pass over each email body**. So the golden
