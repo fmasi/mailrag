@@ -115,8 +115,15 @@ def run(
     progress: bool = False,
 ) -> calibration.CalibrationReport:
     """Sample *sample* files deterministically (by *seed*), judge each with the
-    profile's rubric, and return a :class:`CalibrationReport`. Writes no cache."""
-    kept, _ = resolve_index_files(profile.resolved_root(), profile.selection_rules, None)
+    profile's rubric, and return a :class:`CalibrationReport`. Writes no cache.
+
+    The sample honours the profile's skip list, the same way judge and index do:
+    files already excluded (by an earlier prune, or by rules written before any
+    LLM pass) would otherwise crowd the sample with mail no later stage sees."""
+    rubrics.load_rubric(profile.rubric)  # a missing rubric fails here, not once per email
+    kept, _ = resolve_index_files(
+        profile.resolved_root(), profile.selection_rules, getattr(profile, "blacklist", None)
+    )
     paths = sample_files(kept, sample, seed=seed)
     cl = llm_client.make_client()
     load_email = _make_load_email(body_chars)
@@ -127,6 +134,13 @@ def run(
         )
 
     records = judge_sample(paths, load_email, judge, workers=workers, progress=progress)
+    if not records:
+        # A report on zero emails says nothing, and both callers would record it as a
+        # passed gate. Fail loudly instead: usually the model endpoint is unreachable.
+        raise RuntimeError(
+            f"calibrate judged 0 of {len(paths)} sampled emails; nothing recorded. "
+            "Check that the model endpoint is reachable and the profile selects mail."
+        )
     return calibration.CalibrationReport(
         rubric=profile.rubric,
         sample=len(records),

@@ -36,7 +36,7 @@ keep), never both.
 | `tag` | Regex/header rules flag obvious bulk (newsletters, `no-reply@`). | free | no (tags) |
 | `scan` | Cluster the embeddings (no LLM) and rank "noise pockets". Also **recommends a persona** from your corpus's size and obvious-noise share. | cheap (GPU) | no |
 | `judge` | Cheap LLM **verdict only** (noise/keep). Run on mail you intend to *drop*, so you never pay to summarize it. | small LLM | no (verdict) |
-| `calibrate` | Judge a small **sample** with the rubric and bucket the suspected mistakes — the gate before any full LLM run. | small LLM | no |
+| `calibrate` | Judge a small **sample** with the rubric and bucket the suspected mistakes — the gate before any full LLM run. The sample skips files already on the skip list. | small LLM | no |
 | `summarize` | LLM **summary/context** for the emails you keep (the noise verdict comes free in the same call). The expensive step. | big LLM | no (verdict) |
 | `prune` | Write the confident drops from one source to a skip list: `--from tag`, `judge` or `summarize`. From `tag` or `judge` it runs **before** the summary pass, so the big LLM only sees the keep set. A dry-run preview unless you pass `--yes`. | free | marks drops |
 | `index` | Embed (BGE-M3 dense + sparse) and store in Qdrant. **The only step that actually removes the dropped mail.** Incremental by default; `--recreate` rebuilds from scratch. | GPU | yes |
