@@ -511,6 +511,55 @@ class TestAttachmentStoreNeverBuilt(unittest.TestCase):
         # The guard must not turn a legitimate "no attachments here" into an error.
         self.assertEqual(server.list_attachments(thread_id="t1", store=self._PopulatedStore()), [])
 
+    def test_id_not_in_the_collection_raises_instead_of_empty(self):
+        # A Gmail hex thread id, or an id from another corpus, used to come back as
+        # [], which reads as "this thread has no attachments".
+        seen = []
+
+        def id_known(thread_id, message_id):
+            seen.append((thread_id, message_id))
+            return False
+
+        with self.assertRaises(ValueError) as ctx:
+            server.list_attachments(
+                thread_id="1a1c6ef58686cf3b", store=self._PopulatedStore(), id_known=id_known
+            )
+        msg = str(ctx.exception)
+        self.assertIn("not indexed", msg)
+        self.assertIn("Message-ID", msg)
+        self.assertNotIn("1a1c6ef58686cf3b", msg)  # ids are not echoed into errors
+        self.assertEqual(seen, [("1a1c6ef58686cf3b", None)])
+
+    def test_known_id_without_attachments_still_returns_empty(self):
+        out = server.list_attachments(
+            message_id="<m@x.com>", store=self._PopulatedStore(), id_known=lambda t, m: True
+        )
+        self.assertEqual(out, [])
+
+    def test_ids_reach_the_id_check_normalised_but_never_rewritten(self):
+        # Thread ids are always stored bare; message ids keep the sender's spelling.
+        for kwargs, expected in (
+            ({"thread_id": "<root@x.com>"}, ("root@x.com", None)),
+            ({"thread_id": " root@x.com "}, ("root@x.com", None)),
+            ({"message_id": "m@x.com"}, (None, "m@x.com")),
+            ({"message_id": " <m@x.com> "}, (None, "<m@x.com>")),
+        ):
+            with self.subTest(kwargs=kwargs):
+                seen = []
+                server.list_attachments(
+                    store=self._PopulatedStore(),
+                    id_known=lambda t, m: seen.append((t, m)) or True,
+                    **kwargs,
+                )
+                self.assertEqual(seen, [expected])
+
+    def test_unanswerable_id_check_degrades_to_empty(self):
+        # Qdrant down: say nothing rather than claim the id is unknown.
+        out = server.list_attachments(
+            thread_id="t1", store=self._PopulatedStore(), id_known=lambda t, m: None
+        )
+        self.assertEqual(out, [])
+
     def test_get_attachment_on_empty_store_names_the_cause(self):
         with self.assertRaises(ValueError) as ctx:
             server.get_attachment("deadbeef", store=self._EmptyStore())
@@ -692,11 +741,28 @@ class TestListCollections(unittest.TestCase):
         client = _FakeQdrant(["a", "b"], {"a": 1, "b": 2})
         with (
             mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch("src.mcp_server.scoping.collection_profiles", return_value={}),
             mock.patch("src.mcp_server.server.latest_manifest_collection", return_value="b"),
         ):
             rows = server.list_collections(client=client)
         self.assertTrue(rows[1]["is_default"])
         self.assertFalse(rows[0]["is_default"])
+
+    def test_no_default_flagged_when_several_corpora_are_configured(self):
+        # The other tools refuse to guess between several corpora, so flagging the
+        # latest manifest as default sent an agent to the wrong one (11 Nov: it
+        # grepped iles-legacy for mail that lives in iles-rag).
+        client = _FakeQdrant(["a", "b"], {"a": 1, "b": 2})
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch(
+                "src.mcp_server.scoping.collection_profiles",
+                return_value={"a": "/p/a.json", "b": "/p/b.json"},
+            ),
+            mock.patch("src.mcp_server.server.latest_manifest_collection", return_value="b"),
+        ):
+            rows = server.list_collections(client=client)
+        self.assertEqual([r["is_default"] for r in rows], [False, False])
 
     def test_points_count_none_when_info_fails(self):
         client = _FakeQdrant(["a"], {"a": 5}, bad_info={"a"})
@@ -805,12 +871,13 @@ class TestListAttachments(unittest.TestCase):
             ],
         )
 
-    def test_message_id_passthrough(self):
+    def test_message_id_tries_each_spelling(self):
         store = _FakeStore([])
         server.list_attachments(message_id="m9", store=store)
         # One call: the raw read came back empty, so there was nothing to filter
         # and no second query.
-        self.assertEqual(store.list_calls, [(None, "m9")])
+        # Tried as given, then bracketed: the store keeps the sender's spelling.
+        self.assertEqual(store.list_calls, [(None, "m9"), (None, "<m9>")])
 
     def test_requires_an_identifier(self):
         with self.assertRaises(ValueError):
@@ -818,8 +885,14 @@ class TestListAttachments(unittest.TestCase):
 
     def test_builds_and_closes_store_when_not_injected(self):
         store = _FakeStore([])
-        with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store) as ctor:
+        with (
+            mock.patch("src.mcp_server.server.AttachmentStore", return_value=store) as ctor,
+            mock.patch(
+                "src.mcp_server.server._qdrant_id_known", return_value=lambda t, m: True
+            ) as id_check,
+        ):
             server.list_attachments(thread_id="t1", collection="c1")
+        id_check.assert_called_once_with("c1")  # the default check, never a live Qdrant
         ctor.assert_called_once()
         self.assertTrue(store.closed)
 
@@ -1109,6 +1182,84 @@ class TestCliWiring(unittest.TestCase):
 
             self.assertEqual(os.environ["MAILRAG_COLLECTION"], "work-rag")
             self.assertEqual(os.environ["MAILRAG_QDRANT_URL"], "http://localhost:6333")
+
+
+class TestQdrantIdKnown(unittest.TestCase):
+    """The default id check behind list_attachments: a payload count, never a guess."""
+
+    class _Client:
+        def __init__(self, n=0, boom=False):
+            self.n, self.boom, self.calls = n, boom, []
+
+        closed = False
+
+        def scroll(self, collection, scroll_filter=None, limit=10, **kw):
+            if self.boom:
+                raise ConnectionError("qdrant down")
+            self.calls.append((collection, scroll_filter, limit))
+            return [object()] * min(self.n, limit), None
+
+        def close(self):
+            self.closed = True
+
+    def _check(self, client, thread_id=None, message_id=None):
+        # The client is built at call time, so the patch must cover the call.
+        with mock.patch("src.config.qdrant.get_qdrant_client", return_value=client):
+            return server._qdrant_id_known("iles-rag")(thread_id, message_id)
+
+    def test_thread_id_filters_on_thread_id(self):
+        client = self._Client(n=3)
+        self.assertTrue(self._check(client, thread_id="<t@x.com>"))
+        coll, flt, limit = client.calls[0]
+        self.assertEqual(coll, "iles-rag")
+        self.assertEqual(limit, 1)  # stops at the first match
+        self.assertTrue(client.closed)
+        self.assertEqual([c.key for c in flt.must], ["thread_id"])
+
+    def test_message_id_matches_email_or_attachment_chunks(self):
+        client = self._Client(n=0)
+        self.assertFalse(self._check(client, message_id="<m@x.com>"))
+        flt = client.calls[0][1]
+        self.assertEqual(sorted(c.key for c in flt.should), ["message_id", "parent_message_id"])
+        self.assertEqual(flt.should[0].match.any, ["<m@x.com>", "m@x.com"])  # both spellings
+
+    def test_qdrant_failure_answers_unknown_not_missing(self):
+        self.assertIsNone(self._check(self._Client(boom=True), thread_id="<t@x.com>"))
+
+
+class TestMessageIdSpellingsAgainstARealStore(unittest.TestCase):
+    """A sender may write a bare Message-ID; the stored spelling must still match."""
+
+    def setUp(self):
+        import tempfile
+
+        self.dir = tempfile.mkdtemp(prefix="att_ids_")
+        self.store = server.AttachmentStore(self.dir)
+        for mid in ("bare@x.com", "<bracketed@x.com>"):
+            self.store.put(
+                mid.encode(),
+                message_id=mid,
+                thread_id="t1",
+                filename="invoice.pdf",
+                mime="application/pdf",
+                size=len(mid),
+                source_type="eml",
+                source_ref="/corpus/1.eml",
+            )
+
+    def tearDown(self):
+        import shutil
+
+        self.store.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_every_spelling_finds_the_stored_row(self):
+        for given in ("bare@x.com", "<bare@x.com>", "bracketed@x.com", "<bracketed@x.com>"):
+            with self.subTest(given=given):
+                rows = server.list_attachments(
+                    message_id=given, store=self.store, id_known=lambda t, m: True
+                )
+                self.assertEqual([r["filename"] for r in rows], ["invoice.pdf"])
 
 
 if __name__ == "__main__":
