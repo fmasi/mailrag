@@ -47,6 +47,7 @@ from src.attachments.location import (  # noqa: F401 — re-exported: the public
 )
 from src.attachments.location import safe_dirname as _safe_dirname  # noqa: F401
 from src.attachments.store import AttachmentStore
+from src.data.threading import normalize_message_id
 from src.llm.answer import answer_from_threads
 from src.mcp_server import usage
 from src.mcp_server.grep import grep_email as _grep_email
@@ -704,22 +705,25 @@ def _qdrant_id_known(
 ) -> Callable[[Optional[str], Optional[str]], Optional[bool]]:
     """Build an ``id_known`` check: is this thread or message indexed in *collection*?
 
-    A payload-filter count, no embedding and no ranking. Message ids match an
+    A payload-filter lookup that stops at the first match, no embedding and no ranking. Message ids match an
     email chunk's ``message_id`` or an attachment chunk's ``parent_message_id``.
     Returns ``None`` when Qdrant cannot answer, so an outage never turns into a
     false "not indexed".
     """
 
     def check(thread_id: Optional[str], message_id: Optional[str]) -> Optional[bool]:
+        client = None
         try:
             from qdrant_client import models
 
             from src.config.qdrant import get_qdrant_client
 
             if message_id:
+                bare = normalize_message_id(message_id)
+                spellings = [f"<{bare}>", bare]
                 flt = models.Filter(
                     should=[
-                        models.FieldCondition(key=k, match=models.MatchValue(value=message_id))
+                        models.FieldCondition(key=k, match=models.MatchAny(any=spellings))
                         for k in ("message_id", "parent_message_id")
                     ]
                 )
@@ -732,9 +736,19 @@ def _qdrant_id_known(
                     ]
                 )
             client = get_qdrant_client(url=resolve_qdrant_url())
-            return client.count(collection, count_filter=flt, exact=True).count > 0
+            # One matching point settles it: stop at the first, never count them all.
+            points, _ = client.scroll(
+                collection, scroll_filter=flt, limit=1, with_payload=False, with_vectors=False
+            )
+            return bool(points)
         except Exception:
             return None
+        finally:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:  # noqa: S110 - closing is best effort
+                    pass
 
     return check
 
@@ -769,6 +783,12 @@ def list_attachments(
 
     Raises ``ValueError`` when neither identifier is supplied.
     """
+    # Accept either spelling: the index stores thread ids bare and message ids in
+    # angle brackets, and a caller cannot be expected to know which is which.
+    thread_id = normalize_message_id(thread_id) or None
+    message_id = (
+        f"<{normalize_message_id(message_id)}>" if normalize_message_id(message_id) else None
+    )
     if not thread_id and not message_id:
         raise ValueError("one of thread_id or message_id is required")
     owns = store is None
@@ -790,7 +810,8 @@ def list_attachments(
                     f"that {kind} is not indexed in this collection, so there is nothing "
                     "to list (an empty list would have meant 'no attachments'). mailrag "
                     "ids are RFC Message-IDs, such as <abc123@mail.gmail.com>; a thread's "
-                    "id is the Message-ID of its first message. Gmail's hex thread and "
+                    "id is the Message-ID of its first message, with or without the angle "
+                    "brackets. Gmail's hex thread and "
                     "message ids are not mailrag ids: take ids from search_email or "
                     "grep_email results. Each corpus is separate, so the message may be "
                     "in another collection: see list_collections()."
@@ -1068,8 +1089,8 @@ def build_server():
 
         Ids are mailrag ids, taken from search_email / grep_email results: a
         message id is the email's RFC Message-ID (``<abc123@mail.gmail.com>``) and a
-        thread id is the Message-ID of the thread's first message. Gmail's hex ids
-        do not work. An id this collection never indexed raises an error rather
+        thread id is the Message-ID of the thread's first message, without the
+        angle brackets (either spelling is accepted). Gmail's hex ids do not work. An id this collection never indexed raises an error rather
         than returning an empty list; ``[]`` means the message has no attachments.
 
         Args:

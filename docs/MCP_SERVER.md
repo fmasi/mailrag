@@ -303,7 +303,8 @@ List the files attached to a thread or a message (parity with the CLI
 
 > **Ids are mailrag ids.** A message id is the email's RFC `Message-ID` (such as
 > `<abc123@mail.gmail.com>`), and a thread id is the `Message-ID` of the thread's
-> first message. Gmail's hex thread and message ids are not mailrag ids. An id the
+> first message without the angle brackets. Either spelling is accepted for both.
+> Gmail's hex thread and message ids are not mailrag ids. An id the
 > collection has never indexed raises an error instead of returning `[]`, so "no
 > attachments" and "wrong id, or wrong collection" never look the same. A message
 > that is indexed but has no attachments still returns `[]`. If Qdrant can't

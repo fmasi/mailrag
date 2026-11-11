@@ -536,6 +536,23 @@ class TestAttachmentStoreNeverBuilt(unittest.TestCase):
         )
         self.assertEqual(out, [])
 
+    def test_either_id_spelling_reaches_the_store_in_its_stored_form(self):
+        # The store keeps thread ids bare and message ids bracketed; callers send both.
+        for kwargs, expected in (
+            ({"thread_id": "<root@x.com>"}, ("root@x.com", None)),
+            ({"thread_id": " root@x.com "}, ("root@x.com", None)),
+            ({"message_id": "m@x.com"}, (None, "<m@x.com>")),
+            ({"message_id": "<m@x.com>"}, (None, "<m@x.com>")),
+        ):
+            with self.subTest(kwargs=kwargs):
+                seen = []
+                server.list_attachments(
+                    store=self._PopulatedStore(),
+                    id_known=lambda t, m: seen.append((t, m)) or True,
+                    **kwargs,
+                )
+                self.assertEqual(seen, [expected])
+
     def test_unanswerable_id_check_degrades_to_empty(self):
         # Qdrant down: say nothing rather than claim the id is unknown.
         out = server.list_attachments(
@@ -854,12 +871,12 @@ class TestListAttachments(unittest.TestCase):
             ],
         )
 
-    def test_message_id_passthrough(self):
+    def test_message_id_reaches_the_store_bracketed(self):
         store = _FakeStore([])
         server.list_attachments(message_id="m9", store=store)
         # One call: the raw read came back empty, so there was nothing to filter
         # and no second query.
-        self.assertEqual(store.list_calls, [(None, "m9")])
+        self.assertEqual(store.list_calls, [(None, "<m9>")])  # stored spelling
 
     def test_requires_an_identifier(self):
         with self.assertRaises(ValueError):
@@ -867,8 +884,14 @@ class TestListAttachments(unittest.TestCase):
 
     def test_builds_and_closes_store_when_not_injected(self):
         store = _FakeStore([])
-        with mock.patch("src.mcp_server.server.AttachmentStore", return_value=store) as ctor:
+        with (
+            mock.patch("src.mcp_server.server.AttachmentStore", return_value=store) as ctor,
+            mock.patch(
+                "src.mcp_server.server._qdrant_id_known", return_value=lambda t, m: True
+            ) as id_check,
+        ):
             server.list_attachments(thread_id="t1", collection="c1")
+        id_check.assert_called_once_with("c1")  # the default check, never a live Qdrant
         ctor.assert_called_once()
         self.assertTrue(store.closed)
 
@@ -1167,11 +1190,16 @@ class TestQdrantIdKnown(unittest.TestCase):
         def __init__(self, n=0, boom=False):
             self.n, self.boom, self.calls = n, boom, []
 
-        def count(self, collection, count_filter=None, exact=False):
+        closed = False
+
+        def scroll(self, collection, scroll_filter=None, limit=10, **kw):
             if self.boom:
                 raise ConnectionError("qdrant down")
-            self.calls.append((collection, count_filter, exact))
-            return mock.Mock(count=self.n)
+            self.calls.append((collection, scroll_filter, limit))
+            return [object()] * min(self.n, limit), None
+
+        def close(self):
+            self.closed = True
 
     def _check(self, client, thread_id=None, message_id=None):
         # The client is built at call time, so the patch must cover the call.
@@ -1181,9 +1209,10 @@ class TestQdrantIdKnown(unittest.TestCase):
     def test_thread_id_filters_on_thread_id(self):
         client = self._Client(n=3)
         self.assertTrue(self._check(client, thread_id="<t@x.com>"))
-        coll, flt, exact = client.calls[0]
+        coll, flt, limit = client.calls[0]
         self.assertEqual(coll, "iles-rag")
-        self.assertTrue(exact)
+        self.assertEqual(limit, 1)  # stops at the first match
+        self.assertTrue(client.closed)
         self.assertEqual([c.key for c in flt.must], ["thread_id"])
 
     def test_message_id_matches_email_or_attachment_chunks(self):
@@ -1191,6 +1220,7 @@ class TestQdrantIdKnown(unittest.TestCase):
         self.assertFalse(self._check(client, message_id="<m@x.com>"))
         flt = client.calls[0][1]
         self.assertEqual(sorted(c.key for c in flt.should), ["message_id", "parent_message_id"])
+        self.assertEqual(flt.should[0].match.any, ["<m@x.com>", "m@x.com"])  # both spellings
 
     def test_qdrant_failure_answers_unknown_not_missing(self):
         self.assertIsNone(self._check(self._Client(boom=True), thread_id="<t@x.com>"))
