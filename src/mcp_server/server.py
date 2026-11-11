@@ -700,6 +700,18 @@ def _require_populated_store(store) -> None:
         )
 
 
+def _message_id_spellings(message_id: str) -> List[str]:
+    """The id as given, then bracketed and bare, without duplicates.
+
+    Message ids are stored exactly as the header was written (whitespace
+    collapsed), so a sender's bare ``abc@host`` stays bare. Trying the given
+    spelling first means an id copied from a search result always matches.
+    """
+    given = message_id.strip()
+    bare = normalize_message_id(given)
+    return list(dict.fromkeys(s for s in (given, f"<{bare}>", bare) if s and s != "<>"))
+
+
 def _qdrant_id_known(
     collection: str,
 ) -> Callable[[Optional[str], Optional[str]], Optional[bool]]:
@@ -719,8 +731,7 @@ def _qdrant_id_known(
             from src.config.qdrant import get_qdrant_client
 
             if message_id:
-                bare = normalize_message_id(message_id)
-                spellings = [f"<{bare}>", bare]
+                spellings = _message_id_spellings(message_id)
                 flt = models.Filter(
                     should=[
                         models.FieldCondition(key=k, match=models.MatchAny(any=spellings))
@@ -783,12 +794,12 @@ def list_attachments(
 
     Raises ``ValueError`` when neither identifier is supplied.
     """
-    # Accept either spelling: the index stores thread ids bare and message ids in
-    # angle brackets, and a caller cannot be expected to know which is which.
+    # Thread ids are always stored bare (compute_thread_id normalises them), so
+    # normalise. Message ids are stored as the sender wrote the header, usually
+    # bracketed but not always, so the id is never rewritten: it is tried as
+    # given first, then in the other spellings.
     thread_id = normalize_message_id(thread_id) or None
-    message_id = (
-        f"<{normalize_message_id(message_id)}>" if normalize_message_id(message_id) else None
-    )
+    message_id = (message_id or "").strip() or None
     if not thread_id and not message_id:
         raise ValueError("one of thread_id or message_id is required")
     owns = store is None
@@ -799,7 +810,14 @@ def list_attachments(
         if id_known is None:
             id_known = _qdrant_id_known(coll)
     try:
-        raw = store.list_for(thread_id=thread_id, message_id=message_id, include_boilerplate=True)
+        raw: List[Any] = []
+        for candidate in _message_id_spellings(message_id) if message_id else [None]:
+            raw = store.list_for(
+                thread_id=thread_id, message_id=candidate, include_boilerplate=True
+            )
+            if raw:
+                message_id = candidate
+                break
         if not raw:
             # Nothing here at all — the common case for most threads, and now a
             # single query rather than two, since there is nothing to filter.

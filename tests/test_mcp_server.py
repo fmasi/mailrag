@@ -536,13 +536,13 @@ class TestAttachmentStoreNeverBuilt(unittest.TestCase):
         )
         self.assertEqual(out, [])
 
-    def test_either_id_spelling_reaches_the_store_in_its_stored_form(self):
-        # The store keeps thread ids bare and message ids bracketed; callers send both.
+    def test_ids_reach_the_id_check_normalised_but_never_rewritten(self):
+        # Thread ids are always stored bare; message ids keep the sender's spelling.
         for kwargs, expected in (
             ({"thread_id": "<root@x.com>"}, ("root@x.com", None)),
             ({"thread_id": " root@x.com "}, ("root@x.com", None)),
-            ({"message_id": "m@x.com"}, (None, "<m@x.com>")),
-            ({"message_id": "<m@x.com>"}, (None, "<m@x.com>")),
+            ({"message_id": "m@x.com"}, (None, "m@x.com")),
+            ({"message_id": " <m@x.com> "}, (None, "<m@x.com>")),
         ):
             with self.subTest(kwargs=kwargs):
                 seen = []
@@ -871,12 +871,13 @@ class TestListAttachments(unittest.TestCase):
             ],
         )
 
-    def test_message_id_reaches_the_store_bracketed(self):
+    def test_message_id_tries_each_spelling(self):
         store = _FakeStore([])
         server.list_attachments(message_id="m9", store=store)
         # One call: the raw read came back empty, so there was nothing to filter
         # and no second query.
-        self.assertEqual(store.list_calls, [(None, "<m9>")])  # stored spelling
+        # Tried as given, then bracketed: the store keeps the sender's spelling.
+        self.assertEqual(store.list_calls, [(None, "m9"), (None, "<m9>")])
 
     def test_requires_an_identifier(self):
         with self.assertRaises(ValueError):
@@ -1224,6 +1225,41 @@ class TestQdrantIdKnown(unittest.TestCase):
 
     def test_qdrant_failure_answers_unknown_not_missing(self):
         self.assertIsNone(self._check(self._Client(boom=True), thread_id="<t@x.com>"))
+
+
+class TestMessageIdSpellingsAgainstARealStore(unittest.TestCase):
+    """A sender may write a bare Message-ID; the stored spelling must still match."""
+
+    def setUp(self):
+        import tempfile
+
+        self.dir = tempfile.mkdtemp(prefix="att_ids_")
+        self.store = server.AttachmentStore(self.dir)
+        for mid in ("bare@x.com", "<bracketed@x.com>"):
+            self.store.put(
+                mid.encode(),
+                message_id=mid,
+                thread_id="t1",
+                filename="invoice.pdf",
+                mime="application/pdf",
+                size=len(mid),
+                source_type="eml",
+                source_ref="/corpus/1.eml",
+            )
+
+    def tearDown(self):
+        import shutil
+
+        self.store.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_every_spelling_finds_the_stored_row(self):
+        for given in ("bare@x.com", "<bare@x.com>", "bracketed@x.com", "<bracketed@x.com>"):
+            with self.subTest(given=given):
+                rows = server.list_attachments(
+                    message_id=given, store=self.store, id_known=lambda t, m: True
+                )
+                self.assertEqual([r["filename"] for r in rows], ["invoice.pdf"])
 
 
 if __name__ == "__main__":
