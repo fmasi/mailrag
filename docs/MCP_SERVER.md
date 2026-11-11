@@ -59,7 +59,9 @@ Discover the indexed corpora on the configured Qdrant instance.
 - **Args:** none.
 - **Returns:** a list of rows `{name: str, points_count: int | None, is_default: bool}`.
   `points_count` is `None` when Qdrant cannot cheaply report it. `is_default` marks
-  the corpus the other tools use when no `collection` is passed.
+  the corpus the other tools use when no `collection` is passed. With several
+  corpora configured and no `$MAILRAG_COLLECTION`, there is no default (the other
+  tools refuse to guess), and no row is flagged.
 - **Errors:** a clear `ValueError` (`cannot list collections from Qdrant at <url>: …`)
   if Qdrant is unreachable, rather than a crash.
 
@@ -299,6 +301,14 @@ List the files attached to a thread or a message (parity with the CLI
 > its `sha256`s → `get_attachment` to read one. A search hit's
 > `attachment_names` is the hint that a document exists.
 
+> **Ids are mailrag ids.** A message id is the email's RFC `Message-ID` (such as
+> `<abc123@mail.gmail.com>`), and a thread id is the `Message-ID` of the thread's
+> first message. Gmail's hex thread and message ids are not mailrag ids. An id the
+> collection has never indexed raises an error instead of returning `[]`, so "no
+> attachments" and "wrong id, or wrong collection" never look the same. A message
+> that is indexed but has no attachments still returns `[]`. If Qdrant can't
+> answer the check, the tool returns `[]` rather than claim the id is unknown.
+
 - **Args:**
   - `thread_id` (str, optional) — thread whose attachments to list.
   - `message_id` (str, optional) — message whose attachments to list.
@@ -397,12 +407,15 @@ precedence order:
 
 1. the **`collection`** argument (when given);
 2. the **`$MAILRAG_COLLECTION`** environment variable;
-3. the **latest onboarding manifest** (`latest_manifest_collection` — the corpus
-   your most recent `./mailrag onboard` built).
+3. the **single corpus** configured on this machine, when there is exactly one;
+4. the **latest onboarding manifest** (`latest_manifest_collection`), only when no
+   corpus profile is recorded at all.
 
-If none of those resolve, the tool returns a clear error
+With several corpora configured and neither of the first two set, the tool
+refuses and names the options: answering from the wrong corpus would mix them
+silently. If nothing resolves, it returns a clear error
 (`no email collection configured: set MAILRAG_COLLECTION or run 'mailrag onboard' first`)
-rather than crashing. The same precedence drives the `is_default` flag returned by
+rather than crashing. The same resolution drives the `is_default` flag returned by
 `list_collections`.
 
 ## Configuration

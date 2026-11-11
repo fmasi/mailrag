@@ -511,6 +511,38 @@ class TestAttachmentStoreNeverBuilt(unittest.TestCase):
         # The guard must not turn a legitimate "no attachments here" into an error.
         self.assertEqual(server.list_attachments(thread_id="t1", store=self._PopulatedStore()), [])
 
+    def test_id_not_in_the_collection_raises_instead_of_empty(self):
+        # A Gmail hex thread id, or an id from another corpus, used to come back as
+        # [], which reads as "this thread has no attachments".
+        seen = []
+
+        def id_known(thread_id, message_id):
+            seen.append((thread_id, message_id))
+            return False
+
+        with self.assertRaises(ValueError) as ctx:
+            server.list_attachments(
+                thread_id="1a1c6ef58686cf3b", store=self._PopulatedStore(), id_known=id_known
+            )
+        msg = str(ctx.exception)
+        self.assertIn("not indexed", msg)
+        self.assertIn("Message-ID", msg)
+        self.assertNotIn("1a1c6ef58686cf3b", msg)  # ids are not echoed into errors
+        self.assertEqual(seen, [("1a1c6ef58686cf3b", None)])
+
+    def test_known_id_without_attachments_still_returns_empty(self):
+        out = server.list_attachments(
+            message_id="<m@x.com>", store=self._PopulatedStore(), id_known=lambda t, m: True
+        )
+        self.assertEqual(out, [])
+
+    def test_unanswerable_id_check_degrades_to_empty(self):
+        # Qdrant down: say nothing rather than claim the id is unknown.
+        out = server.list_attachments(
+            thread_id="t1", store=self._PopulatedStore(), id_known=lambda t, m: None
+        )
+        self.assertEqual(out, [])
+
     def test_get_attachment_on_empty_store_names_the_cause(self):
         with self.assertRaises(ValueError) as ctx:
             server.get_attachment("deadbeef", store=self._EmptyStore())
@@ -692,11 +724,28 @@ class TestListCollections(unittest.TestCase):
         client = _FakeQdrant(["a", "b"], {"a": 1, "b": 2})
         with (
             mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch("src.mcp_server.scoping.collection_profiles", return_value={}),
             mock.patch("src.mcp_server.server.latest_manifest_collection", return_value="b"),
         ):
             rows = server.list_collections(client=client)
         self.assertTrue(rows[1]["is_default"])
         self.assertFalse(rows[0]["is_default"])
+
+    def test_no_default_flagged_when_several_corpora_are_configured(self):
+        # The other tools refuse to guess between several corpora, so flagging the
+        # latest manifest as default sent an agent to the wrong one (11 Nov: it
+        # grepped iles-legacy for mail that lives in iles-rag).
+        client = _FakeQdrant(["a", "b"], {"a": 1, "b": 2})
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch(
+                "src.mcp_server.scoping.collection_profiles",
+                return_value={"a": "/p/a.json", "b": "/p/b.json"},
+            ),
+            mock.patch("src.mcp_server.server.latest_manifest_collection", return_value="b"),
+        ):
+            rows = server.list_collections(client=client)
+        self.assertEqual([r["is_default"] for r in rows], [False, False])
 
     def test_points_count_none_when_info_fails(self):
         client = _FakeQdrant(["a"], {"a": 5}, bad_info={"a"})
@@ -1109,6 +1158,42 @@ class TestCliWiring(unittest.TestCase):
 
             self.assertEqual(os.environ["MAILRAG_COLLECTION"], "work-rag")
             self.assertEqual(os.environ["MAILRAG_QDRANT_URL"], "http://localhost:6333")
+
+
+class TestQdrantIdKnown(unittest.TestCase):
+    """The default id check behind list_attachments: a payload count, never a guess."""
+
+    class _Client:
+        def __init__(self, n=0, boom=False):
+            self.n, self.boom, self.calls = n, boom, []
+
+        def count(self, collection, count_filter=None, exact=False):
+            if self.boom:
+                raise ConnectionError("qdrant down")
+            self.calls.append((collection, count_filter, exact))
+            return mock.Mock(count=self.n)
+
+    def _check(self, client, thread_id=None, message_id=None):
+        # The client is built at call time, so the patch must cover the call.
+        with mock.patch("src.config.qdrant.get_qdrant_client", return_value=client):
+            return server._qdrant_id_known("iles-rag")(thread_id, message_id)
+
+    def test_thread_id_filters_on_thread_id(self):
+        client = self._Client(n=3)
+        self.assertTrue(self._check(client, thread_id="<t@x.com>"))
+        coll, flt, exact = client.calls[0]
+        self.assertEqual(coll, "iles-rag")
+        self.assertTrue(exact)
+        self.assertEqual([c.key for c in flt.must], ["thread_id"])
+
+    def test_message_id_matches_email_or_attachment_chunks(self):
+        client = self._Client(n=0)
+        self.assertFalse(self._check(client, message_id="<m@x.com>"))
+        flt = client.calls[0][1]
+        self.assertEqual(sorted(c.key for c in flt.should), ["message_id", "parent_message_id"])
+
+    def test_qdrant_failure_answers_unknown_not_missing(self):
+        self.assertIsNone(self._check(self._Client(boom=True), thread_id="<t@x.com>"))
 
 
 if __name__ == "__main__":
