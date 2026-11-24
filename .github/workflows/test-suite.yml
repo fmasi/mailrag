@@ -44,8 +44,10 @@ jobs:
       # extraction was effectively untested here. The missing-binary branch is
       # still covered: those tests strip PATH explicitly rather than relying on
       # the runner happening to lack tesseract.
+      # The script retries, then falls back from the runner's Azure mirror to
+      # archive.ubuntu.com: a mirror outage once failed this check three times.
       - name: Install OCR binaries
-        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils
+        run: bash scripts/ci/install-ocr-deps.sh
 
       - name: Install Poetry
         run: python -m pip install --upgrade pip poetry
