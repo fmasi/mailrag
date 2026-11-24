@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from src.attachments.location import (  # noqa: F401 — re-exported: the public names live here
     DEFAULT_ATTACH_STORE,
@@ -47,6 +47,7 @@ from src.attachments.location import (  # noqa: F401 — re-exported: the public
 )
 from src.attachments.location import safe_dirname as _safe_dirname  # noqa: F401
 from src.attachments.store import AttachmentStore
+from src.data.threading import normalize_message_id
 from src.llm.answer import answer_from_threads
 from src.mcp_server import usage
 from src.mcp_server.grep import grep_email as _grep_email
@@ -369,9 +370,9 @@ def list_collections(qdrant_url: Optional[str] = None, *, client=None) -> List[D
 
     Asks Qdrant (``get_collections``) for every collection name and, for each,
     reports a cheap ``points_count`` when available (``None`` if that per-collection
-    call fails). The row whose name matches the resolved default
-    (``$MAILRAG_COLLECTION`` or the latest onboarding manifest) is flagged
-    ``is_default``.
+    call fails). ``is_default`` marks the collection a call without ``collection``
+    would use (:func:`resolve_collection`). With several corpora configured and no
+    ``$MAILRAG_COLLECTION`` there is no default, and no row is flagged.
 
     ``client`` is injectable for tests. Raises ``ValueError`` with a clear message
     when Qdrant is unreachable, rather than crashing.
@@ -389,8 +390,11 @@ def list_collections(qdrant_url: Optional[str] = None, *, client=None) -> List[D
     except Exception as exc:
         raise ValueError(f"cannot list collections from Qdrant at {url}: {exc}") from exc
 
+    # Flag only the default the other tools would really use. With several
+    # corpora configured, resolve_collection refuses to guess, so there is no
+    # default; flagging the latest manifest anyway sent agents to the wrong one.
     try:
-        default = os.environ.get("MAILRAG_COLLECTION") or latest_manifest_collection()
+        default: Optional[str] = resolve_collection(None)
     except Exception:
         default = None
 
@@ -696,6 +700,70 @@ def _require_populated_store(store) -> None:
         )
 
 
+def _message_id_spellings(message_id: str) -> List[str]:
+    """The id as given, then bracketed and bare, without duplicates.
+
+    Message ids are stored exactly as the header was written (whitespace
+    collapsed), so a sender's bare ``abc@host`` stays bare. Trying the given
+    spelling first means an id copied from a search result always matches.
+    """
+    given = message_id.strip()
+    bare = normalize_message_id(given)
+    return list(dict.fromkeys(s for s in (given, f"<{bare}>", bare) if s and s != "<>"))
+
+
+def _qdrant_id_known(
+    collection: str,
+) -> Callable[[Optional[str], Optional[str]], Optional[bool]]:
+    """Build an ``id_known`` check: is this thread or message indexed in *collection*?
+
+    A payload-filter lookup that stops at the first match, no embedding and no ranking. Message ids match an
+    email chunk's ``message_id`` or an attachment chunk's ``parent_message_id``.
+    Returns ``None`` when Qdrant cannot answer, so an outage never turns into a
+    false "not indexed".
+    """
+
+    def check(thread_id: Optional[str], message_id: Optional[str]) -> Optional[bool]:
+        client = None
+        try:
+            from qdrant_client import models
+
+            from src.config.qdrant import get_qdrant_client
+
+            if message_id:
+                spellings = _message_id_spellings(message_id)
+                flt = models.Filter(
+                    should=[
+                        models.FieldCondition(key=k, match=models.MatchAny(any=spellings))
+                        for k in ("message_id", "parent_message_id")
+                    ]
+                )
+            else:
+                flt = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="thread_id", match=models.MatchValue(value=thread_id)
+                        )
+                    ]
+                )
+            client = get_qdrant_client(url=resolve_qdrant_url())
+            # One matching point settles it: stop at the first, never count them all.
+            points, _ = client.scroll(
+                collection, scroll_filter=flt, limit=1, with_payload=False, with_vectors=False
+            )
+            return bool(points)
+        except Exception:
+            return None
+        finally:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:  # noqa: S110 - closing is best effort
+                    pass
+
+    return check
+
+
 def list_attachments(
     thread_id: Optional[str] = None,
     message_id: Optional[str] = None,
@@ -703,6 +771,7 @@ def list_attachments(
     include_boilerplate: bool = False,
     *,
     store=None,
+    id_known: Optional[Callable[[Optional[str], Optional[str]], Optional[bool]]] = None,
 ) -> List[Dict[str, Any]]:
     """List the attachments belonging to a thread or message.
 
@@ -716,20 +785,55 @@ def list_attachments(
     physically separate directories, so a thread id from one corpus cannot
     surface the other's attachments. ``store`` is injectable for tests.
 
+    An id the collection has never indexed raises instead of returning ``[]``:
+    an empty list means "this message has no attachments", and a wrong id (a
+    Gmail hex id, or one from another corpus) must not read that way.
+    ``id_known(thread_id, message_id)`` answers whether the id is indexed
+    (``None`` when it cannot tell); it is injectable for tests and defaults to a
+    Qdrant key lookup when the store is not injected.
+
     Raises ``ValueError`` when neither identifier is supplied.
     """
+    # Thread ids are always stored bare (compute_thread_id normalises them), so
+    # normalise. Message ids are stored as the sender wrote the header, usually
+    # bracketed but not always, so the id is never rewritten: it is tried as
+    # given first, then in the other spellings.
+    thread_id = normalize_message_id(thread_id) or None
+    message_id = (message_id or "").strip() or None
     if not thread_id and not message_id:
         raise ValueError("one of thread_id or message_id is required")
     owns = store is None
     if store is None:
         assert_no_legacy_shared_store()
-        store = AttachmentStore(resolve_attach_store(collection=_attachment_collection(collection)))
+        coll = _attachment_collection(collection)
+        store = AttachmentStore(resolve_attach_store(collection=coll))
+        if id_known is None:
+            id_known = _qdrant_id_known(coll)
     try:
-        raw = store.list_for(thread_id=thread_id, message_id=message_id, include_boilerplate=True)
+        raw: List[Any] = []
+        for candidate in _message_id_spellings(message_id) if message_id else [None]:
+            raw = store.list_for(
+                thread_id=thread_id, message_id=candidate, include_boilerplate=True
+            )
+            if raw:
+                message_id = candidate
+                break
         if not raw:
             # Nothing here at all — the common case for most threads, and now a
             # single query rather than two, since there is nothing to filter.
             _require_populated_store(store)
+            if id_known is not None and id_known(thread_id, message_id) is False:
+                kind = "message_id" if message_id else "thread_id"
+                raise ValueError(
+                    f"that {kind} is not indexed in this collection, so there is nothing "
+                    "to list (an empty list would have meant 'no attachments'). mailrag "
+                    "ids are RFC Message-IDs, such as <abc123@mail.gmail.com>; a thread's "
+                    "id is the Message-ID of its first message, with or without the angle "
+                    "brackets. Gmail's hex thread and "
+                    "message ids are not mailrag ids: take ids from search_email or "
+                    "grep_email results. Each corpus is separate, so the message may be "
+                    "in another collection: see list_collections()."
+                )
             return []
         metas = (
             raw
@@ -837,7 +941,9 @@ def build_server():
         """Discover the indexed email corpora available on the Qdrant instance.
 
         Returns one row per collection: ``{name, points_count, is_default}``. Use
-        ``name`` as the ``collection`` argument of the other tools.
+        ``name`` as the ``collection`` argument of the other tools. With several
+        corpora there is usually no default (no row flagged): pass ``collection``
+        on every call, and look in each corpus before concluding mail is absent.
         """
         return list_collections()
 
@@ -998,6 +1104,12 @@ def build_server():
         ``image002.png`` is a 259-byte spacer in one message and a 12 MB pasted
         screenshot in another. One-off inline images are therefore kept: a pasted
         screenshot is content. Pass ``include_boilerplate=True`` for the raw list.
+
+        Ids are mailrag ids, taken from search_email / grep_email results: a
+        message id is the email's RFC Message-ID (``<abc123@mail.gmail.com>``) and a
+        thread id is the Message-ID of the thread's first message, without the
+        angle brackets (either spelling is accepted). Gmail's hex ids do not work. An id this collection never indexed raises an error rather
+        than returning an empty list; ``[]`` means the message has no attachments.
 
         Args:
             thread_id: Thread whose attachments to list (one of thread_id/message_id).
