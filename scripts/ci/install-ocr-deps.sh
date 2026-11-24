@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Install the OCR binaries the test suite needs (tesseract, poppler) on an
-# Ubuntu CI runner, surviving a flaky package mirror.
+# Ubuntu CI runner, retrying when the package mirrors are unreachable.
 #
-# GitHub's Ubuntu runners fetch from azure.archive.ubuntu.com. In November 2026
-# that mirror stopped resolving for over an hour and failed the required
-# `pytest` check three times before a single test ran. So: try the configured
-# mirror twice, then rewrite the apt sources to archive.ubuntu.com and try once
-# more. Each apt call is time-boxed so a hung mirror fails fast instead of
-# eating the job's timeout.
+# On 11 Nov 2026 the runner could resolve none of its apt mirrors (the
+# runner's mirror list names azure.archive.ubuntu.com, archive.ubuntu.com and
+# security.ubuntu.com, and all three failed), and the required `pytest` check
+# died here three times, about 10 minutes each, before a single test ran.
+# Rewriting the apt sources to another mirror would not help: the mirror list
+# already falls back. What does help is retrying a short blip, and failing in
+# a few minutes rather than ten when the outage is real, so a later rerun is
+# cheap.
 set -euo pipefail
 
 PACKAGES=(tesseract-ocr poppler-utils)
-FALLBACK_MIRROR="http://archive.ubuntu.com/ubuntu"
-APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30)
+APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+BACKOFF=(30 90) # seconds to wait before attempts 2 and 3
 
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
@@ -21,22 +23,22 @@ fi
 
 # `--error-on=any` makes `apt-get update` exit non-zero when an index fails to
 # download; by default it only warns, and the install then fails confusingly.
+# Only the network steps are time-boxed: killing dpkg mid-install could leave
+# it interrupted for the next attempt.
 apt_install() {
   $SUDO timeout 90 apt-get "${APT_OPTS[@]}" update --error-on=any &&
-    $SUDO timeout 180 apt-get "${APT_OPTS[@]}" install -y "${PACKAGES[@]}"
+    $SUDO timeout 180 apt-get "${APT_OPTS[@]}" install -y --download-only "${PACKAGES[@]}" &&
+    $SUDO apt-get install -y "${PACKAGES[@]}"
 }
 
-for attempt in 1 2; do
+for wait in "${BACKOFF[@]}"; do
   if apt_install; then
     exit 0
   fi
-  echo "::warning::apt attempt ${attempt} against the configured mirror failed"
-  sleep 15
+  echo "::warning::apt could not reach its mirrors, retrying in ${wait}s"
+  sleep "$wait"
 done
-
-echo "::warning::switching apt sources to ${FALLBACK_MIRROR}"
-for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-  [ -f "$f" ] || continue
-  $SUDO sed -i -E "s#https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu/?#${FALLBACK_MIRROR}/#g" "$f"
-done
-apt_install
+apt_install || {
+  echo "::error::apt mirrors unreachable after 3 attempts; rerun the job once they recover"
+  exit 1
+}
