@@ -23,6 +23,7 @@ from src.cluster.noise_pockets import (
 )
 from src.data.noise_filter import NoiseFilter
 from src.data.threading import compute_thread_id
+from src.ingest.device import pick_device
 from src.ingest.embedder import BgeM3Embedder
 from src.ingest.hybrid_qdrant import get_client
 from src.ingest.local_source import resolve_index_files
@@ -94,7 +95,9 @@ def _load_emails(paths):
 
 def _fresh_thread_vectors(emails, tid_to_idx, *, batch_size=32) -> Dict[str, np.ndarray]:
     """Embed each email body once, then mean-pool per thread."""
-    embedder = BgeM3Embedder(device="mps", use_fp16=True)
+    device = pick_device()
+    embedder = BgeM3Embedder(device=device, use_fp16=(device != "cpu"))
+    
     dense, _ = embedder.encode(
         [getattr(e, "body", "") or "" for e in emails], batch_size=batch_size
     )
