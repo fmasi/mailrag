@@ -35,10 +35,10 @@ for wait in "${BACKOFF[@]}"; do
   if apt_install; then
     exit 0
   fi
-  echo "::warning::apt could not reach its mirrors, retrying in ${wait}s"
+  echo "::warning::apt attempt failed (see the output above), retrying in ${wait}s"
   sleep "$wait"
 done
 apt_install || {
-  echo "::error::apt mirrors unreachable after 3 attempts; rerun the job once they recover"
+  echo "::error::apt failed 3 times; if the mirrors were unreachable, rerun once they recover"
   exit 1
 }
