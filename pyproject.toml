@@ -7,7 +7,7 @@ license = "Apache-2.0"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.14"
+python = ">=3.11.5,<3.14"  # 3.11.5: soupsieve 4 (a security floor below) requires it
 # Depend on llama-index-core + the specific integration packages we import,
 # NOT the `llama-index` umbrella meta-package: the umbrella pins the openai
 # sub-packages to <0.7, which conflicts with llama-index-llms-openai-like (needs
@@ -123,8 +123,14 @@ imapclient = {version = "^3.1.0", optional = true}
 # past known CVEs — see the pip-audit job in .github/workflows/ci.yml.
 #   soupsieve  — CVE-2026-49476/49477 (PYSEC-2026-3071/3072), fixed in 2.8.4;
 #                CVE-2026-85999/86000 (GHSA-gjv8-xp57-g29c, GHSA-j934-xhv5-fg8f),
-#                fixed in 2.9.0. Supersedes Dependabot PR #79.
-soupsieve = "^2.9.0"
+#                fixed in 2.9.0. Supersedes Dependabot PR #79. CVE-2026-126191/126193
+#                (GHSA-6655-6qjp-jx7x, GHSA-7g44-g9rc-x53w), fixed in 3.0.2, and
+#                CVE-2026-126190 (GHSA-mmhr-3c5m-f64f), fixed in 4.0.0 (a major bump;
+#                beautifulsoup4 asks for >=1.6.1, so no cap blocks it).
+soupsieve = "^4.0.0"
+#   inscriptis — via FlagEmbedding / ir-datasets. CVE-2026-132277
+#                (GHSA-q87h-c5m7-659j), quadratic memory in get_text(), fixed in 2.7.6.
+inscriptis = "^2.7.6"
 #   transformers — CVE-2026-5241 (PYSEC-2026-2290), fixed in 5.5.0.
 transformers = "^5.5.0"
 #   click — CVE-2026-7246 (PYSEC-2026-2132), fixed in 8.3.3; pin the 8.4 line.
@@ -220,8 +226,9 @@ certifi = "^2026.10.19"
 #              -112940, fixed in 4.2.1 (a major bump; the three dependents ask for
 #              `*` or `>=3.10.0`, so no cap blocks it).
 filelock = "^4.2.1"
-#   opentelemetry-api — via mcp. CVE-2026-114603, fixed in 1.45.1.
-opentelemetry-api = "^1.45.1"
+#   opentelemetry-api — via mcp. CVE-2026-114603, fixed in 1.45.1; CVE-2026-126360
+#                       (GHSA-mf5v-w3w3-f6cg), quadratic traceparent parsing, fixed in 1.45.2.
+opentelemetry-api = "^1.45.2"
 #   multidict — via aiohttp / yarl. GHSA-54p9-h82j-f925 (CVE-2026-104874), a
 #               reference leak in the items-view union/subtraction, fixed in
 #               6.9.1.
@@ -248,7 +255,8 @@ ipykernel = "^7.2.0"
 # CVE-2026-91990/91991), fixed in 6.5.8. 6.6 clears GHSA-pcg2-g6cj-q92c,
 # GHSA-pw9p-v7r6-gx4p and GHSA-r4j5-9xpp-3985 (CVE-2026-115927, -116577, -116578):
 # quadratic header parsing, an open redirect and event-loop blocking on chunked bodies.
-tornado = "^6.6"
+# 6.6.1 clears GHSA-5cjw-f85j-cv6r (CVE-2026-126347), an open redirect via triple-slash paths.
+tornado = "^6.6.1"
 # The two CI quality gates, declared so a dev environment built from this file
 # is complete — previously they existed only as pinned `pip install` lines in
 # .github/workflows/ci.yml, so running them locally meant installing them by
